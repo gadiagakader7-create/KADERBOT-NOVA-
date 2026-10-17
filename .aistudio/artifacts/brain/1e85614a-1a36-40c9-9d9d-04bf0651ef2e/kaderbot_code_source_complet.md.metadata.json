@@ -1,0 +1,5 @@
+{
+  "Summary": "Code source complet de l'application web KaderBot avec architecture double face (Public / Admin via ?admin=true), synchronisation temps r\u00e9el de la m\u00e9moire et des hits, et t\u00e9l\u00e9chargement zip.",
+  "UserFacing": true,
+  "RequestFeedback": false
+}

@@ -28,6 +28,7 @@ interface KnowledgeGraphTabProps {
   onAddDefinition: (sujet: string, defText: string) => void;
   onDeleteConcept: (sujet: string) => void;
   onAdjustWeight: (sujet: string, delta: number) => void;
+  onAdjustHits?: (sujet: string, entryIdx: number, delta: number) => void;
   onAddLink: (source: string, target: string) => void;
   onDeleteLink: (source: string, target: string) => void;
   onAskQuestionAbout: (sujet: string) => void;
@@ -41,6 +42,7 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
   onAddDefinition,
   onDeleteConcept,
   onAdjustWeight,
+  onAdjustHits,
   onAddLink,
   onDeleteLink,
   onAskQuestionAbout,
@@ -324,10 +326,38 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
                   >
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-gray-200">{entry.def}</p>
-                      <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400">
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-400 flex-wrap">
                         <span>Source: {entry.source}</span>
                         <span>·</span>
-                        <span>Consulté: {entry.hits} fois</span>
+                        <span className="flex items-center gap-1.5">
+                          <span>Hits: <strong className="text-emerald-300 font-mono text-xs">{entry.hits}</strong></span>
+                          {onAdjustHits && (
+                            <span className="inline-flex items-center gap-1 ml-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAdjustHits(selectedConcept, idx, 1);
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 font-mono text-[10px] border border-emerald-800/50"
+                                title="Augmenter les hits (+1)"
+                              >
+                                +1 hit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAdjustHits(selectedConcept, idx, -1);
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 font-mono text-[10px] border border-rose-800/50"
+                                title="Diminuer les hits (-1)"
+                              >
+                                -1 hit
+                              </button>
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </div>
 

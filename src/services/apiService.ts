@@ -168,6 +168,7 @@ export const apiService = {
     liens: LinksStore;
     groqApiKey?: string;
     groqModel?: string;
+    mode?: 'auto' | 'console' | 'gui';
   }): Promise<Blob> {
     const res = await fetch('/api/export-pydroid', {
       method: 'POST',

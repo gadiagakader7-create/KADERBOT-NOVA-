@@ -72,7 +72,7 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
     setDecayReport(res);
   };
 
-  const handleDownloadPydroid = async () => {
+  const handleDownloadPydroid = async (mode: 'console' | 'gui' | 'auto' = 'console') => {
     setIsExportingPydroid(true);
     try {
       const blob = await apiService.downloadPydroidScript({
@@ -81,12 +81,14 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
         liens,
         groqApiKey,
         groqModel,
+        mode,
       });
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `kaderbot_v14_pydroid_${activeSession}.py`;
+      const suffix = mode === 'console' ? 'terminal' : mode === 'gui' ? 'tkinter' : 'auto';
+      a.download = `kaderbot_v14_pydroid_${suffix}_${activeSession}.py`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -159,43 +161,141 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
       </div>
 
       {/* 1. Android Pydroid 3 Sync Banner */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#0E131F] to-[#0A121A] border border-cyan-500/30 shadow-xl space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-              <Smartphone className="w-5 h-5" />
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#0E131F] to-[#0A121A] border border-cyan-500/30 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 flex-shrink-0">
+              <Smartphone className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <span>Exporter vers l'application Pydroid 3 (Android)</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800/40 text-cyan-300">
-                  Format .py
+              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                <span>Exporter vers Pydroid 3 (Android)</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 border border-emerald-800/40 text-emerald-300">
+                  Version V14 Corrigée Anti-Crash
                 </span>
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">
-                Tu as codé KADERBOT sur Android avec Pydroid 3. Tu peux exporter le script Python mis à jour avec toutes les nouvelles connaissances apprises ici pour continuer sur ton téléphone !
+                Deux formats d'exécution prêts à l'emploi selon la configuration de votre application Pydroid 3 sur mobile.
               </p>
             </div>
           </div>
-
-          <button
-            onClick={handleDownloadPydroid}
-            disabled={isExportingPydroid}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-cyan-950/40 flex items-center gap-2 transition active:scale-95 flex-shrink-0"
-          >
-            <FileCode className="w-4 h-4" />
-            <span>{isExportingPydroid ? 'Génération...' : 'Télécharger kaderbot_v14.py'}</span>
-          </button>
         </div>
 
-        <div className="bg-[#090B10]/80 p-3 rounded-xl border border-gray-800 text-xs text-gray-300 space-y-1">
-          <span className="font-semibold text-cyan-300">Comment l'ouvrir sur Pydroid 3 :</span>
-          <ol className="list-decimal list-inside space-y-0.5 text-[11px] text-gray-400">
-            <li>Télécharge le fichier <code>kaderbot_v14.py</code> ci-dessus sur ton smartphone.</li>
-            <li>Ouvre <strong>Pydroid 3</strong> sur Android, clique sur Dossier → Ouvrir → sélectionne le script.</li>
-            <li>Appuie sur le bouton jaune "Play" : l'interface se lance avec tes nouvelles connaissances synchronisées !</li>
-          </ol>
+        {/* Action cards: Mode Console vs Mode Tkinter */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {/* Card 1: Console / Terminal (Recommandé Pydroid 3) */}
+          <div className="p-4 rounded-xl bg-[#090D18] border border-emerald-500/30 hover:border-emerald-500/60 transition flex flex-col justify-between space-y-3">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>Mode Console / Terminal (Recommandé)</span>
+                </span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                  100% Garanti
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                Tourne <strong>nativement</strong> dans la fenêtre noire de Pydroid 3. Zéro plugin requis, dialogue fluide, saisie <code>[Toi] &gt;</code>, déduction causale, apprentissage et appel Groq.
+              </p>
+            </div>
+            <button
+              onClick={() => handleDownloadPydroid('console')}
+              disabled={isExportingPydroid}
+              className="w-full py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-emerald-950/40 flex items-center justify-center gap-2 transition active:scale-95"
+            >
+              <FileCode className="w-4 h-4" />
+              <span>{isExportingPydroid ? 'Génération...' : 'Télécharger Mode Terminal (Recommandé)'}</span>
+            </button>
+          </div>
+
+          {/* Card 2: Tkinter GUI */}
+          <div className="p-4 rounded-xl bg-[#090D18] border border-cyan-500/30 hover:border-cyan-500/60 transition flex flex-col justify-between space-y-3">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                  <span>Mode Graphique Tkinter</span>
+                </span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/40">
+                  Fenêtre Graphique
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                Tente d'ouvrir la fenêtre Tkinter. <strong>Sécurité anti-crash</strong> : si Pydroid 3 n'a pas le plugin Tkinter installé, il bascule automatiquement sur le terminal !
+              </p>
+            </div>
+            <button
+              onClick={() => handleDownloadPydroid('gui')}
+              disabled={isExportingPydroid}
+              className="w-full py-2.5 px-3 rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-cyan-950/40 flex items-center justify-center gap-2 transition active:scale-95"
+            >
+              <FileCode className="w-4 h-4" />
+              <span>{isExportingPydroid ? 'Génération...' : 'Télécharger Mode Graphique Tkinter'}</span>
+            </button>
+          </div>
         </div>
+
+        {/* Diagnostics & Explications */}
+        <div className="bg-[#07090F] p-3.5 rounded-xl border border-gray-800 text-xs text-gray-300 space-y-2">
+          <div className="flex items-center gap-2 text-cyan-300 font-semibold text-xs">
+            <Smartphone className="w-4 h-4" />
+            <span>Pourquoi Tkinter ne s'ouvrait pas et comment le résoudre :</span>
+          </div>
+          <ul className="list-disc list-inside space-y-1 text-[11px] text-gray-400">
+            <li>
+              <strong>Pydroid 3 n'inclut pas Tkinter par défaut</strong> : Sur Android, Tkinter dépend d'un serveur X11. Sans le plugin <em>&ldquo;Pydroid repository plugin&rdquo;</em> (disponible sur le Play Store), Python plante dès <code>import tkinter</code>.
+            </li>
+            <li>
+              <strong>Le Mode Terminal (Console) est la solution idéale</strong> : Il s'exécute directement dans la console native de Pydroid 3, sans aucun plugin externe, avec toutes les capacités cognitives de KaderBot.
+            </li>
+            <li>
+              <strong>Sécurité Base64</strong> : Les données étaient précédemment sujettes à des erreurs de parsing JSON (<code>null</code> au lieu de <code>None</code>). C'est désormais 100% corrigé.
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      {/* 2. Package Web Complet pour Transformation en Application Mobile (APK) */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#120F24] to-[#0A0D18] border border-purple-500/30 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 flex-shrink-0">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                <span>Code Source Web Complet (ZIP) pour App Mobile</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-950 border border-purple-800/40 text-purple-300">
+                  Prêt pour Outil Dédié (APK / iOS)
+                </span>
+              </h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Téléchargez l'intégralité du projet web (Vite, React, Moteur Cognitif, UI et bundle compilé <code>dist/</code>) en un seul clic.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3.5 bg-[#090714] rounded-xl border border-purple-500/20 text-xs text-gray-300 space-y-2">
+          <div className="font-semibold text-purple-300 flex items-center gap-2">
+            <span>Comment le transformer en application mobile avec votre outil dédié :</span>
+          </div>
+          <ul className="list-disc list-inside space-y-1 text-[11px] text-gray-400">
+            <li><strong>Avec WebIntoApp / Website 2 APK :</strong> Importez le dossier <code>dist/</code> inclus dans l'archive ZIP pour générer directement un fichier APK installable sur n'importe quel smartphone Android.</li>
+            <li><strong>Avec Capacitor / Cordova :</strong> Décompressez l'archive, lancez <code>npm install && npx cap add android</code> pour obtenir un projet natif Android Studio.</li>
+            <li><strong>Installation PWA directe :</strong> Vous pouvez aussi installer l'application immédiatement depuis le navigateur Chrome via le menu ou l'icône d'installation dans la barre d'adresse.</li>
+          </ul>
+        </div>
+
+        <a
+          href="/api/export-project-zip"
+          download="kaderbot-projet-web-complet.zip"
+          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-purple-950/50 flex items-center justify-center gap-2.5 transition active:scale-95"
+        >
+          <Download className="w-4 h-4" />
+          <span>Télécharger le Projet Web Complet (.ZIP)</span>
+        </a>
       </div>
 
       {/* 2. Sessions Management */}

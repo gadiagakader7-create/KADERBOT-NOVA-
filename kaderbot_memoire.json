@@ -1,0 +1,57 @@
+{
+  "memoire": {
+    "moineau": [
+      {
+        "def": "petit oiseau",
+        "poids": 0.9,
+        "hits": 2,
+        "source": "manuel",
+        "type": "concept"
+      }
+    ],
+    "quelle est la capitale de la france": [
+      {
+        "def": "Paris est la capitale de la France.",
+        "poids": 0.85,
+        "hits": 1,
+        "type": "question_reponse",
+        "question_origine": "quelle est la capitale de la france ?"
+      }
+    ],
+    "robot": [
+      {
+        "def": "machine intelligente",
+        "poids": 0.85,
+        "hits": 1,
+        "source": "manuel",
+        "type": "concept",
+        "last_used": "2026-10-17T11:09:25.136319",
+        "created": "2026-10-17T11:09:25.136344"
+      },
+      {
+        "def": "machine intelligente",
+        "poids": 0.85,
+        "hits": 1,
+        "source": "manuel",
+        "type": "concept",
+        "last_used": "2026-10-17T11:08:22.539350",
+        "created": "2026-10-17T11:08:22.539837"
+      }
+    ]
+  },
+  "regles": {
+    "oiseau": [
+      {
+        "quant": "tous",
+        "prop": "volent"
+      }
+    ]
+  },
+  "liens": {
+    "moineau": [
+      "oiseau"
+    ]
+  },
+  "synonymes": {},
+  "updated_at": "2026-10-17T11:09:25.136531"
+}

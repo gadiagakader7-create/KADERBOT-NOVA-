@@ -51,7 +51,31 @@ import { SettingsModal } from './components/SettingsModal';
 import { apiService } from './services/apiService';
 
 export default function App() {
+  // Admin detection via URL (?admin=true)
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('admin') === 'true';
+  });
+
   const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
+
+  // Keep admin status synced on URL changes
+  useEffect(() => {
+    const checkAdmin = () => {
+      const params = new URLSearchParams(window.location.search);
+      setIsAdmin(params.get('admin') === 'true');
+    };
+    window.addEventListener('popstate', checkAdmin);
+    return () => window.removeEventListener('popstate', checkAdmin);
+  }, []);
+
+  // When not in admin mode, restrict active tab to 'chat' or 'tools'
+  useEffect(() => {
+    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
+      setActiveTab('chat');
+    }
+  }, [isAdmin, activeTab]);
 
   // Modals state
   const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
@@ -172,7 +196,54 @@ export default function App() {
 
   const [isThinking, setIsThinking] = useState(false);
 
-  // Sync to localStorage
+  // Server Memory Synchronization (Requirement 4: Share data live between Admin and Public)
+  const lastServerTimestamp = useRef<string>('');
+  const isSyncingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchSharedMemory = async () => {
+      if (isSyncingRef.current) return;
+      try {
+        const remote = await apiService.loadMemoryFromServer();
+        if (remote && isMounted) {
+          const remoteUpdated = (remote as any).updatedAt || '';
+          if (remoteUpdated && remoteUpdated === lastServerTimestamp.current) {
+            return;
+          }
+          if (remote.memoire && Object.keys(remote.memoire).length > 0) {
+            setMemoire(remote.memoire);
+          }
+          if (remote.regles && Object.keys(remote.regles).length > 0) {
+            setRegles(remote.regles);
+          }
+          if (remote.liens && Object.keys(remote.liens).length > 0) {
+            setLiens(remote.liens);
+          }
+          if (remote.synonymes && Object.keys(remote.synonymes).length > 0) {
+            setSynonymes(remote.synonymes);
+          }
+          if (remote.sessions && remote.sessions.length > 0) {
+            setSessions(remote.sessions);
+          }
+          if (remoteUpdated) {
+            lastServerTimestamp.current = remoteUpdated;
+          }
+        }
+      } catch (err) {
+        // Silently keep local state if offline
+      }
+    };
+
+    fetchSharedMemory();
+    const interval = setInterval(fetchSharedMemory, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Sync to localStorage & Server disk
   useEffect(() => {
     localStorage.setItem('kaderbot_config', JSON.stringify(config));
   }, [config]);
@@ -187,7 +258,8 @@ export default function App() {
     localStorage.setItem(`kaderbot_liens_${config.activeSession}`, JSON.stringify(liens));
     localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(synonymes));
 
-    // Also attempt background sync to server disk
+    // Save to server backend so updates made in Admin mode are shared to all users
+    isSyncingRef.current = true;
     apiService
       .saveMemoryToServer({
         memoire,
@@ -196,8 +268,28 @@ export default function App() {
         synonymes,
         sessions,
       })
-      .catch(() => {});
+      .then(res => {
+        if (res && res.savedAt) {
+          lastServerTimestamp.current = res.savedAt;
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        isSyncingRef.current = false;
+      });
   }, [memoire, regles, liens, synonymes, config.activeSession, sessions]);
+
+  // Adjust hits on specific concept definition
+  const handleAdjustHits = (sujet: string, entryIdx: number, delta: number) => {
+    setMemoire(prev => {
+      const list = prev[sujet];
+      if (!list || !list[entryIdx]) return prev;
+      const updated = [...list];
+      const newHits = Math.max(0, (updated[entryIdx].hits || 0) + delta);
+      updated[entryIdx] = { ...updated[entryIdx], hits: newHits };
+      return { ...prev, [sujet]: updated };
+    });
+  };
 
   // Handle switching sessions
   const handleSelectSession = (newSession: string) => {
@@ -1185,10 +1277,15 @@ export default function App() {
         onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
         sessions={sessions}
         onSelectSession={handleSelectSession}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
-        onOpenActionsMenu={() => setIsActionsModalOpen(true)}
+        onOpenSettings={() => {
+          if (isAdmin) setIsSettingsModalOpen(true);
+        }}
+        onOpenActionsMenu={() => {
+          if (isAdmin) setIsActionsModalOpen(true);
+        }}
         conceptsCount={Object.keys(memoire).length}
         rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
+        isAdmin={isAdmin}
       />
 
       {/* Main View Workspace */}
@@ -1204,11 +1301,13 @@ export default function App() {
             activeSession={config.activeSession}
             prefilledText={chatPrefill}
             onClearPrefill={() => setChatPrefill('')}
-            onOpenActions={() => setIsActionsModalOpen(true)}
+            onOpenActions={() => {
+              if (isAdmin) setIsActionsModalOpen(true);
+            }}
           />
         )}
 
-        {activeTab === 'graph' && (
+        {activeTab === 'graph' && isAdmin && (
           <KnowledgeGraphTab
             memoire={memoire}
             regles={regles}
@@ -1239,6 +1338,7 @@ export default function App() {
               });
             }}
             onAdjustWeight={handleAdjustWeight}
+            onAdjustHits={handleAdjustHits}
             onAddLink={handleAddLink}
             onDeleteLink={handleDeleteLink}
             onAskQuestionAbout={s => {
@@ -1248,7 +1348,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'rules' && (
+        {activeTab === 'rules' && isAdmin && (
           <RulesTab
             memoire={memoire}
             regles={regles}
@@ -1281,7 +1381,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'sessions' && (
+        {activeTab === 'sessions' && isAdmin && (
           <SessionsTab
             sessions={sessions}
             activeSession={config.activeSession}
@@ -1306,7 +1406,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom Navigation Tabs */}
+      {/* Bottom Navigation Tabs - Public shows only Discussion & Atelier Texte */}
       <nav className="h-14 sm:h-16 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
         <button
           onClick={() => setActiveTab('chat')}
@@ -1320,29 +1420,33 @@ export default function App() {
           <span className="text-[10px] sm:text-xs font-semibold">Discussion</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('graph')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'graph'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('graph')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'graph'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('rules')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'rules'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('rules')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'rules'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('tools')}
@@ -1356,40 +1460,46 @@ export default function App() {
           <span className="text-[10px] sm:text-xs font-semibold">Atelier Texte</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('sessions')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'sessions'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('sessions')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'sessions'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
+          </button>
+        )}
       </nav>
 
-      {/* Action Command Menu Modal */}
-      <ActionMenuModal
-        isOpen={isActionsModalOpen}
-        onClose={() => setIsActionsModalOpen(false)}
-        onSelectAction={(cmd, immediate) => {
-          if (immediate) {
-            handleProcessUserMessage(cmd);
-          } else {
-            setActiveTab('chat');
-            setChatPrefill(cmd);
-          }
-        }}
-      />
+      {/* Action Command Menu Modal (Admin Only) */}
+      {isAdmin && (
+        <ActionMenuModal
+          isOpen={isActionsModalOpen}
+          onClose={() => setIsActionsModalOpen(false)}
+          onSelectAction={(cmd, immediate) => {
+            if (immediate) {
+              handleProcessUserMessage(cmd);
+            } else {
+              setActiveTab('chat');
+              setChatPrefill(cmd);
+            }
+          }}
+        />
+      )}
 
-      {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        config={config}
-        onSaveConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
-      />
+      {/* Settings Modal (Admin Only) */}
+      {isAdmin && (
+        <SettingsModal
+          isOpen={isSettingsModalOpen}
+          onClose={() => setIsSettingsModalOpen(false)}
+          config={config}
+          onSaveConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
+        />
+      )}
     </div>
   );
 }
