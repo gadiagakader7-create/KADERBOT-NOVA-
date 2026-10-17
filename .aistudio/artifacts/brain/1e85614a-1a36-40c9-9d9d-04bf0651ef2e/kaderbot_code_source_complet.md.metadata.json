@@ -1,5 +1,5 @@
 {
-  "Summary": "Code source complet de l'application web KaderBot avec architecture double face (Public / Admin via ?admin=true), synchronisation temps r\u00e9el de la m\u00e9moire et des hits, et t\u00e9l\u00e9chargement zip.",
+  "Summary": "Code source complet de l'application web KaderBot incluant la cl\u00e9 API Gemini configurable en Admin, les boutons de confiance r\u00e9serv\u00e9s \u00e0 l'admin, le d\u00e9filement mobile verrouill\u00e9 avec zone de saisie fixe, et l'archive ZIP pr\u00eate au t\u00e9l\u00e9chargement.",
   "UserFacing": true,
   "RequestFeedback": false
 }

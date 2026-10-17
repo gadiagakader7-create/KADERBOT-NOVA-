@@ -151,14 +151,27 @@ async function callGroqWithFallback(
 // Helper to call Gemini with multi-model fallback in case of temporary 503/429 spikes
 async function callGeminiWithFallback(
   fullPrompt: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  customApiKey?: string
 ): Promise<{ text: string; model: string }> {
+  const clientToUse =
+    customApiKey && customApiKey.trim()
+      ? new GoogleGenAI({
+          apiKey: customApiKey.trim(),
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        })
+      : ai;
+
   const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastError: any = null;
 
   for (const m of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
+      const response = await clientToUse.models.generateContent({
         model: m,
         contents: fullPrompt,
         config: systemInstruction ? { systemInstruction } : undefined,
@@ -176,7 +189,46 @@ async function callGeminiWithFallback(
   throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
 }
 
-// 0. Groq Connection & Model Tester Endpoint
+// 0. Gemini Connection Tester Endpoint
+app.post('/api/gemini/test', async (req, res) => {
+  try {
+    const { apiKey } = req.body;
+    const keyToUse = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY;
+    if (!keyToUse) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Aucune clé API Gemini fournie ni configurée sur le serveur.',
+      });
+    }
+
+    const testClient = new GoogleGenAI({
+      apiKey: keyToUse.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    const start = Date.now();
+    const result = await testClient.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: 'Réponds en un seul mot: "Connecté".',
+    });
+    const latencyMs = Date.now() - start;
+
+    return res.json({
+      ok: true,
+      model: 'gemini-3.8-flash',
+      latencyMs,
+      reply: result.text?.trim() || 'Connecté',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 0.1 Groq Connection & Model Tester Endpoint
 app.post('/api/groq/test', async (req, res) => {
   try {
     const { apiKey, model = 'openai/gpt-oss-120b' } = req.body;
@@ -236,6 +288,7 @@ app.post('/api/chat', async (req, res) => {
       prompt,
       history = [],
       provider = 'gemini',
+      geminiApiKey,
       groqApiKey,
       groqModel = 'openai/gpt-oss-120b',
       systemPrompt = DEFAULT_SYSTEM_PROMPT,
@@ -256,7 +309,7 @@ app.post('/api/chat', async (req, res) => {
 
       if (!keyToUse) {
         console.warn('Pas de clé Groq renseignée, bascule fluide sur Gemini');
-        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -271,7 +324,7 @@ app.post('/api/chat', async (req, res) => {
         return res.json({ text, provider: 'groq', model: actualModel });
       } catch (groqErr: any) {
         console.warn(`Groq indisponible (${groqErr.message}), bascule de secours sur Gemini...`);
-        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -282,8 +335,8 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // B. Default: Gemini 3.8 Flash (Server-Side)
-    const geminiRes = await callGeminiWithFallback(fullPrompt);
+    // B. Default: Gemini 3.8 Flash (Server-Side or Admin Custom Key)
+    const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
     return res.json({ text: geminiRes.text, provider: 'gemini', model: geminiRes.model });
   } catch (error: any) {
     console.error('Erreur /api/chat:', error);
@@ -300,6 +353,7 @@ app.post('/api/idees', async (req, res) => {
       style = 'creatif',
       styleDesc = '',
       provider = 'gemini',
+      geminiApiKey,
       groqApiKey,
       groqModel = 'openai/gpt-oss-120b',
     } = req.body;
@@ -316,7 +370,7 @@ app.post('/api/idees', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.");
+    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.", geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/idees:', error);
@@ -327,7 +381,7 @@ app.post('/api/idees', async (req, res) => {
 // 3. Translation endpoint
 app.post('/api/traduis', async (req, res) => {
   try {
-    const { text, targetLang, provider = 'gemini', groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, targetLang, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Traduis le texte suivant en ${targetLang}. Réponds UNIQUEMENT par la traduction exacte, sans commentaire, guillemets ni introduction:\n\n${text}`;
 
     if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
@@ -340,7 +394,7 @@ app.post('/api/traduis', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.');
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.', geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/traduis:', error);
@@ -351,7 +405,7 @@ app.post('/api/traduis', async (req, res) => {
 // 4. Corrector endpoint
 app.post('/api/corrige', async (req, res) => {
   try {
-    const { text, provider = 'gemini', groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Corrige les fautes d'orthographe, de grammaire et de ponctuation du texte suivant en gardant le sens et le ton. Réponds uniquement par le texte corrigé:\n\n${text}`;
 
     if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
@@ -364,7 +418,7 @@ app.post('/api/corrige', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.');
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.', geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/corrige:', error);
@@ -375,7 +429,7 @@ app.post('/api/corrige', async (req, res) => {
 // 5. Summarizer endpoint
 app.post('/api/resume', async (req, res) => {
   try {
-    const { text, provider = 'gemini', groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Résume le texte suivant en 2 à 3 phrases claires, précises et directes. Réponds uniquement par le résumé:\n\n${text}`;
 
     if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
@@ -388,7 +442,7 @@ app.post('/api/resume', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.');
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.', geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/resume:', error);

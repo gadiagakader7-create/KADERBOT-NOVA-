@@ -95,6 +95,7 @@ export default function App() {
     }
     return {
       provider: 'gemini',
+      geminiApiKey: '',
       groqApiKey: '',
       groqModel: 'openai/gpt-oss-120b',
       geminiModel: 'gemini-3.8-flash',
@@ -504,6 +505,7 @@ export default function App() {
             content: m.text,
           })),
           provider: 'groq',
+          geminiApiKey: config.geminiApiKey,
           groqApiKey: config.groqApiKey,
           groqModel: config.groqModel || 'openai/gpt-oss-120b',
           systemPrompt: config.systemPrompt,
@@ -737,6 +739,7 @@ export default function App() {
           prompt,
           history: [],
           provider: config.provider,
+          geminiApiKey: config.geminiApiKey,
           groqApiKey: config.groqApiKey,
         });
 
@@ -1239,6 +1242,7 @@ export default function App() {
         prompt: text,
         history: historyFormatted,
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel || 'openai/gpt-oss-120b',
         systemPrompt: config.systemPrompt,
@@ -1270,7 +1274,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300">
+    <div className="h-screen h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
       {/* Top Header */}
       <Header
         config={config}
@@ -1289,7 +1293,7 @@ export default function App() {
       />
 
       {/* Main View Workspace */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
         {activeTab === 'chat' && (
           <ChatTab
             messages={messages}
@@ -1304,6 +1308,7 @@ export default function App() {
             onOpenActions={() => {
               if (isAdmin) setIsActionsModalOpen(true);
             }}
+            isAdmin={isAdmin}
           />
         )}
 

@@ -4,6 +4,7 @@ export interface ChatApiParams {
   prompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   provider: 'gemini' | 'groq' | 'local_only';
+  geminiApiKey?: string;
   groqApiKey?: string;
   groqModel?: string;
   systemPrompt?: string;
@@ -46,12 +47,25 @@ export const apiService = {
     return await res.json();
   },
 
+  async testGeminiConnection(
+    apiKey: string
+  ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
+    const res = await fetch('/api/gemini/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+
+    return await res.json();
+  },
+
   async genererIdees(params: {
     theme: string;
     count: number;
     style: string;
     styleDesc?: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -74,6 +88,7 @@ export const apiService = {
     text: string;
     targetLang: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -95,6 +110,7 @@ export const apiService = {
   async corriger(params: {
     text: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -116,6 +132,7 @@ export const apiService = {
   async resumer(params: {
     text: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {

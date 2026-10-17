@@ -28,6 +28,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveConfig,
 }) => {
   const [provider, setProvider] = useState<LLMProvider>(config.provider);
+  const [geminiKey, setGeminiKey] = useState(config.geminiApiKey || '');
   const [groqKey, setGroqKey] = useState(config.groqApiKey || '');
   const [groqModel, setGroqModel] = useState(
     config.groqModel === 'llama-3.3-70b-versatile'
@@ -39,9 +40,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [autoLearn, setAutoLearn] = useState(config.autoLearnFromLLM);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Connection tester state
+  // Connection tester states
   const [isTestingGroq, setIsTestingGroq] = useState(false);
   const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    model?: string;
+    latencyMs?: number;
+  } | null>(null);
+
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{
     ok: boolean;
     message: string;
     model?: string;
@@ -52,6 +61,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setProvider(config.provider);
+      setGeminiKey(config.geminiApiKey || '');
       setGroqKey(config.groqApiKey || '');
       setGroqModel(
         config.groqModel === 'llama-3.3-70b-versatile'
@@ -62,10 +72,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setSoundEnabled(config.soundEnabled);
       setAutoLearn(config.autoLearnFromLLM);
       setTestResult(null);
+      setGeminiTestResult(null);
     }
   }, [isOpen, config]);
 
   if (!isOpen) return null;
+
+  const handleTestGemini = async () => {
+    setIsTestingGemini(true);
+    setGeminiTestResult(null);
+
+    try {
+      const res = await apiService.testGeminiConnection(geminiKey.trim());
+      if (res.ok) {
+        setGeminiTestResult({
+          ok: true,
+          message: `Connecté à Gemini (${res.model}) avec succès ! Latence : ${res.latencyMs}ms.`,
+          model: res.model,
+          latencyMs: res.latencyMs,
+        });
+      } else {
+        setGeminiTestResult({
+          ok: false,
+          message: res.error || 'Erreur de connexion Gemini',
+        });
+      }
+    } catch (e: any) {
+      setGeminiTestResult({
+        ok: false,
+        message: e.message || 'Impossible de joindre le serveur de test',
+      });
+    } finally {
+      setIsTestingGemini(false);
+    }
+  };
 
   const handleTestGroq = async () => {
     if (!groqKey.trim()) {
@@ -107,6 +147,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSave = () => {
     onSaveConfig({
       provider,
+      geminiApiKey: geminiKey.trim(),
       groqApiKey: groqKey.trim(),
       groqModel,
       systemPrompt,
@@ -205,6 +246,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Gemini Configuration Section */}
+          {provider === 'gemini' && (
+            <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+                  <Key className="w-4 h-4" />
+                  <span>Configuration Gemini (Google AI Studio)</span>
+                </div>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-emerald-400/80 hover:text-emerald-300 underline flex items-center gap-1"
+                >
+                  <span>Obtenir une clé gratuite</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-gray-300 mb-1">Clé API Gemini (Optionnelle) :</label>
+                <input
+                  type="password"
+                  placeholder="AIzaSy... (laisser vide pour utiliser la clé serveur)"
+                  value={geminiKey}
+                  onChange={e => setGeminiKey(e.target.value)}
+                  className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Si non renseignée, le serveur utilise automatiquement sa propre variable d'environnement <code className="text-emerald-400 font-mono">GEMINI_API_KEY</code>.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleTestGemini}
+                  disabled={isTestingGemini}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-200 text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>{isTestingGemini ? 'Test en cours...' : 'Tester la connexion Gemini'}</span>
+                </button>
+              </div>
+
+              {geminiTestResult && (
+                <div
+                  className={`p-2.5 rounded-lg text-xs flex items-start gap-2 ${
+                    geminiTestResult.ok
+                      ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300'
+                      : 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+                  }`}
+                >
+                  {geminiTestResult.ok ? (
+                    <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <p className="font-semibold">{geminiTestResult.message}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Groq Configuration Section */}
           {provider === 'groq' && (

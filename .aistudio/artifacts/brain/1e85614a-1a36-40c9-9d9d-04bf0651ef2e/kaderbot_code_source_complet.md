@@ -1,24 +1,24 @@
-# KADERBOT — Code Source Complet (Système Bicompartimenté Public / Admin)
+# KADERBOT — Code Source Complet & Guide de Déploiement
 
-Ce document contient **l'intégralité du code source** du projet **KADERBOT**, avec l'architecture à double interface (Public / Administrateur pilotée par l'URL) :
+Ce document contient **l'intégralité du code source mis à jour** du projet **KADERBOT**, incluant les 3 dernières améliorations majeures :
 
-### 1. Interface Publique (par défaut, sans `?admin=true`)
-- **Navigation épurée** : Seuls les onglets **Discussion** et **Atelier Texte** sont affichés.
-- **Zéro clé API demandée** : L'interface utilise directement les variables d'environnement du serveur (`process.env.GEMINI_API_KEY` ou `process.env.GROQ_API_KEY`).
-- **Paramètres masqués** : Aucun bouton de configuration ni panneau d'administration n'apparaît.
-- **Cerveau, Règles et Sessions totalement invisibles**.
+1. **Clé API Gemini dans les Paramètres Admin (`SettingsModal.tsx`)** :
+   - Champ de saisie sécurisé pour la clé API Gemini avec testeur de connexion instantané (`/api/gemini/test`).
+   - Le serveur (`server.ts`) utilise en priorité cette clé personnalisée si fournie, sinon il bascule automatiquement sur la variable d'environnement `GEMINI_API_KEY`.
 
-### 2. Interface Administrateur (avec `?admin=true`)
-- **Accès complet** : Tous les onglets sont visibles (Discussion, Cerveau & Graphe, Règles & Inférence, Atelier Texte, Sessions & Pydroid).
-- **Gestion des hits** : Boutons interactifs `+1 hit` / `-1 hit` sur chaque définition pour ajuster le score de consultation.
-- **Synchronisation en direct** : Tout fait ajouté, supprimé ou modifié en mode Admin est immédiatement partagé avec l'interface publique via l'API de persistance (`/api/memory/save` et `/api/memory`).
-- **Téléchargement ZIP** : Bouton direct de téléchargement du projet web complet dans l'onglet Sessions & Pydroid ou via `/api/export-project-zip`.
+2. **Boutons de certitude masqués en Mode Public (`ChatTab.tsx`)** :
+   - Les boutons d'évaluation "Exact (+0.1)" et "Inexact (-0.15)" sous les réponses du bot sont désormais strictement réservés à l'administrateur (`?admin=true`).
+   - L'interface publique reste ainsi épurée, propre et orientée utilisateur final.
+
+3. **Verrouillage du défilement & Zone de saisie fixe sur Mobile** :
+   - La zone de saisie (champ texte, micro de dictée vocale, bouton effacer et bouton envoyer) reste désormais en permanence fixée et visible en bas de l'écran sur mobile (`h-[100dvh]`, `flex-shrink-0`).
+   - Seule la liste des messages défile de manière fluide (`overflow-y-auto min-h-0 overscroll-contain`), empêchant la page entière de glisser ou de masquer la barre de chat.
 
 ---
 
 ## 🛠 Script Python de Réextraction Automatique (`unbundle.py`)
 
-Si vous téléchargez ce document en tant que fichier markdown et souhaitez recréer automatiquement l'ensemble des fichiers :
+Si vous téléchargez ce document en tant que fichier texte et souhaitez recréer l'arborescence des dossiers et fichiers :
 
 ```python
 # unbundle.py
@@ -27,12 +27,7 @@ import os, re
 with open('kaderbot_code_source_complet.md', 'r', encoding='utf-8') as f:
     text = f.read()
 
-pattern = re.compile(r'### Fichier : `([^`]+)`
-
-```[a-zA-Z0-9_-]*
-(.*?)```
-
----', re.DOTALL)
+pattern = re.compile(r'### Fichier : `([^`]+)`\n\n```[a-zA-Z0-9_-]*\n(.*?)```\n\n---', re.DOTALL)
 matches = pattern.findall(text)
 
 print(f'Extraction de {len(matches)} fichiers...')
@@ -42,7 +37,7 @@ for rel_path, content in matches:
         out.write(content)
     print(f'-> {rel_path}')
 
-print('Tous les fichiers ont été restaurés avec succès !')
+print('Extraction terminée avec succès !')
 ```
 
 ---
@@ -335,6 +330,7 @@ export type LLMProvider = 'gemini' | 'groq' | 'local_only';
 
 export interface AppConfig {
   provider: LLMProvider;
+  geminiApiKey?: string;
   groqApiKey?: string;
   groqModel: string;
   geminiModel: string;
@@ -1434,6 +1430,7 @@ export interface ChatApiParams {
   prompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   provider: 'gemini' | 'groq' | 'local_only';
+  geminiApiKey?: string;
   groqApiKey?: string;
   groqModel?: string;
   systemPrompt?: string;
@@ -1476,12 +1473,25 @@ export const apiService = {
     return await res.json();
   },
 
+  async testGeminiConnection(
+    apiKey: string
+  ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
+    const res = await fetch('/api/gemini/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+
+    return await res.json();
+  },
+
   async genererIdees(params: {
     theme: string;
     count: number;
     style: string;
     styleDesc?: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -1504,6 +1514,7 @@ export const apiService = {
     text: string;
     targetLang: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -1525,6 +1536,7 @@ export const apiService = {
   async corriger(params: {
     text: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -1546,6 +1558,7 @@ export const apiService = {
   async resumer(params: {
     text: string;
     provider: string;
+    geminiApiKey?: string;
     groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
@@ -1714,6 +1727,7 @@ export default function App() {
     }
     return {
       provider: 'gemini',
+      geminiApiKey: '',
       groqApiKey: '',
       groqModel: 'openai/gpt-oss-120b',
       geminiModel: 'gemini-3.8-flash',
@@ -2123,6 +2137,7 @@ export default function App() {
             content: m.text,
           })),
           provider: 'groq',
+          geminiApiKey: config.geminiApiKey,
           groqApiKey: config.groqApiKey,
           groqModel: config.groqModel || 'openai/gpt-oss-120b',
           systemPrompt: config.systemPrompt,
@@ -2356,6 +2371,7 @@ export default function App() {
           prompt,
           history: [],
           provider: config.provider,
+          geminiApiKey: config.geminiApiKey,
           groqApiKey: config.groqApiKey,
         });
 
@@ -2858,6 +2874,7 @@ export default function App() {
         prompt: text,
         history: historyFormatted,
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel || 'openai/gpt-oss-120b',
         systemPrompt: config.systemPrompt,
@@ -2889,7 +2906,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300">
+    <div className="h-screen h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
       {/* Top Header */}
       <Header
         config={config}
@@ -2908,7 +2925,7 @@ export default function App() {
       />
 
       {/* Main View Workspace */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
         {activeTab === 'chat' && (
           <ChatTab
             messages={messages}
@@ -2923,6 +2940,7 @@ export default function App() {
             onOpenActions={() => {
               if (isAdmin) setIsActionsModalOpen(true);
             }}
+            isAdmin={isAdmin}
           />
         )}
 
@@ -3370,6 +3388,7 @@ interface ChatTabProps {
   prefilledText?: string;
   onClearPrefill?: () => void;
   onOpenActions?: () => void;
+  isAdmin?: boolean;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -3383,6 +3402,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   prefilledText,
   onClearPrefill,
   onOpenActions,
+  isAdmin = false,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -3491,11 +3511,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-112px)] sm:h-[calc(100vh-120px)] relative overflow-hidden bg-[#050508] cyber-bg">
-      {/* Messages Scroll Area */}
+    <div className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] cyber-bg">
+      {/* Messages Scroll Area - Only this container scrolls */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5"
+        className="flex-1 overflow-y-auto min-h-0 px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5 overscroll-contain"
       >
         {/* Session banner */}
         <div className="flex justify-center">
@@ -3575,8 +3595,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   </div>
                 )}
 
-                {/* Interactive Cognitive Feedback buttons (just like Python script!) */}
-                {!isUser && msg.meta?.sujet && (
+                {/* Interactive Cognitive Feedback buttons (Admin Only - Just like Python script!) */}
+                {isAdmin && !isUser && msg.meta?.sujet && (
                   <div className="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[11px] text-gray-400">
                       Ce fait sur <span className="text-emerald-400 font-mono font-bold">{msg.meta.sujet}</span> est-il exact ?
@@ -3659,7 +3679,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       </div>
 
       {/* Quick Action Pills */}
-      <div className="px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/80 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
+      <div className="flex-shrink-0 px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
         {quickPills.map((pill, idx) => (
           <button
             key={idx}
@@ -3671,8 +3691,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         ))}
       </div>
 
-      {/* Input Form Bar */}
-      <div className="p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80">
+      {/* Input Form Bar - Permanently fixed at bottom of chat */}
+      <div className="flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
         <form onSubmit={handleFormSubmit} className="max-w-7xl mx-auto flex items-center gap-2">
           {/* Voice input button */}
           <button
@@ -4643,6 +4663,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         style: selectedStyle,
         styleDesc,
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
@@ -4676,6 +4697,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         prompt,
         history: [],
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
@@ -4702,6 +4724,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         text: transInput.trim(),
         targetLang: transLang,
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
@@ -4721,6 +4744,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       const result = await apiService.corriger({
         text: corrigeInput.trim(),
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
@@ -4740,6 +4764,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       const result = await apiService.resumer({
         text: resumeInput.trim(),
         provider: config.provider,
+        geminiApiKey: config.geminiApiKey,
         groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
@@ -5581,6 +5606,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveConfig,
 }) => {
   const [provider, setProvider] = useState<LLMProvider>(config.provider);
+  const [geminiKey, setGeminiKey] = useState(config.geminiApiKey || '');
   const [groqKey, setGroqKey] = useState(config.groqApiKey || '');
   const [groqModel, setGroqModel] = useState(
     config.groqModel === 'llama-3.3-70b-versatile'
@@ -5592,9 +5618,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [autoLearn, setAutoLearn] = useState(config.autoLearnFromLLM);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Connection tester state
+  // Connection tester states
   const [isTestingGroq, setIsTestingGroq] = useState(false);
   const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    model?: string;
+    latencyMs?: number;
+  } | null>(null);
+
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{
     ok: boolean;
     message: string;
     model?: string;
@@ -5605,6 +5639,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setProvider(config.provider);
+      setGeminiKey(config.geminiApiKey || '');
       setGroqKey(config.groqApiKey || '');
       setGroqModel(
         config.groqModel === 'llama-3.3-70b-versatile'
@@ -5615,10 +5650,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setSoundEnabled(config.soundEnabled);
       setAutoLearn(config.autoLearnFromLLM);
       setTestResult(null);
+      setGeminiTestResult(null);
     }
   }, [isOpen, config]);
 
   if (!isOpen) return null;
+
+  const handleTestGemini = async () => {
+    setIsTestingGemini(true);
+    setGeminiTestResult(null);
+
+    try {
+      const res = await apiService.testGeminiConnection(geminiKey.trim());
+      if (res.ok) {
+        setGeminiTestResult({
+          ok: true,
+          message: `Connecté à Gemini (${res.model}) avec succès ! Latence : ${res.latencyMs}ms.`,
+          model: res.model,
+          latencyMs: res.latencyMs,
+        });
+      } else {
+        setGeminiTestResult({
+          ok: false,
+          message: res.error || 'Erreur de connexion Gemini',
+        });
+      }
+    } catch (e: any) {
+      setGeminiTestResult({
+        ok: false,
+        message: e.message || 'Impossible de joindre le serveur de test',
+      });
+    } finally {
+      setIsTestingGemini(false);
+    }
+  };
 
   const handleTestGroq = async () => {
     if (!groqKey.trim()) {
@@ -5660,6 +5725,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSave = () => {
     onSaveConfig({
       provider,
+      geminiApiKey: geminiKey.trim(),
       groqApiKey: groqKey.trim(),
       groqModel,
       systemPrompt,
@@ -5758,6 +5824,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Gemini Configuration Section */}
+          {provider === 'gemini' && (
+            <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+                  <Key className="w-4 h-4" />
+                  <span>Configuration Gemini (Google AI Studio)</span>
+                </div>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-emerald-400/80 hover:text-emerald-300 underline flex items-center gap-1"
+                >
+                  <span>Obtenir une clé gratuite</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-gray-300 mb-1">Clé API Gemini (Optionnelle) :</label>
+                <input
+                  type="password"
+                  placeholder="AIzaSy... (laisser vide pour utiliser la clé serveur)"
+                  value={geminiKey}
+                  onChange={e => setGeminiKey(e.target.value)}
+                  className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Si non renseignée, le serveur utilise automatiquement sa propre variable d'environnement <code className="text-emerald-400 font-mono">GEMINI_API_KEY</code>.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleTestGemini}
+                  disabled={isTestingGemini}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-200 text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>{isTestingGemini ? 'Test en cours...' : 'Tester la connexion Gemini'}</span>
+                </button>
+              </div>
+
+              {geminiTestResult && (
+                <div
+                  className={`p-2.5 rounded-lg text-xs flex items-start gap-2 ${
+                    geminiTestResult.ok
+                      ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300'
+                      : 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+                  }`}
+                >
+                  {geminiTestResult.ok ? (
+                    <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <p className="font-semibold">{geminiTestResult.message}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Groq Configuration Section */}
           {provider === 'groq' && (
@@ -6422,14 +6554,27 @@ async function callGroqWithFallback(
 // Helper to call Gemini with multi-model fallback in case of temporary 503/429 spikes
 async function callGeminiWithFallback(
   fullPrompt: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  customApiKey?: string
 ): Promise<{ text: string; model: string }> {
+  const clientToUse =
+    customApiKey && customApiKey.trim()
+      ? new GoogleGenAI({
+          apiKey: customApiKey.trim(),
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        })
+      : ai;
+
   const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastError: any = null;
 
   for (const m of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
+      const response = await clientToUse.models.generateContent({
         model: m,
         contents: fullPrompt,
         config: systemInstruction ? { systemInstruction } : undefined,
@@ -6447,7 +6592,46 @@ async function callGeminiWithFallback(
   throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
 }
 
-// 0. Groq Connection & Model Tester Endpoint
+// 0. Gemini Connection Tester Endpoint
+app.post('/api/gemini/test', async (req, res) => {
+  try {
+    const { apiKey } = req.body;
+    const keyToUse = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY;
+    if (!keyToUse) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Aucune clé API Gemini fournie ni configurée sur le serveur.',
+      });
+    }
+
+    const testClient = new GoogleGenAI({
+      apiKey: keyToUse.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    const start = Date.now();
+    const result = await testClient.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: 'Réponds en un seul mot: "Connecté".',
+    });
+    const latencyMs = Date.now() - start;
+
+    return res.json({
+      ok: true,
+      model: 'gemini-3.8-flash',
+      latencyMs,
+      reply: result.text?.trim() || 'Connecté',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 0.1 Groq Connection & Model Tester Endpoint
 app.post('/api/groq/test', async (req, res) => {
   try {
     const { apiKey, model = 'openai/gpt-oss-120b' } = req.body;
@@ -6507,6 +6691,7 @@ app.post('/api/chat', async (req, res) => {
       prompt,
       history = [],
       provider = 'gemini',
+      geminiApiKey,
       groqApiKey,
       groqModel = 'openai/gpt-oss-120b',
       systemPrompt = DEFAULT_SYSTEM_PROMPT,
@@ -6527,7 +6712,7 @@ app.post('/api/chat', async (req, res) => {
 
       if (!keyToUse) {
         console.warn('Pas de clé Groq renseignée, bascule fluide sur Gemini');
-        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -6542,7 +6727,7 @@ app.post('/api/chat', async (req, res) => {
         return res.json({ text, provider: 'groq', model: actualModel });
       } catch (groqErr: any) {
         console.warn(`Groq indisponible (${groqErr.message}), bascule de secours sur Gemini...`);
-        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -6553,8 +6738,8 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // B. Default: Gemini 3.8 Flash (Server-Side)
-    const geminiRes = await callGeminiWithFallback(fullPrompt);
+    // B. Default: Gemini 3.8 Flash (Server-Side or Admin Custom Key)
+    const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
     return res.json({ text: geminiRes.text, provider: 'gemini', model: geminiRes.model });
   } catch (error: any) {
     console.error('Erreur /api/chat:', error);
@@ -6571,6 +6756,7 @@ app.post('/api/idees', async (req, res) => {
       style = 'creatif',
       styleDesc = '',
       provider = 'gemini',
+      geminiApiKey,
       groqApiKey,
       groqModel = 'openai/gpt-oss-120b',
     } = req.body;
@@ -6587,7 +6773,7 @@ app.post('/api/idees', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.");
+    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.", geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/idees:', error);
@@ -6598,7 +6784,7 @@ app.post('/api/idees', async (req, res) => {
 // 3. Translation endpoint
 app.post('/api/traduis', async (req, res) => {
   try {
-    const { text, targetLang, provider = 'gemini', groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, targetLang, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Traduis le texte suivant en ${targetLang}. Réponds UNIQUEMENT par la traduction exacte, sans commentaire, guillemets ni introduction:\n\n${text}`;
 
     if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
@@ -6611,7 +6797,7 @@ app.post('/api/traduis', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.');
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.', geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/traduis:', error);
@@ -6622,7 +6808,7 @@ app.post('/api/traduis', async (req, res) => {
 // 4. Corrector endpoint
 app.post('/api/corrige', async (req, res) => {
   try {
-    const { text, provider = 'gemini', groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Corrige les fautes d'orthographe, de grammaire et de ponctuation du texte suivant en gardant le sens et le ton. Réponds uniquement par le texte corrigé:\n\n${text}`;
 
     if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
@@ -6635,7 +6821,7 @@ app.post('/api/corrige', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.');
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.', geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/corrige:', error);
@@ -6646,7 +6832,7 @@ app.post('/api/corrige', async (req, res) => {
 // 5. Summarizer endpoint
 app.post('/api/resume', async (req, res) => {
   try {
-    const { text, provider = 'gemini', groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Résume le texte suivant en 2 à 3 phrases claires, précises et directes. Réponds uniquement par le résumé:\n\n${text}`;
 
     if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
@@ -6659,7 +6845,7 @@ app.post('/api/resume', async (req, res) => {
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.');
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.', geminiApiKey);
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/resume:', error);

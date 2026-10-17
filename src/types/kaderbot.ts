@@ -71,6 +71,7 @@ export type LLMProvider = 'gemini' | 'groq' | 'local_only';
 
 export interface AppConfig {
   provider: LLMProvider;
+  geminiApiKey?: string;
   groqApiKey?: string;
   groqModel: string;
   geminiModel: string;

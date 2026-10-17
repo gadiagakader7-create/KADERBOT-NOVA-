@@ -29,6 +29,7 @@ interface ChatTabProps {
   prefilledText?: string;
   onClearPrefill?: () => void;
   onOpenActions?: () => void;
+  isAdmin?: boolean;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -42,6 +43,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   prefilledText,
   onClearPrefill,
   onOpenActions,
+  isAdmin = false,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -150,11 +152,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-112px)] sm:h-[calc(100vh-120px)] relative overflow-hidden bg-[#050508] cyber-bg">
-      {/* Messages Scroll Area */}
+    <div className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] cyber-bg">
+      {/* Messages Scroll Area - Only this container scrolls */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5"
+        className="flex-1 overflow-y-auto min-h-0 px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5 overscroll-contain"
       >
         {/* Session banner */}
         <div className="flex justify-center">
@@ -234,8 +236,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   </div>
                 )}
 
-                {/* Interactive Cognitive Feedback buttons (just like Python script!) */}
-                {!isUser && msg.meta?.sujet && (
+                {/* Interactive Cognitive Feedback buttons (Admin Only - Just like Python script!) */}
+                {isAdmin && !isUser && msg.meta?.sujet && (
                   <div className="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[11px] text-gray-400">
                       Ce fait sur <span className="text-emerald-400 font-mono font-bold">{msg.meta.sujet}</span> est-il exact ?
@@ -318,7 +320,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       </div>
 
       {/* Quick Action Pills */}
-      <div className="px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/80 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
+      <div className="flex-shrink-0 px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
         {quickPills.map((pill, idx) => (
           <button
             key={idx}
@@ -330,8 +332,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         ))}
       </div>
 
-      {/* Input Form Bar */}
-      <div className="p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80">
+      {/* Input Form Bar - Permanently fixed at bottom of chat */}
+      <div className="flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
         <form onSubmit={handleFormSubmit} className="max-w-7xl mx-auto flex items-center gap-2">
           {/* Voice input button */}
           <button
