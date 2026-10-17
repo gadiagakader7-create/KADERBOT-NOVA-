@@ -1,0 +1,6 @@
+{
+  "name": "KADERBOT NOVA - Système Cognitif & IA",
+  "description": "Assistant cognitif hybride KADERBOT avec moteur d'apprentissage autonome, graphe de connaissances, déduction logique et intégration IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

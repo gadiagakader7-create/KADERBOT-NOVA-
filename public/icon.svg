@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="128" fill="#090B10"/>
+  <circle cx="256" cy="256" r="210" stroke="#10A37F" stroke-width="8" stroke-dasharray="16 12" stroke-opacity="0.35"/>
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10A37F"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#10A37F" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#10A37F" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="256" cy="256" r="160" fill="url(#glow)"/>
+  <!-- Neural hexagon / brain core -->
+  <path d="M256 120 L370 186 V318 L256 384 L142 318 V186 Z" stroke="url(#grad1)" stroke-width="14" fill="#0E131F" stroke-linejoin="round"/>
+  <!-- Inner circuits -->
+  <circle cx="256" cy="256" r="42" fill="url(#grad1)"/>
+  <circle cx="256" cy="186" r="18" fill="#10A37F"/>
+  <circle cx="316" cy="221" r="14" fill="#06B6D4"/>
+  <circle cx="316" cy="291" r="14" fill="#10A37F"/>
+  <circle cx="256" cy="326" r="18" fill="#06B6D4"/>
+  <circle cx="196" cy="291" r="14" fill="#10A37F"/>
+  <circle cx="196" cy="221" r="14" fill="#06B6D4"/>
+  <!-- Connecting links -->
+  <path d="M256 186 L256 214 M316 221 L286 241 M316 291 L286 271 M256 326 L256 298 M196 291 L226 271 M196 221 L226 241" stroke="#6EE7B7" stroke-width="6" stroke-linecap="round"/>
+  <!-- K letter stylized in center -->
+  <text x="256" y="272" font-family="'Plus Jakarta Sans', sans-serif" font-size="44" font-weight="900" fill="#FFFFFF" text-anchor="middle">K</text>
+</svg>

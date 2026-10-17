@@ -1,0 +1,390 @@
+import React, { useState } from 'react';
+import {
+  X,
+  Sparkles,
+  Key,
+  Check,
+  Sliders,
+  Volume2,
+  BookOpen,
+  Activity,
+  AlertTriangle,
+  ExternalLink,
+} from 'lucide-react';
+import { AppConfig, LLMProvider } from '../types/kaderbot';
+import { apiService } from '../services/apiService';
+
+interface SettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  config: AppConfig;
+  onSaveConfig: (updated: Partial<AppConfig>) => void;
+}
+
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  isOpen,
+  onClose,
+  config,
+  onSaveConfig,
+}) => {
+  const [provider, setProvider] = useState<LLMProvider>(config.provider);
+  const [groqKey, setGroqKey] = useState(config.groqApiKey || '');
+  const [groqModel, setGroqModel] = useState(
+    config.groqModel === 'llama-3.3-70b-versatile'
+      ? 'openai/gpt-oss-120b'
+      : config.groqModel || 'openai/gpt-oss-120b'
+  );
+  const [systemPrompt, setSystemPrompt] = useState(config.systemPrompt);
+  const [soundEnabled, setSoundEnabled] = useState(config.soundEnabled);
+  const [autoLearn, setAutoLearn] = useState(config.autoLearnFromLLM);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Connection tester state
+  const [isTestingGroq, setIsTestingGroq] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    model?: string;
+    latencyMs?: number;
+  } | null>(null);
+
+  // Sync state when modal opens
+  React.useEffect(() => {
+    if (isOpen) {
+      setProvider(config.provider);
+      setGroqKey(config.groqApiKey || '');
+      setGroqModel(
+        config.groqModel === 'llama-3.3-70b-versatile'
+          ? 'openai/gpt-oss-120b'
+          : config.groqModel || 'openai/gpt-oss-120b'
+      );
+      setSystemPrompt(config.systemPrompt);
+      setSoundEnabled(config.soundEnabled);
+      setAutoLearn(config.autoLearnFromLLM);
+      setTestResult(null);
+    }
+  }, [isOpen, config]);
+
+  if (!isOpen) return null;
+
+  const handleTestGroq = async () => {
+    if (!groqKey.trim()) {
+      setTestResult({
+        ok: false,
+        message: 'Veuillez coller votre clé API Groq (commençant par gsk_...)',
+      });
+      return;
+    }
+
+    setIsTestingGroq(true);
+    setTestResult(null);
+
+    try {
+      const res = await apiService.testGroqConnection(groqKey.trim(), groqModel);
+      if (res.ok) {
+        setTestResult({
+          ok: true,
+          message: `Connecté à Groq avec succès ! Latence : ${res.latencyMs}ms.`,
+          model: res.model,
+          latencyMs: res.latencyMs,
+        });
+      } else {
+        setTestResult({
+          ok: false,
+          message: res.error || 'Erreur de connexion Groq',
+        });
+      }
+    } catch (e: any) {
+      setTestResult({
+        ok: false,
+        message: e.message || 'Impossible de joindre le serveur de test',
+      });
+    } finally {
+      setIsTestingGroq(false);
+    }
+  };
+
+  const handleSave = () => {
+    onSaveConfig({
+      provider,
+      groqApiKey: groqKey.trim(),
+      groqModel,
+      systemPrompt,
+      soundEnabled,
+      autoLearnFromLLM: autoLearn,
+    });
+    setSavedSuccess(true);
+    setTimeout(() => {
+      setSavedSuccess(false);
+      onClose();
+    }, 600);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+      <div className="bg-[#0E131F] border border-gray-800 rounded-2xl w-full max-w-xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-800/80 bg-[#090B10]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              <Sliders className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-white">Paramètres KADERBOT NOVA</h2>
+              <p className="text-[11px] text-gray-400">Configuration du cerveau hybride & des moteurs IA</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Form Body */}
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-5 text-xs text-gray-300">
+          {/* Provider Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-white mb-2">
+              Moteur d'Intelligence Artificielle Actif
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setProvider('gemini')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                  provider === 'gemini'
+                    ? 'bg-emerald-950/40 border-emerald-500/60 text-white shadow-sm shadow-emerald-500/10'
+                    : 'bg-gray-900/60 border-gray-800 text-gray-400 hover:bg-gray-800/50'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-emerald-400 text-xs">Gemini 3.8 Flash</span>
+                  {provider === 'gemini' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  Prêt à l'emploi. Aucun réglage de clé requis, ultra-rapide et gratuit.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProvider('groq')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                  provider === 'groq'
+                    ? 'bg-amber-950/40 border-amber-500/60 text-white shadow-sm shadow-amber-500/10'
+                    : 'bg-gray-900/60 border-gray-800 text-gray-400 hover:bg-gray-800/50'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-amber-400 text-xs">Groq API</span>
+                  {provider === 'groq' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  Supporte GPT-OSS 120B & Llama. Requiert une clé API Groq gratuite.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProvider('local_only')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                  provider === 'local_only'
+                    ? 'bg-blue-950/40 border-blue-500/60 text-white shadow-sm shadow-blue-500/10'
+                    : 'bg-gray-900/60 border-gray-800 text-gray-400 hover:bg-gray-800/50'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-blue-400 text-xs">100% Local</span>
+                  {provider === 'local_only' && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  Graphe de mémoire, règles et déductions logiques sans aucun appel réseau.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Groq Configuration Section */}
+          {provider === 'groq' && (
+            <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-300 font-semibold text-xs">
+                  <Key className="w-4 h-4" />
+                  <span>Configuration Groq Cloud</span>
+                </div>
+                <a
+                  href="https://console.groq.com/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-amber-400/80 hover:text-amber-300 underline flex items-center gap-1"
+                >
+                  <span>Obtenir une clé gratuite</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-gray-300 mb-1">Clé API Groq :</label>
+                <input
+                  type="password"
+                  placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  value={groqKey}
+                  onChange={e => setGroqKey(e.target.value)}
+                  className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-amber-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-gray-300 mb-1">Modèle d'IA Groq :</label>
+                <select
+                  value={groqModel}
+                  onChange={e => setGroqModel(e.target.value)}
+                  className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                >
+                  <option value="openai/gpt-oss-120b">
+                    openai/gpt-oss-120b (OpenAI GPT-OSS 120B - Très puissant & Grand modèle)
+                  </option>
+                  <option value="openai/gpt-oss-20b">
+                    openai/gpt-oss-20b (OpenAI GPT-OSS 20B - Équilibré)
+                  </option>
+                  <option value="llama-3.1-8b-instant">
+                    llama-3.1-8b-instant (Meta Llama 3.1 8B - Gratuit & Ultra-rapide)
+                  </option>
+                  <option value="llama-3.3-70b-specdec">
+                    llama-3.3-70b-specdec (Meta Llama 3.3 70B SpecDec)
+                  </option>
+                  <option value="qwen/qwen3.8-27b">
+                    qwen/qwen3.8-27b (Qwen 3.8 27B)
+                  </option>
+                  <option value="mixtral-8x7b-32768">
+                    mixtral-8x7b-32768 (Mistral 8x7B)
+                  </option>
+                </select>
+              </div>
+
+              {/* Test Groq Connection Button */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleTestGroq}
+                  disabled={isTestingGroq}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-semibold transition active:scale-95 disabled:opacity-50"
+                >
+                  <Activity className={`w-3.5 h-3.5 ${isTestingGroq ? 'animate-spin' : ''}`} />
+                  <span>{isTestingGroq ? 'Test en cours...' : 'Tester la connexion & le modèle'}</span>
+                </button>
+
+                {/* Test feedback */}
+                {testResult && (
+                  <div
+                    className={`mt-2 p-2.5 rounded-lg border text-[11px] leading-relaxed flex items-start gap-2 ${
+                      testResult.ok
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {testResult.ok ? (
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <p className="font-semibold">{testResult.ok ? 'Succès' : 'Échec du test'}</p>
+                      <p className="opacity-90">{testResult.message}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Auto-learning toggle */}
+          <div className="flex items-start justify-between gap-3 p-3 rounded-xl bg-gray-900/60 border border-gray-800">
+            <div>
+              <div className="flex items-center gap-1.5 font-semibold text-white">
+                <BookOpen className="w-4 h-4 text-emerald-400" />
+                <span>Apprentissage Automatique</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Lorsque l’IA répond, KADERBOT extrait automatiquement le sujet principal et enrichit son graphe de mémoire local avec un score de confiance adaptatif.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={autoLearn}
+              onChange={e => setAutoLearn(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-gray-700 bg-gray-800 text-emerald-500 focus:ring-emerald-500"
+            />
+          </div>
+
+          {/* Voice Speech toggle */}
+          <div className="flex items-start justify-between gap-3 p-3 rounded-xl bg-gray-900/60 border border-gray-800">
+            <div>
+              <div className="flex items-center gap-1.5 font-semibold text-white">
+                <Volume2 className="w-4 h-4 text-cyan-400" />
+                <span>Synthèse Vocale (Voix française)</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Lit à voix haute les réponses et déductions logiques de KADERBOT.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={soundEnabled}
+              onChange={e => setSoundEnabled(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-gray-700 bg-gray-800 text-cyan-500 focus:ring-cyan-500"
+            />
+          </div>
+
+          {/* System Prompt Customization */}
+          <div>
+            <label className="block text-xs font-semibold text-white mb-1.5">
+              Instruction Système (Personnalité de KADERBOT)
+            </label>
+            <textarea
+              rows={3}
+              value={systemPrompt}
+              onChange={e => setSystemPrompt(e.target.value)}
+              className="w-full bg-[#090B10] border border-gray-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+            />
+            <p className="text-[10px] text-gray-500 mt-1">
+              Définit le ton concis, chaleureux et curieux du bot tel qu'il a été programmé dans Pydroid 3.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-800/80 bg-[#090B10] flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium"
+          >
+            Fermer
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            className={`px-5 py-2 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${
+              savedSuccess
+                ? 'bg-emerald-600'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-md shadow-emerald-900/30'
+            }`}
+          >
+            {savedSuccess ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Enregistré !</span>
+              </>
+            ) : (
+              <span>Sauvegarder</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

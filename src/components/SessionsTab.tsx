@@ -1,0 +1,314 @@
+import React, { useState } from 'react';
+import {
+  FolderTree,
+  Download,
+  Upload,
+  RefreshCw,
+  Trash2,
+  Plus,
+  Check,
+  FileCode,
+  Smartphone,
+  Brain,
+  Sparkles,
+} from 'lucide-react';
+import {
+  LinksStore,
+  MemoryStore,
+  RulesStore,
+  SynonymsStore,
+} from '../types/kaderbot';
+import { decayMemoire } from '../core/cognitiveEngine';
+import { apiService } from '../services/apiService';
+
+interface SessionsTabProps {
+  sessions: string[];
+  activeSession: string;
+  onSelectSession: (s: string) => void;
+  onCreateSession: (name: string) => void;
+  memoire: MemoryStore;
+  regles: RulesStore;
+  liens: LinksStore;
+  synonymes: SynonymsStore;
+  onUpdateMemory: (newMemo: MemoryStore, newRegles: RulesStore) => void;
+  onImportFullBackup: (data: {
+    memoire: MemoryStore;
+    regles: RulesStore;
+    liens: LinksStore;
+  }) => void;
+  groqApiKey?: string;
+  groqModel?: string;
+}
+
+export const SessionsTab: React.FC<SessionsTabProps> = ({
+  sessions,
+  activeSession,
+  onSelectSession,
+  onCreateSession,
+  memoire,
+  regles,
+  liens,
+  synonymes,
+  onUpdateMemory,
+  onImportFullBackup,
+  groqApiKey,
+  groqModel,
+}) => {
+  const [newSessionName, setNewSessionName] = useState('');
+  const [decayReport, setDecayReport] = useState<{ modifs: number; supprimes: number } | null>(null);
+  const [isExportingPydroid, setIsExportingPydroid] = useState(false);
+
+  const handleCreateSessionSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newSessionName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!clean || sessions.includes(clean)) return;
+    onCreateSession(clean);
+    setNewSessionName('');
+  };
+
+  const handleRunDecay = () => {
+    const res = decayMemoire(memoire, regles, 7, 0.98);
+    onUpdateMemory({ ...memoire }, { ...regles });
+    setDecayReport(res);
+  };
+
+  const handleDownloadPydroid = async () => {
+    setIsExportingPydroid(true);
+    try {
+      const blob = await apiService.downloadPydroidScript({
+        memoire,
+        regles,
+        liens,
+        groqApiKey,
+        groqModel,
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kaderbot_v14_pydroid_${activeSession}.py`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Erreur export script : ${err.message}`);
+    } finally {
+      setIsExportingPydroid(false);
+    }
+  };
+
+  const handleExportJSON = () => {
+    const data = {
+      version: '14.0',
+      activeSession,
+      exportedAt: new Date().toISOString(),
+      memoire,
+      regles,
+      liens,
+      synonymes,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kaderbot_backup_${activeSession}_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const json = JSON.parse(evt.target?.result as string);
+        if (json.memoire || json.regles) {
+          onImportFullBackup({
+            memoire: json.memoire || {},
+            regles: json.regles || {},
+            liens: json.liens || {},
+          });
+          alert('Sauvegarde importée avec succès dans la session active !');
+        } else {
+          alert('Fichier JSON invalide pour KADERBOT.');
+        }
+      } catch (err) {
+        alert('Erreur lors du décodage du fichier JSON.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#050508] max-w-5xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-800 pb-4">
+        <div>
+          <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+            <FolderTree className="w-5 h-5 text-teal-400" />
+            <span>Gestion des Sessions & Exportation Pydroid 3</span>
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Bascule entre différentes mémoires isolées, lance l'oubli intelligent et exporte ton code pour Android.
+          </p>
+        </div>
+      </div>
+
+      {/* 1. Android Pydroid 3 Sync Banner */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#0E131F] to-[#0A121A] border border-cyan-500/30 shadow-xl space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <Smartphone className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Exporter vers l'application Pydroid 3 (Android)</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800/40 text-cyan-300">
+                  Format .py
+                </span>
+              </h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Tu as codé KADERBOT sur Android avec Pydroid 3. Tu peux exporter le script Python mis à jour avec toutes les nouvelles connaissances apprises ici pour continuer sur ton téléphone !
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleDownloadPydroid}
+            disabled={isExportingPydroid}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 disabled:opacity-40 text-white text-xs font-bold shadow-lg shadow-cyan-950/40 flex items-center gap-2 transition active:scale-95 flex-shrink-0"
+          >
+            <FileCode className="w-4 h-4" />
+            <span>{isExportingPydroid ? 'Génération...' : 'Télécharger kaderbot_v14.py'}</span>
+          </button>
+        </div>
+
+        <div className="bg-[#090B10]/80 p-3 rounded-xl border border-gray-800 text-xs text-gray-300 space-y-1">
+          <span className="font-semibold text-cyan-300">Comment l'ouvrir sur Pydroid 3 :</span>
+          <ol className="list-decimal list-inside space-y-0.5 text-[11px] text-gray-400">
+            <li>Télécharge le fichier <code>kaderbot_v14.py</code> ci-dessus sur ton smartphone.</li>
+            <li>Ouvre <strong>Pydroid 3</strong> sur Android, clique sur Dossier → Ouvrir → sélectionne le script.</li>
+            <li>Appuie sur le bouton jaune "Play" : l'interface se lance avec tes nouvelles connaissances synchronisées !</li>
+          </ol>
+        </div>
+      </div>
+
+      {/* 2. Sessions Management */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0E131F] border border-gray-800 shadow-xl space-y-4">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <FolderTree className="w-4 h-4 text-emerald-400" />
+          <span>Profils & Sessions de Mémoire</span>
+        </h3>
+
+        {/* Sessions list */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          {sessions.map(s => {
+            const isActive = activeSession === s;
+            return (
+              <div
+                key={s}
+                onClick={() => onSelectSession(s)}
+                className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                  isActive
+                    ? 'bg-emerald-950/40 border-emerald-500/60 text-white shadow-md'
+                    : 'bg-gray-900/60 border-gray-800 text-gray-300 hover:bg-gray-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isActive ? 'bg-emerald-400' : 'bg-gray-600'
+                    }`}
+                  />
+                  <span className="text-xs font-bold capitalize">{s}</span>
+                </div>
+                {isActive && (
+                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800/40">
+                    Active
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Create new session form */}
+        <form onSubmit={handleCreateSessionSubmit} className="pt-2 flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Nom d'une nouvelle session (ex: physique, histoire, perso)..."
+            value={newSessionName}
+            onChange={e => setNewSessionName(e.target.value)}
+            className="flex-1 bg-[#161822] border border-gray-800 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+          />
+          <button
+            type="submit"
+            disabled={!newSessionName.trim()}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold transition flex items-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Créer session</span>
+          </button>
+        </form>
+      </div>
+
+      {/* 3. Intelligent Decay (Oubli intelligent de la V13) */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0E131F] border border-gray-800 shadow-xl space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-rose-400" />
+            <h3 className="text-sm font-bold text-white">Mécanisme d'Oubli Intelligent (Decay)</h3>
+          </div>
+          <button
+            onClick={handleRunDecay}
+            className="px-3.5 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 text-xs font-bold transition"
+          >
+            Lancer l'oubli maintenant
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-400 leading-relaxed">
+          Comme dans le cerveau humain, les faits peu utilisés ou mémorisés il y a plus de 7 jours voient leur coefficient de certitude diminuer progressivement. Les connaissances erronées ou obsolètes finissent par disparaître naturellement.
+        </p>
+
+        {decayReport && (
+          <div className="p-3 rounded-xl bg-rose-950/20 border border-rose-500/30 text-xs text-rose-200">
+            Résultat de l’oubli : <strong>{decayReport.modifs}</strong> faits recalculés à la baisse,{' '}
+            <strong>{decayReport.supprimes}</strong> faits obsolètes purgés.
+          </div>
+        )}
+      </div>
+
+      {/* 4. Backup & Restore JSON */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0E131F] border border-gray-800 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-bold text-white">Sauvegarde & Restauration JSON</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Exportez l’intégralité de la base de données cognitive pour la conserver ou la transférer.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportJSON}
+            className="px-3 py-2 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-800 text-white text-xs font-medium flex items-center gap-1.5 transition"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Exporter JSON</span>
+          </button>
+
+          <label className="px-3 py-2 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-800 text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer transition">
+            <Upload className="w-3.5 h-3.5" />
+            <span>Importer JSON</span>
+            <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+};
