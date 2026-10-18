@@ -108,19 +108,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleTestGroq = async () => {
-    if (!groqKey.trim()) {
-      setTestResult({
-        ok: false,
-        message: 'Veuillez coller votre clé API Groq (commençant par gsk_...)',
-      });
-      return;
-    }
-
     setIsTestingGroq(true);
     setTestResult(null);
 
     try {
-      const res = await apiService.testGroqConnection(groqKey.trim(), groqModel);
+      const res = await apiService.testGroqConnection(groqKey.trim() || undefined, groqModel);
       if (res.ok) {
         setTestResult({
           ok: true,

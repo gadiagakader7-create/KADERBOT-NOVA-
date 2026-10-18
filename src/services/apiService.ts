@@ -4,8 +4,6 @@ export interface ChatApiParams {
   prompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   provider: 'gemini' | 'groq' | 'local_only';
-  geminiApiKey?: string;
-  groqApiKey?: string;
   groqModel?: string;
   systemPrompt?: string;
 }
@@ -20,10 +18,18 @@ export interface ChatApiResponse {
 
 export const apiService = {
   async chat(params: ChatApiParams): Promise<ChatApiResponse> {
+    // Strip any sensitive keys - Server exclusively uses process.env keys
+    const { prompt, history, provider, groqModel, systemPrompt } = params as any;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        prompt,
+        history,
+        provider,
+        groqModel,
+        systemPrompt,
+      }),
     });
 
     if (!res.ok) {
@@ -35,25 +41,25 @@ export const apiService = {
   },
 
   async testGroqConnection(
-    apiKey: string,
+    apiKey?: string,
     model = 'openai/gpt-oss-120b'
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
     const res = await fetch('/api/groq/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey, model }),
+      body: JSON.stringify({ apiKey: apiKey?.trim() || undefined, model }),
     });
 
     return await res.json();
   },
 
   async testGeminiConnection(
-    apiKey: string
+    apiKey?: string
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
     const res = await fetch('/api/gemini/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify({ apiKey: apiKey?.trim() || undefined }),
     });
 
     return await res.json();
@@ -65,14 +71,20 @@ export const apiService = {
     style: string;
     styleDesc?: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { theme, count, style, styleDesc, provider, groqModel } = params as any;
     const res = await fetch('/api/idees', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        theme,
+        count,
+        style,
+        styleDesc,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -88,14 +100,18 @@ export const apiService = {
     text: string;
     targetLang: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { text, targetLang, provider, groqModel } = params as any;
     const res = await fetch('/api/traduis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        text,
+        targetLang,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -110,14 +126,17 @@ export const apiService = {
   async corriger(params: {
     text: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { text, provider, groqModel } = params as any;
     const res = await fetch('/api/corrige', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        text,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -132,14 +151,17 @@ export const apiService = {
   async resumer(params: {
     text: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { text, provider, groqModel } = params as any;
     const res = await fetch('/api/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        text,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {

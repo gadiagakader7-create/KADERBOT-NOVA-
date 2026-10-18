@@ -319,8 +319,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         </button>
       </div>
 
-      {/* Quick Action Pills */}
-      <div className="flex-shrink-0 px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
+      {/* Quick Action Pills - Fixed above input */}
+      <div className="shrink-0 flex-shrink-0 px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
         {quickPills.map((pill, idx) => (
           <button
             key={idx}
@@ -333,7 +333,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       </div>
 
       {/* Input Form Bar - Permanently fixed at bottom of chat */}
-      <div className="flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
+      <div className="shrink-0 flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
         <form onSubmit={handleFormSubmit} className="max-w-7xl mx-auto flex items-center gap-2">
           {/* Voice input button */}
           <button

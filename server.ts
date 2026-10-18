@@ -151,27 +151,14 @@ async function callGroqWithFallback(
 // Helper to call Gemini with multi-model fallback in case of temporary 503/429 spikes
 async function callGeminiWithFallback(
   fullPrompt: string,
-  systemInstruction?: string,
-  customApiKey?: string
+  systemInstruction?: string
 ): Promise<{ text: string; model: string }> {
-  const clientToUse =
-    customApiKey && customApiKey.trim()
-      ? new GoogleGenAI({
-          apiKey: customApiKey.trim(),
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        })
-      : ai;
-
   const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastError: any = null;
 
   for (const m of modelsToTry) {
     try {
-      const response = await clientToUse.models.generateContent({
+      const response = await ai.models.generateContent({
         model: m,
         contents: fullPrompt,
         config: systemInstruction ? { systemInstruction } : undefined,
@@ -189,15 +176,14 @@ async function callGeminiWithFallback(
   throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
 }
 
-// 0. Gemini Connection Tester Endpoint
+// 0. Gemini Connection Tester Endpoint (Uses process.env.GEMINI_API_KEY exclusively)
 app.post('/api/gemini/test', async (req, res) => {
   try {
-    const { apiKey } = req.body;
-    const keyToUse = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY;
+    const keyToUse = process.env.GEMINI_API_KEY || req.body?.apiKey;
     if (!keyToUse) {
       return res.status(400).json({
         ok: false,
-        error: 'Aucune clé API Gemini fournie ni configurée sur le serveur.',
+        error: 'Aucune variable GEMINI_API_KEY configurée sur le serveur.',
       });
     }
 
@@ -228,14 +214,16 @@ app.post('/api/gemini/test', async (req, res) => {
   }
 });
 
-// 0.1 Groq Connection & Model Tester Endpoint
+// 0.1 Groq Connection & Model Tester Endpoint (Uses process.env.GROQ_API_KEY exclusively)
 app.post('/api/groq/test', async (req, res) => {
   try {
-    const { apiKey, model = 'openai/gpt-oss-120b' } = req.body;
-    if (!apiKey || !apiKey.trim()) {
+    const keyToUse = process.env.GROQ_API_KEY || req.body?.apiKey;
+    const model = req.body?.model || 'openai/gpt-oss-120b';
+
+    if (!keyToUse) {
       return res.status(400).json({
         ok: false,
-        error: 'Veuillez saisir une clé API Groq (gsk_...) pour effectuer le test.',
+        error: 'Aucune variable GROQ_API_KEY configurée sur le serveur.',
       });
     }
 
@@ -245,7 +233,7 @@ app.post('/api/groq/test', async (req, res) => {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey.trim()}`,
+        Authorization: `Bearer ${keyToUse.trim()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -281,15 +269,13 @@ app.post('/api/groq/test', async (req, res) => {
   }
 });
 
-// 1. Chat endpoint (Gemini or Groq)
+// 1. Chat endpoint (Exclusively uses process.env.GEMINI_API_KEY and process.env.GROQ_API_KEY)
 app.post('/api/chat', async (req, res) => {
   try {
     const {
       prompt,
       history = [],
       provider = 'gemini',
-      geminiApiKey,
-      groqApiKey,
       groqModel = 'openai/gpt-oss-120b',
       systemPrompt = DEFAULT_SYSTEM_PROMPT,
     } = req.body;
@@ -303,28 +289,28 @@ app.post('/api/chat', async (req, res) => {
       .join('\n');
     const fullPrompt = `${systemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
 
-    // A. Groq Provider
+    // A. Groq Provider (Exclusively using process.env.GROQ_API_KEY)
     if (provider === 'groq') {
-      const keyToUse = groqApiKey || process.env.GROQ_API_KEY;
+      const serverGroqKey = process.env.GROQ_API_KEY;
 
-      if (!keyToUse) {
-        console.warn('Pas de clé Groq renseignée, bascule fluide sur Gemini');
-        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
+      if (!serverGroqKey) {
+        console.warn('Pas de GROQ_API_KEY sur le serveur, bascule transparente sur Gemini (GEMINI_API_KEY)');
+        const geminiRes = await callGeminiWithFallback(fullPrompt);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
           model: geminiRes.model,
           isFallback: true,
-          fallbackReason: 'Aucune clé Groq configurée',
+          fallbackReason: 'Aucune variable GROQ_API_KEY configurée sur le serveur',
         });
       }
 
       try {
-        const { text, actualModel } = await callGroqWithFallback(prompt, systemPrompt, keyToUse, groqModel, history);
+        const { text, actualModel } = await callGroqWithFallback(prompt, systemPrompt, serverGroqKey, groqModel, history);
         return res.json({ text, provider: 'groq', model: actualModel });
       } catch (groqErr: any) {
         console.warn(`Groq indisponible (${groqErr.message}), bascule de secours sur Gemini...`);
-        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
+        const geminiRes = await callGeminiWithFallback(fullPrompt);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -335,8 +321,8 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // B. Default: Gemini 3.8 Flash (Server-Side or Admin Custom Key)
-    const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
+    // B. Default: Gemini 3.8 Flash (Exclusively using process.env.GEMINI_API_KEY via ai client)
+    const geminiRes = await callGeminiWithFallback(fullPrompt);
     return res.json({ text: geminiRes.text, provider: 'gemini', model: geminiRes.model });
   } catch (error: any) {
     console.error('Erreur /api/chat:', error);
@@ -344,7 +330,7 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// 2. Ideas Generator endpoint
+// 2. Ideas Generator endpoint (Exclusively server env keys)
 app.post('/api/idees', async (req, res) => {
   try {
     const {
@@ -353,24 +339,21 @@ app.post('/api/idees', async (req, res) => {
       style = 'creatif',
       styleDesc = '',
       provider = 'gemini',
-      geminiApiKey,
-      groqApiKey,
       groqModel = 'openai/gpt-oss-120b',
     } = req.body;
 
     const prompt = `Génère exactement ${count} idées courtes sur le thème : "${theme}". Style demandé: ${styleDesc || style}. Format obligatoire : une idée par ligne, numérotée de 1 à ${count}. Pas d'introduction ni de conclusion.`;
 
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text } = await callGroqWithFallback(prompt, "Tu es un générateur d'idées créatif et concis.", key, groqModel);
+        const { text } = await callGroqWithFallback(prompt, "Tu es un générateur d'idées créatif et concis.", process.env.GROQ_API_KEY, groqModel);
         return res.json({ text });
       } catch (err) {
         console.warn('Groq idees failed, falling back to Gemini');
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.", geminiApiKey);
+    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.");
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/idees:', error);
@@ -378,23 +361,22 @@ app.post('/api/idees', async (req, res) => {
   }
 });
 
-// 3. Translation endpoint
+// 3. Translation endpoint (Exclusively server env keys)
 app.post('/api/traduis', async (req, res) => {
   try {
-    const { text, targetLang, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, targetLang, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Traduis le texte suivant en ${targetLang}. Réponds UNIQUEMENT par la traduction exacte, sans commentaire, guillemets ni introduction:\n\n${text}`;
 
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un traducteur professionnel expert.', key, groqModel);
+        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un traducteur professionnel expert.', process.env.GROQ_API_KEY, groqModel);
         return res.json({ text: result });
       } catch (err) {
         console.warn('Groq traduis failed, falling back to Gemini');
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.', geminiApiKey);
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.');
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/traduis:', error);
@@ -402,23 +384,22 @@ app.post('/api/traduis', async (req, res) => {
   }
 });
 
-// 4. Corrector endpoint
+// 4. Corrector endpoint (Exclusively server env keys)
 app.post('/api/corrige', async (req, res) => {
   try {
-    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Corrige les fautes d'orthographe, de grammaire et de ponctuation du texte suivant en gardant le sens et le ton. Réponds uniquement par le texte corrigé:\n\n${text}`;
 
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un correcteur professionnel.', key, groqModel);
+        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un correcteur professionnel.', process.env.GROQ_API_KEY, groqModel);
         return res.json({ text: result });
       } catch (err) {
         console.warn('Groq corrige failed, falling back to Gemini');
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.', geminiApiKey);
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.');
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/corrige:', error);
@@ -426,23 +407,22 @@ app.post('/api/corrige', async (req, res) => {
   }
 });
 
-// 5. Summarizer endpoint
+// 5. Summarizer endpoint (Exclusively server env keys)
 app.post('/api/resume', async (req, res) => {
   try {
-    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const { text, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
     const prompt = `Résume le texte suivant en 2 à 3 phrases claires, précises et directes. Réponds uniquement par le résumé:\n\n${text}`;
 
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un expert en synthèse documentaire.', key, groqModel);
+        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un expert en synthèse documentaire.', process.env.GROQ_API_KEY, groqModel);
         return res.json({ text: result });
       } catch (err) {
         console.warn('Groq resume failed, falling back to Gemini');
       }
     }
 
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.', geminiApiKey);
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.');
     return res.json({ text: geminiRes.text });
   } catch (error: any) {
     console.error('Erreur /api/resume:', error);

@@ -505,8 +505,6 @@ export default function App() {
             content: m.text,
           })),
           provider: 'groq',
-          geminiApiKey: config.geminiApiKey,
-          groqApiKey: config.groqApiKey,
           groqModel: config.groqModel || 'openai/gpt-oss-120b',
           systemPrompt: config.systemPrompt,
         });
@@ -641,7 +639,6 @@ export default function App() {
           text: corps,
           targetLang: cible,
           provider: config.provider,
-          groqApiKey: config.groqApiKey,
         });
         addBotMessage(result, { source: 'systeme' });
       } catch (err: any) {
@@ -664,7 +661,6 @@ export default function App() {
         const result = await apiService.corriger({
           text: corps,
           provider: config.provider,
-          groqApiKey: config.groqApiKey,
         });
         addBotMessage(result, { source: 'systeme' });
       } catch (err: any) {
@@ -700,7 +696,6 @@ export default function App() {
           count,
           style,
           provider: config.provider,
-          groqApiKey: config.groqApiKey,
         });
 
         const lines = result
@@ -739,8 +734,6 @@ export default function App() {
           prompt,
           history: [],
           provider: config.provider,
-          geminiApiKey: config.geminiApiKey,
-          groqApiKey: config.groqApiKey,
         });
 
         addBotMessage(`Idée ${num + 1} développée :\n${res.text}`, { source: 'systeme' });
@@ -784,7 +777,6 @@ export default function App() {
           const res = await apiService.resumer({
             text: corps,
             provider: config.provider,
-            groqApiKey: config.groqApiKey,
           });
           addBotMessage(res, { source: 'systeme' });
         } catch (err: any) {
@@ -1242,8 +1234,6 @@ export default function App() {
         prompt: text,
         history: historyFormatted,
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel || 'openai/gpt-oss-120b',
         systemPrompt: config.systemPrompt,
       });
@@ -1274,8 +1264,8 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
-      {/* Top Header */}
+    <div className="fixed inset-0 h-full w-full max-h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
+      {/* Top Header - Fixé en haut, toujours visible */}
       <Header
         config={config}
         onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
@@ -1292,8 +1282,8 @@ export default function App() {
         isAdmin={isAdmin}
       />
 
-      {/* Main View Workspace */}
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+      {/* Main View Workspace - flex-1 min-h-0 overflow-hidden */}
+      <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
         {activeTab === 'chat' && (
           <ChatTab
             messages={messages}
@@ -1412,7 +1402,7 @@ export default function App() {
       </main>
 
       {/* Bottom Navigation Tabs - Public shows only Discussion & Atelier Texte */}
-      <nav className="h-14 sm:h-16 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
+      <nav className="h-14 sm:h-16 shrink-0 flex-shrink-0 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
         <button
           onClick={() => setActiveTab('chat')}
           className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${

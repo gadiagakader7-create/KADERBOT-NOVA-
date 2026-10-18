@@ -1,50 +1,10 @@
-# KADERBOT — Code Source Complet & Guide de Déploiement
+# 📦 KADERBOT NOVA V14 - Code Source Complet & Guide d Application Mobile
 
-Ce document contient **l'intégralité du code source mis à jour** du projet **KADERBOT**, incluant les 3 dernières améliorations majeures :
-
-1. **Clé API Gemini dans les Paramètres Admin (`SettingsModal.tsx`)** :
-   - Champ de saisie sécurisé pour la clé API Gemini avec testeur de connexion instantané (`/api/gemini/test`).
-   - Le serveur (`server.ts`) utilise en priorité cette clé personnalisée si fournie, sinon il bascule automatiquement sur la variable d'environnement `GEMINI_API_KEY`.
-
-2. **Boutons de certitude masqués en Mode Public (`ChatTab.tsx`)** :
-   - Les boutons d'évaluation "Exact (+0.1)" et "Inexact (-0.15)" sous les réponses du bot sont désormais strictement réservés à l'administrateur (`?admin=true`).
-   - L'interface publique reste ainsi épurée, propre et orientée utilisateur final.
-
-3. **Verrouillage du défilement & Zone de saisie fixe sur Mobile** :
-   - La zone de saisie (champ texte, micro de dictée vocale, bouton effacer et bouton envoyer) reste désormais en permanence fixée et visible en bas de l'écran sur mobile (`h-[100dvh]`, `flex-shrink-0`).
-   - Seule la liste des messages défile de manière fluide (`overflow-y-auto min-h-0 overscroll-contain`), empêchant la page entière de glisser ou de masquer la barre de chat.
+Ce document contient l intégralité du code source mis à jour de **KADERBOT NOVA** (Interface Hybride, Mode Public/Admin, Clés serveur Render 100% autonomes, Affichage mobile 3 zones fixes).
 
 ---
 
-## 🛠 Script Python de Réextraction Automatique (`unbundle.py`)
-
-Si vous téléchargez ce document en tant que fichier texte et souhaitez recréer l'arborescence des dossiers et fichiers :
-
-```python
-# unbundle.py
-import os, re
-
-with open('kaderbot_code_source_complet.md', 'r', encoding='utf-8') as f:
-    text = f.read()
-
-pattern = re.compile(r'### Fichier : `([^`]+)`\n\n```[a-zA-Z0-9_-]*\n(.*?)```\n\n---', re.DOTALL)
-matches = pattern.findall(text)
-
-print(f'Extraction de {len(matches)} fichiers...')
-for rel_path, content in matches:
-    os.makedirs(os.path.dirname(rel_path), exist_ok=True)
-    with open(rel_path, 'w', encoding='utf-8') as out:
-        out.write(content)
-    print(f'-> {rel_path}')
-
-print('Extraction terminée avec succès !')
-```
-
----
-
-## 📂 Code Source Intégral du Projet
-
-### Fichier : `package.json`
+## 📄 Fichier : `package.json`
 
 ```json
 {
@@ -89,7 +49,7 @@ print('Extraction terminée avec succès !')
 
 ---
 
-### Fichier : `vite.config.ts`
+## 📄 Fichier : `vite.config.ts`
 
 ```typescript
 import tailwindcss from '@tailwindcss/vite';
@@ -119,7 +79,7 @@ export default defineConfig(() => {
 
 ---
 
-### Fichier : `tsconfig.json`
+## 📄 Fichier : `tsconfig.json`
 
 ```json
 {
@@ -154,11 +114,11 @@ export default defineConfig(() => {
 
 ---
 
-### Fichier : `index.html`
+## 📄 Fichier : `index.html`
 
 ```html
 <!doctype html>
-<html lang="fr" class="dark">
+<html lang="fr" class="dark h-full w-full overflow-hidden">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -178,8 +138,8 @@ export default defineConfig(() => {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-[#050508] text-gray-100 antialiased selection:bg-[#10A37F]/30 selection:text-emerald-300 overflow-x-hidden min-h-screen">
-    <div id="root"></div>
+  <body class="bg-[#050508] text-gray-100 antialiased selection:bg-[#10A37F]/30 selection:text-emerald-300 fixed inset-0 w-full h-full overflow-hidden">
+    <div id="root" class="w-full h-full overflow-hidden"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
@@ -188,12 +148,2658 @@ export default defineConfig(() => {
 
 ---
 
-### Fichier : `src/index.css`
+## 📄 Fichier : `server.ts`
+
+```typescript
+import express from 'express';
+import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { GoogleGenAI } from '@google/genai';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json({ limit: '10mb' }));
+
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
+
+// Initialize Gemini SDK
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    },
+  },
+});
+
+const DEFAULT_SYSTEM_PROMPT =
+  'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
+  'Tu réponds toujours en français, en 2 à 4 phrases maximum. ' +
+  'Tu ne fais pas de listes à puces sauf si on te le demande. ' +
+  'Tu es chaleureux mais pas excessif.';
+
+// Helper to normalize and resolve Groq model IDs accurately
+export function resolveGroqModel(requestedModel?: string): string {
+  if (!requestedModel) return 'openai/gpt-oss-120b';
+  const clean = requestedModel.trim();
+  const lower = clean.toLowerCase();
+
+  // OpenAI GPT-OSS on Groq
+  if (lower.includes('gpt-oss-20b') || lower.includes('gpt20b')) {
+    return 'openai/gpt-oss-20b';
+  }
+  if (
+    lower === 'openai/gpt-oss-120b' ||
+    lower.includes('gpt-oss-120b') ||
+    lower.includes('gpt120b') ||
+    lower.includes('gpt-120b') ||
+    lower.includes('gpt') ||
+    lower.includes('oss')
+  ) {
+    return 'openai/gpt-oss-120b';
+  }
+
+  // Deprecated models migration
+  if (lower.includes('llama-3.3-70b-versatile')) {
+    return 'llama-3.3-70b-specdec';
+  }
+
+  // Qwen on Groq
+  if (lower.includes('qwen')) {
+    return 'qwen/qwen3.8-27b';
+  }
+
+  // Llama 3.1 8B Instant
+  if (lower.includes('llama-3.1-8b') || lower.includes('llama3-8b')) {
+    return 'llama-3.1-8b-instant';
+  }
+
+  return clean;
+}
+
+// Helper to call Groq with candidate fallback and clean error management
+async function callGroqWithFallback(
+  prompt: string,
+  systemPrompt: string,
+  apiKey: string,
+  requestedModel = 'openai/gpt-oss-120b',
+  history: Array<{ role: string; content: string }> = []
+): Promise<{ text: string; actualModel: string }> {
+  const primaryModel = resolveGroqModel(requestedModel);
+
+  // Candidate models to try in order on Groq
+  const candidateModels = Array.from(
+    new Set([
+      primaryModel,
+      'openai/gpt-oss-120b',
+      'llama-3.1-8b-instant',
+      'llama-3.3-70b-specdec',
+      'qwen/qwen3.8-27b',
+      'mixtral-8x7b-32768',
+    ])
+  );
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: prompt },
+  ];
+
+  let lastError = '';
+
+  for (const modelToTry of candidateModels) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: modelToTry,
+          messages,
+          temperature: 0.7,
+          max_tokens: 800,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content?.trim() || '';
+        return { text: content, actualModel: modelToTry };
+      }
+
+      const errData = await response.json().catch(() => null);
+      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+      lastError = errMsg;
+
+      // If 404 (model not found / deprecated), try next candidate model
+      if (response.status === 404) {
+        console.warn(`Modèle Groq "${modelToTry}" non accessible (404), tentative avec modèle suivant...`);
+        continue;
+      } else {
+        // e.g. 401 invalid api key or 429 rate limit - no point trying other models with same key
+        break;
+      }
+    } catch (e: any) {
+      lastError = e.message;
+    }
+  }
+
+  throw new Error(`Groq: ${lastError}`);
+}
+
+// Helper to call Gemini with multi-model fallback in case of temporary 503/429 spikes
+async function callGeminiWithFallback(
+  fullPrompt: string,
+  systemInstruction?: string
+): Promise<{ text: string; model: string }> {
+  const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  let lastError: any = null;
+
+  for (const m of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model: m,
+        contents: fullPrompt,
+        config: systemInstruction ? { systemInstruction } : undefined,
+      });
+      const text = response.text?.trim();
+      if (text) {
+        return { text, model: m };
+      }
+    } catch (err: any) {
+      console.warn(`Gemini modèle ${m} indisponible (${err.message}), tentative modèle suivant...`);
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
+}
+
+// 0. Gemini Connection Tester Endpoint (Uses process.env.GEMINI_API_KEY exclusively)
+app.post('/api/gemini/test', async (req, res) => {
+  try {
+    const keyToUse = process.env.GEMINI_API_KEY || req.body?.apiKey;
+    if (!keyToUse) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Aucune variable GEMINI_API_KEY configurée sur le serveur.',
+      });
+    }
+
+    const testClient = new GoogleGenAI({
+      apiKey: keyToUse.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    const start = Date.now();
+    const result = await testClient.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: 'Réponds en un seul mot: "Connecté".',
+    });
+    const latencyMs = Date.now() - start;
+
+    return res.json({
+      ok: true,
+      model: 'gemini-3.8-flash',
+      latencyMs,
+      reply: result.text?.trim() || 'Connecté',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 0.1 Groq Connection & Model Tester Endpoint (Uses process.env.GROQ_API_KEY exclusively)
+app.post('/api/groq/test', async (req, res) => {
+  try {
+    const keyToUse = process.env.GROQ_API_KEY || req.body?.apiKey;
+    const model = req.body?.model || 'openai/gpt-oss-120b';
+
+    if (!keyToUse) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Aucune variable GROQ_API_KEY configurée sur le serveur.',
+      });
+    }
+
+    const resolvedModel = resolveGroqModel(model);
+    const start = Date.now();
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${keyToUse.trim()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: resolvedModel,
+        messages: [{ role: 'user', content: 'Réponds en un seul mot: "Connecté".' }],
+        max_tokens: 20,
+      }),
+    });
+
+    const latencyMs = Date.now() - start;
+
+    if (response.ok) {
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content?.trim() || 'Connecté';
+      return res.json({
+        ok: true,
+        model: resolvedModel,
+        latencyMs,
+        reply,
+      });
+    }
+
+    const errData = await response.json().catch(() => null);
+    const errMsg = errData?.error?.message || `Erreur HTTP ${response.status}`;
+    return res.status(response.status).json({
+      ok: false,
+      status: response.status,
+      error: errMsg,
+      model: resolvedModel,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 1. Chat endpoint (Exclusively uses process.env.GEMINI_API_KEY and process.env.GROQ_API_KEY)
+app.post('/api/chat', async (req, res) => {
+  try {
+    const {
+      prompt,
+      history = [],
+      provider = 'gemini',
+      groqModel = 'openai/gpt-oss-120b',
+      systemPrompt = DEFAULT_SYSTEM_PROMPT,
+    } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt requis' });
+    }
+
+    const formattedHistory = history
+      .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
+      .join('\n');
+    const fullPrompt = `${systemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
+
+    // A. Groq Provider (Exclusively using process.env.GROQ_API_KEY)
+    if (provider === 'groq') {
+      const serverGroqKey = process.env.GROQ_API_KEY;
+
+      if (!serverGroqKey) {
+        console.warn('Pas de GROQ_API_KEY sur le serveur, bascule transparente sur Gemini (GEMINI_API_KEY)');
+        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        return res.json({
+          text: geminiRes.text,
+          provider: 'gemini',
+          model: geminiRes.model,
+          isFallback: true,
+          fallbackReason: 'Aucune variable GROQ_API_KEY configurée sur le serveur',
+        });
+      }
+
+      try {
+        const { text, actualModel } = await callGroqWithFallback(prompt, systemPrompt, serverGroqKey, groqModel, history);
+        return res.json({ text, provider: 'groq', model: actualModel });
+      } catch (groqErr: any) {
+        console.warn(`Groq indisponible (${groqErr.message}), bascule de secours sur Gemini...`);
+        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        return res.json({
+          text: geminiRes.text,
+          provider: 'gemini',
+          model: geminiRes.model,
+          isFallback: true,
+          fallbackReason: groqErr.message,
+        });
+      }
+    }
+
+    // B. Default: Gemini 3.8 Flash (Exclusively using process.env.GEMINI_API_KEY via ai client)
+    const geminiRes = await callGeminiWithFallback(fullPrompt);
+    return res.json({ text: geminiRes.text, provider: 'gemini', model: geminiRes.model });
+  } catch (error: any) {
+    console.error('Erreur /api/chat:', error);
+    return res.status(500).json({ error: error.message || 'Erreur serveur KADERBOT' });
+  }
+});
+
+// 2. Ideas Generator endpoint (Exclusively server env keys)
+app.post('/api/idees', async (req, res) => {
+  try {
+    const {
+      theme,
+      count = 5,
+      style = 'creatif',
+      styleDesc = '',
+      provider = 'gemini',
+      groqModel = 'openai/gpt-oss-120b',
+    } = req.body;
+
+    const prompt = `Génère exactement ${count} idées courtes sur le thème : "${theme}". Style demandé: ${styleDesc || style}. Format obligatoire : une idée par ligne, numérotée de 1 à ${count}. Pas d'introduction ni de conclusion.`;
+
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
+      try {
+        const { text } = await callGroqWithFallback(prompt, "Tu es un générateur d'idées créatif et concis.", process.env.GROQ_API_KEY, groqModel);
+        return res.json({ text });
+      } catch (err) {
+        console.warn('Groq idees failed, falling back to Gemini');
+      }
+    }
+
+    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.");
+    return res.json({ text: geminiRes.text });
+  } catch (error: any) {
+    console.error('Erreur /api/idees:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. Translation endpoint (Exclusively server env keys)
+app.post('/api/traduis', async (req, res) => {
+  try {
+    const { text, targetLang, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const prompt = `Traduis le texte suivant en ${targetLang}. Réponds UNIQUEMENT par la traduction exacte, sans commentaire, guillemets ni introduction:\n\n${text}`;
+
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
+      try {
+        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un traducteur professionnel expert.', process.env.GROQ_API_KEY, groqModel);
+        return res.json({ text: result });
+      } catch (err) {
+        console.warn('Groq traduis failed, falling back to Gemini');
+      }
+    }
+
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.');
+    return res.json({ text: geminiRes.text });
+  } catch (error: any) {
+    console.error('Erreur /api/traduis:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Corrector endpoint (Exclusively server env keys)
+app.post('/api/corrige', async (req, res) => {
+  try {
+    const { text, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const prompt = `Corrige les fautes d'orthographe, de grammaire et de ponctuation du texte suivant en gardant le sens et le ton. Réponds uniquement par le texte corrigé:\n\n${text}`;
+
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
+      try {
+        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un correcteur professionnel.', process.env.GROQ_API_KEY, groqModel);
+        return res.json({ text: result });
+      } catch (err) {
+        console.warn('Groq corrige failed, falling back to Gemini');
+      }
+    }
+
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.');
+    return res.json({ text: geminiRes.text });
+  } catch (error: any) {
+    console.error('Erreur /api/corrige:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 5. Summarizer endpoint (Exclusively server env keys)
+app.post('/api/resume', async (req, res) => {
+  try {
+    const { text, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const prompt = `Résume le texte suivant en 2 à 3 phrases claires, précises et directes. Réponds uniquement par le résumé:\n\n${text}`;
+
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
+      try {
+        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un expert en synthèse documentaire.', process.env.GROQ_API_KEY, groqModel);
+        return res.json({ text: result });
+      } catch (err) {
+        console.warn('Groq resume failed, falling back to Gemini');
+      }
+    }
+
+    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.');
+    return res.json({ text: geminiRes.text });
+  } catch (error: any) {
+    console.error('Erreur /api/resume:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 6. Memory Persistence (Load & Save to JSON disk file)
+app.get('/api/memory', (req, res) => {
+  try {
+    if (fs.existsSync(MEMORY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
+      return res.json(data);
+    }
+    return res.json({ memoire: {}, regles: {}, liens: {}, synonymes: {}, sessions: ['defaut'] });
+  } catch (err: any) {
+    console.error('Erreur lecture mémoire:', err);
+    return res.status(500).json({ error: 'Erreur lecture stockage' });
+  }
+});
+
+app.post('/api/memory/save', (req, res) => {
+  try {
+    const { memoire, regles, liens, synonymes, sessions } = req.body;
+    fs.writeFileSync(
+      MEMORY_FILE,
+      JSON.stringify({ memoire, regles, liens, synonymes, sessions, updatedAt: new Date().toISOString() }, null, 2),
+      'utf-8'
+    );
+    return res.json({ success: true, savedAt: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('Erreur sauvegarde mémoire:', err);
+    return res.status(500).json({ error: 'Erreur écriture stockage' });
+  }
+});
+
+// Route de téléchargement de l'archive ZIP complète du projet web
+app.get('/api/export-project-zip', (req, res) => {
+  try {
+    const zipPath = path.resolve(__dirname, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_projet_complet.zip');
+    if (fs.existsSync(zipPath)) {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename="kaderbot-projet-web-complet.zip"');
+      return res.sendFile(zipPath);
+    } else {
+      return res.status(404).json({ error: "L'archive ZIP n'est pas encore générée." });
+    }
+  } catch (err) {
+    console.error('Erreur export zip:', err);
+    return res.status(500).json({ error: 'Erreur lors du téléchargement du zip' });
+  }
+});
+
+// 7. Python Pydroid 3 Export Script (Multi-mode: Console & Tkinter)
+app.post('/api/export-pydroid', (req, res) => {
+  try {
+    const {
+      memoire = {},
+      regles = {},
+      liens = {},
+      synonymes = {},
+      groqApiKey = '',
+      groqModel = 'openai/gpt-oss-120b',
+      mode = 'auto', // 'auto' | 'console' | 'gui'
+    } = req.body;
+    const resolvedModel = resolveGroqModel(groqModel);
+
+    // Encode memory and rules safely in Base64 so Python json.loads NEVER fails on null, true, false or quotes
+    const b64Memoire = Buffer.from(JSON.stringify(memoire)).toString('base64');
+    const b64Regles = Buffer.from(JSON.stringify(regles)).toString('base64');
+    const b64Liens = Buffer.from(JSON.stringify(liens)).toString('base64');
+    const b64Synonymes = Buffer.from(JSON.stringify(synonymes)).toString('base64');
+
+    const defaultTargetMode = mode === 'console' ? 'CONSOLE' : mode === 'gui' ? 'GUI' : 'AUTO';
+
+    const pythonScript = `# -*- coding: utf-8 -*-
+"""
+================================================================================
+KADERBOT NOVA V14 - APPLICATION COMPLETE MULTI-MODE POUR PYDROID 3 (ANDROID)
+================================================================================
+Généré par KADERBOT NOVA Web Studio.
+Ce script est conçu pour fonctionner SANS AUCUN CRASH sur Pydroid 3 (Android).
+
+CARACTERISTIQUES :
+- Mode hybride intelligent : Console interactive ultra-fluide ou Interface Tkinter
+- Tolérance zéro crash : Si Tkinter n'est pas installé sur Android, bascule
+  automatiquement sur la Console interactive
+- Moteur cognitif complet : Déduction symbolique, causalité 'pourquoi',
+  recherche floue (difflib), et association sémantique Question-Réponse
+- Sauvegarde locale automatique dans 'kaderbot_memoire.json' sur votre téléphone
+- Connectivité Groq Cloud ultra-rapide (${resolvedModel})
+================================================================================
+"""
+
+import sys
+import os
+import json
+import base64
+import re
+import difflib
+import unicodedata
+import threading
+import urllib.request
+import urllib.error
+from datetime import datetime
+
+# ==============================================================================
+# CONFIGURATION & MODE D'EXECUTION
+# ==============================================================================
+# Modes possibles : 'CONSOLE' (recommandé Pydroid 3), 'GUI' (Tkinter), ou 'AUTO'
+MODE_CIBLE = "${defaultTargetMode}"
+
+API_KEY = "${groqApiKey}"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL_GROQ = "${resolvedModel}"
+GROQ_ACTIF = bool(API_KEY.strip())
+
+SYSTEM_PROMPT = (
+    "Tu es KADERBOT, un assistant cognitif sympa, concis et curieux. "
+    "Tu réponds toujours en français, en 2 à 4 phrases maximum."
+)
+
+DATA_FILE = "kaderbot_memoire.json"
+
+# ==============================================================================
+# CHARGEMENT DES BASES DE CONNAISSANCES (DECODAGE BASE64 ULTRA-STABLE)
+# ==============================================================================
+def _decoder_base64_json(payload_b64):
+    try:
+        raw_bytes = base64.b64decode(payload_b64.encode('utf-8'))
+        return json.loads(raw_bytes.decode('utf-8'))
+    except Exception as e:
+        print("[!] Erreur décodage interne:", e)
+        return {}
+
+memoire = _decoder_base64_json("${b64Memoire}")
+regles = _decoder_base64_json("${b64Regles}")
+liens = _decoder_base64_json("${b64Liens}")
+synonymes = _decoder_base64_json("${b64Synonymes}")
+
+contexte = []
+historique_chat = []
+
+# ==============================================================================
+# PERSISTANCE LOCALE ANDROID
+# ==============================================================================
+def sauvegarder_donnees():
+    try:
+        data = {
+            "memoire": memoire,
+            "regles": regles,
+            "liens": liens,
+            "synonymes": synonymes,
+            "updated_at": datetime.now().isoformat()
+        }
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print("[!] Erreur sauvegarde locale :", e)
+        return False
+
+def charger_donnees():
+    global memoire, regles, liens, synonymes
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                if "memoire" in d: memoire.update(d["memoire"])
+                if "regles" in d: regles.update(d["regles"])
+                if "liens" in d: liens.update(d["liens"])
+                if "synonymes" in d: synonymes.update(d["synonymes"])
+        except Exception as e:
+            print("[!] Erreur chargement sauvegarde :", e)
+
+charger_donnees()
+
+# ==============================================================================
+# OUTILS LINGUISTIQUES & EXTRACTION SEMANTIQUE
+# ==============================================================================
+MOTS_INTERROGATIFS_ET_VIDES = {
+    'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'd', 'l',
+    'ce', 'cet', 'cette', 'ces', 'mon', 'ton', 'son', 'ma', 'ta', 'sa',
+    'qui', 'que', 'quoi', 'quel', 'quelle', 'quels', 'quelles',
+    'comment', 'pourquoi', 'quand', 'est', 'sont', 'ete', 'etre',
+    'avoir', 'fait', 'font', 'bonjour', 'salut', "s'il", 'te', 'plait'
+}
+
+def sans_accent(t):
+    if not t: return ""
+    return "".join(c for c in unicodedata.normalize("NFD", str(t)) if unicodedata.category(c) != "Mn").lower()
+
+PONCT_SET = set(['?', '!', '.', ',', ';', ':', '"', chr(39), '(', ')', '[', ']', '{', '}', '-'])
+
+def nettoyer_ponctuation(chaine):
+    return "".join(" " if c in PONCT_SET else c for c in chaine)
+
+def normaliser_question_cle(q):
+    s = sans_accent(q)
+    s = nettoyer_ponctuation(s)
+    tokens = [w.strip() for w in s.split() if w.strip()]
+    tokens_significatifs = [w for w in tokens if w not in MOTS_INTERROGATIFS_ET_VIDES and len(w) > 2]
+    return " ".join(tokens_significatifs if tokens_significatifs else tokens)
+
+def extraire_mots_cles(q):
+    s = sans_accent(q)
+    s = nettoyer_ponctuation(s)
+    tokens = [w.strip() for w in s.split() if w.strip()]
+    return set([w for w in tokens if w not in MOTS_INTERROGATIFS_ET_VIDES and len(w) > 2])
+
+def rechercher_flou(texte, memoire_dict, regles_dict, seuil=0.72):
+    t_clean = sans_accent(texte).strip()
+    clefs = list(set(list(memoire_dict.keys()) + list(regles_dict.keys())))
+    if not clefs: return None
+    matches = difflib.get_close_matches(t_clean, [sans_accent(k) for k in clefs], n=1, cutoff=seuil)
+    if matches:
+        matched_norm = matches[0]
+        for k in clefs:
+            if sans_accent(k) == matched_norm:
+                return k
+    return None
+
+def trouver_question_reponse(question, memoire_dict, seuil=0.70):
+    if not question or not memoire_dict: return None
+    q_norm = normaliser_question_cle(question)
+    q_mots = extraire_mots_cles(question)
+    if not q_norm and not q_mots: return None
+
+    meilleur = None
+    meilleur_score = 0.0
+
+    for sujet, entries in memoire_dict.items():
+        if not entries: continue
+        entry = entries[0]
+        is_qa = entry.get("type") == "question_reponse" or bool(entry.get("question_origine")) or " " in sujet
+        if not is_qa: continue
+
+        sujet_norm = normaliser_question_cle(entry.get("question_origine") or sujet)
+        sujet_mots = set(entry.get("mots_cles") or list(extraire_mots_cles(sujet_norm)))
+
+        if q_norm == sujet_norm:
+            return {"sujet": sujet, "entry": entry, "score": 1.0}
+
+        score = 0.0
+        if q_mots and sujet_mots:
+            intersection = q_mots.intersection(sujet_mots)
+            union = q_mots.union(sujet_mots)
+            score = len(intersection) / float(len(union)) if union else 0.0
+
+        if score > meilleur_score:
+            meilleur_score = score
+            meilleur = {"sujet": sujet, "entry": entry, "score": score}
+
+    if meilleur and meilleur_score >= seuil:
+        return meilleur
+    return None
+
+def est_requete_definition(texte):
+    t = sans_accent(texte).strip().rstrip("?.! ")
+    prefixes = [
+        "c'est quoi", "cest quoi", "qu'est ce que", "qu'est-ce que",
+        "qu'est ce qu'", "qu'est-ce qu'", "qui est", "parle moi de",
+        "parle-moi de", "definition de", "definir", "definis"
+    ]
+    for pref in prefixes:
+        if t.startswith(pref):
+            reste = t[len(pref):].strip()
+            for art in ["le ", "la ", "les ", "un ", "une ", "des ", "l'", "d'"]:
+                if reste.startswith(art):
+                    reste = reste[len(art):].strip()
+                    break
+            mots = reste.split()
+            if mots:
+                return mots[0]
+    mots_totaux = t.split()
+    if len(mots_totaux) == 1:
+        mot = mots_totaux[0]
+        if len(mot) >= 3 and mot not in ["bonjour", "salut", "merci", "aide", "oui", "non"]:
+            return mot
+    elif len(mots_totaux) == 2 and mots_totaux[0] in ["le", "la", "les", "un", "une", "des", "ce", "cet", "cette"]:
+        return mots_totaux[1]
+    return None
+
+def extraire_x(texte, memoire_dict, regles_dict, syn_dict, ctx_list):
+    t = sans_accent(texte).strip().rstrip("?.! ")
+    if "pourquoi" in t:
+        idx = t.find("pourquoi")
+        reste = t[idx + 8:].strip()
+        for art in ["le ", "la ", "les ", "un ", "une ", "l'", "d'"]:
+            if reste.startswith(art):
+                reste = reste[len(art):].strip()
+                break
+        mots = reste.split()
+        if mots:
+            return mots[0]
+    c_def = est_requete_definition(texte)
+    if c_def:
+        return c_def
+    for p in ["il", "elle", "lui", "ceci", "cela"]:
+        if p in t.split() and ctx_list:
+            return ctx_list[-1]
+    return None
+
+def deduire_chaine(sujet, liens_dict, max_depth=6):
+    chemin = [sujet]
+    curr = sujet
+    for _ in range(max_depth):
+        parents = liens_dict.get(curr, [])
+        if parents:
+            curr = parents[0]
+            chemin.append(curr)
+        else:
+            break
+    return chemin
+
+def repondre_pourquoi(texte, memoire_dict, regles_dict, liens_dict, syn_dict):
+    sujet = extraire_x(texte, memoire_dict, regles_dict, syn_dict, contexte)
+    if not sujet: return None
+    chaine = deduire_chaine(sujet, liens_dict)
+    for ancetre in chaine:
+        if ancetre in regles_dict:
+            for r in regles_dict[ancetre]:
+                if r.get("quant") in ["tous", "chaque"]:
+                    return f"Parce que {sujet} est un {ancetre}, et que tous les {ancetre}s {r.get('prop')}."
+    return None
+
+def apprendre_de_groq(question, reponse, memoire_dict):
+    q_clean = sans_accent(question).strip()
+    concept = est_requete_definition(question)
+    if concept:
+        sujet = concept
+        prem_phrase = reponse.split(".")[0].strip()
+        if len(prem_phrase) > 10:
+            if sujet not in memoire_dict:
+                memoire_dict[sujet] = []
+            memoire_dict[sujet].insert(0, {
+                "def": prem_phrase,
+                "poids": 0.85,
+                "hits": 1,
+                "source": "groq",
+                "type": "concept",
+                "question_origine": question,
+                "last_used": datetime.now().isoformat(),
+                "created": datetime.now().isoformat()
+            })
+            sauvegarder_donnees()
+            return sujet
+    else:
+        # Enregistrer Question + Réponse (Q&R)
+        canonical_q = " ".join(nettoyer_ponctuation(q_clean).split())
+        if len(canonical_q) > 4:
+            mots_cles = list(extraire_mots_cles(question))
+            if canonical_q not in memoire_dict:
+                memoire_dict[canonical_q] = []
+            memoire_dict[canonical_q].insert(0, {
+                "def": reponse.strip(),
+                "poids": 0.85,
+                "hits": 1,
+                "source": "groq",
+                "type": "question_reponse",
+                "mots_cles": mots_cles,
+                "question_origine": question,
+                "last_used": datetime.now().isoformat(),
+                "created": datetime.now().isoformat()
+            })
+            sauvegarder_donnees()
+            return canonical_q
+    return None
+
+# ==============================================================================
+# APPEL API GROQ
+# ==============================================================================
+def appeler_groq_sync(prompt, history_list):
+    if not API_KEY.strip():
+        return "Clé Groq non configurée. Ouvre les paramètres ou définis API_KEY."
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for h in history_list[-4:]:
+        messages.append(h)
+    messages.append({"role": "user", "content": prompt})
+
+    payload = json.dumps({
+        "model": MODEL_GROQ,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 600
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        API_URL,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {API_KEY.strip()}",
+            "Content-Type": "application/json",
+            "User-Agent": "kaderbot-pydroid-v14"
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            return res_data["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8", errors="ignore")
+        return f"Erreur Groq ({e.code}) : {err_msg}"
+    except Exception as e:
+        return f"Erreur connexion : {str(e)}"
+
+# ==============================================================================
+# DISPATCHER CENTRAL DE TRAITEMENT DES MESSAGES
+# ==============================================================================
+def traiter_message_texte(texte):
+    """
+    Traite un message et retourne un tuple : (type_source, message_reponse)
+    type_source : 'LOCAL', 'DEDUCTION', 'GROQ', 'COMMANDE', 'SYSTEME'
+    """
+    txt = texte.strip()
+    if not txt:
+        return ("SYSTEME", "Message vide.")
+    txt_lower = txt.lower()
+
+    # 1. Commande retiens
+    if txt_lower.startswith("retiens:"):
+        corps = txt[8:].strip()
+        if "=" in corps:
+            s, d = [p.strip() for p in corps.split("=", 1)]
+            s_clean = s.lower()
+            if s_clean not in memoire: memoire[s_clean] = []
+            memoire[s_clean].insert(0, {
+                "def": d, "poids": 0.85, "hits": 1, "source": "manuel",
+                "type": "concept",
+                "last_used": datetime.now().isoformat(), "created": datetime.now().isoformat()
+            })
+            contexte.append(s_clean)
+            sauvegarder_donnees()
+            return ("COMMANDE", f"Fait retenu pour '{s_clean}' : {d}")
+        return ("SYSTEME", "Format : retiens: sujet = définition")
+
+    # 2. Commande lie
+    if txt_lower.startswith("lie:"):
+        corps = txt[4:].strip()
+        if "->" in corps:
+            src, dst = [p.strip().lower() for p in corps.split("->", 1)]
+            if src not in liens: liens[src] = []
+            if dst not in liens[src]: liens[src].append(dst)
+            sauvegarder_donnees()
+            return ("DEDUCTION", f"Lien d'héritage établi : {src} -> {dst}")
+        return ("SYSTEME", "Format : lie: moineau -> oiseau")
+
+    # 3. Commande lister
+    if txt_lower.startswith("lister:"):
+        cible = txt_lower[7:].strip()
+        if cible == "memoire":
+            keys = sorted(list(memoire.keys()))
+            return ("SYSTEME", f"Mémoire ({len(keys)} sujets) :\\n" + ", ".join(keys[:35]))
+        if cible == "regles":
+            return ("SYSTEME", f"Règles ({len(regles)} catégories) :\\n" + ", ".join(regles.keys()))
+        if cible == "liens":
+            lignes = [f"{k} -> {', '.join(v)}" for k, v in liens.items()]
+            return ("SYSTEME", "Liens d'héritage :\\n" + "\\n".join(lignes[:20]))
+
+    # 4. Question causale 'pourquoi'
+    if "pourquoi" in txt_lower:
+        rep = repondre_pourquoi(txt, memoire, regles, liens, synonymes)
+        if rep:
+            return ("DEDUCTION", rep)
+
+    # 5. Recherche Question-Réponse (Q&R enregistrée)
+    qa_match = trouver_question_reponse(txt, memoire)
+    if qa_match:
+        entry = qa_match["entry"]
+        rep = entry.get("def", "")
+        return ("LOCAL", rep)
+
+    # 6. Définition directe de concept
+    x = extraire_x(txt, memoire, regles, synonymes, contexte)
+    if x and x in memoire:
+        contexte.append(x)
+        defs = [item["def"] for item in memoire[x]]
+        return ("LOCAL", f"{x.capitalize()} : " + " ; ".join(defs))
+
+    # 7. Recherche floue Levenshtein (en cas de faute de frappe)
+    flou = rechercher_flou(txt, memoire, regles)
+    if flou and flou in memoire:
+        contexte.append(flou)
+        defs = [item["def"] for item in memoire[flou]]
+        return ("LOCAL", f"(Tu voulais dire '{flou}' ?) : " + " ; ".join(defs))
+
+    # 8. Fallback Groq Cloud
+    if GROQ_ACTIF:
+        rep = appeler_groq_sync(txt, historique_chat)
+        historique_chat.append({"role": "user", "content": txt})
+        historique_chat.append({"role": "assistant", "content": rep})
+        apprendre_de_groq(txt, rep, memoire)
+        return ("GROQ", rep)
+
+    return ("LOCAL", f"Je ne connais pas encore ce sujet. Enseigne-le moi avec : retiens: {txt} = ...")
+
+# ==============================================================================
+# MODE 1 : INTERFACE CONSOLE / TERMINAL INTERACTIF (100% GARANTI SUR PYDROID 3)
+# ==============================================================================
+def lancer_mode_console():
+    banner = f"""
+================================================================================
+          KADERBOT NOVA V14 - MOTEUR COGNITIF HYBRIDE (PYDROID 3)
+================================================================================
+[INFO] Mémoire locale chargée : {len(memoire)} entrées | {len(regles)} règles | {len(liens)} liens
+[INFO] Modèle Groq actif : {"OUI (" + MODEL_GROQ + ")" if GROQ_ACTIF else "NON (Mode local seul)"}
+--------------------------------------------------------------------------------
+Commandes utiles :
+  • Poser une question   : "c'est quoi le moineau ?", "pourquoi le faucon vole ?"
+  • Apprendre un concept : "retiens: pigeon = oiseau urbain"
+  • Créer un lien Is-A   : "lie: pigeon -> oiseau"
+  • Inspecter la mémoire : "lister: memoire" ou "lister: regles"
+  • Quitter              : "quitter" ou "exit"
+================================================================================
+"""
+    print(banner)
+
+    while True:
+        try:
+            user_input = input("\\n[Toi] > ").strip()
+            if not user_input:
+                continue
+
+            if user_input.lower() in ["quitter", "exit", "quit", "q"]:
+                print("\\n[KADERBOT] Au revoir et à bientôt ! Données sauvegardées.")
+                sauvegarder_donnees()
+                break
+
+            source, reponse = traiter_message_texte(user_input)
+            prefixe = f"[KADERBOT | {source}]"
+            print(f"\\n{prefixe}\\n{reponse}")
+
+        except (KeyboardInterrupt, EOFError):
+            print("\\n\\n[KADERBOT] Interruption détectée. Données sauvegardées.")
+            sauvegarder_donnees()
+            break
+        except Exception as err:
+            print(f"[!] Erreur inattendue : {err}")
+
+# ==============================================================================
+# MODE 2 : INTERFACE GRAPHIQUE TKINTER (SI DISPONIBLE SUR ANDROID)
+# ==============================================================================
+def lancer_mode_tkinter():
+    try:
+        import tkinter as tk
+        from tkinter import scrolledtext
+    except Exception as e:
+        print(f"[!] Tkinter n'est pas disponible dans ce Pydroid 3 ({e}).")
+        print("[*] Bascule automatique sur la Console Interactive...")
+        lancer_mode_console()
+        return
+
+    class KaderbotTkApp:
+        def __init__(self, root):
+            self.root = root
+            self.root.title("KADERBOT NOVA V14 - Pydroid 3")
+            self.root.geometry("480x760")
+            self.root.configure(bg="#050508")
+
+            # Bannière supérieure
+            top_frame = tk.Frame(root, bg="#090B10", padx=10, pady=8)
+            top_frame.pack(fill=tk.X)
+
+            title_lbl = tk.Label(top_frame, text="KADERBOT NOVA V14", fg="#10A37F", bg="#090B10", font=("Arial", 13, "bold"))
+            title_lbl.pack(side=tk.LEFT)
+
+            self.stats_lbl = tk.Label(top_frame, text=f"{len(memoire)} faits", fg="#718096", bg="#090B10", font=("Arial", 9))
+            self.stats_lbl.pack(side=tk.RIGHT)
+
+            # Zone de discussion
+            self.chat_area = scrolledtext.ScrolledText(root, bg="#0B0E17", fg="#E2E8F0", font=("Arial", 11), wrap=tk.WORD, bd=0, padx=10, pady=10)
+            self.chat_area.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self.chat_area.tag_config("user", foreground="#63B3ED", justify="right")
+            self.chat_area.tag_config("bot", foreground="#48BB78")
+            self.chat_area.tag_config("system", foreground="#A0AEC0", font=("Arial", 9, "italic"))
+
+            # Raccourcis tactiles
+            pills_frame = tk.Frame(root, bg="#050508")
+            pills_frame.pack(fill=tk.X, padx=8, pady=2)
+            pills = [("C'est quoi...", "c'est quoi "), ("Pourquoi...", "pourquoi "), ("Retiens", "retiens: "), ("Mémoire", "lister: memoire")]
+            for label, cmd in pills:
+                btn = tk.Button(pills_frame, text=label, bg="#161822", fg="#CBD5E0", font=("Arial", 8), bd=1, relief=tk.FLAT, padx=6, pady=2,
+                                command=lambda c=cmd: self.prefill(c))
+                btn.pack(side=tk.LEFT, padx=2)
+
+            # Zone d'envoi
+            bottom_frame = tk.Frame(root, bg="#090B10", padx=8, pady=6)
+            bottom_frame.pack(fill=tk.X)
+            self.entry = tk.Entry(bottom_frame, bg="#161822", fg="#FFFFFF", insertbackground="#10A37F", font=("Arial", 11), bd=1, relief=tk.FLAT)
+            self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=(0, 6))
+            self.entry.bind("<Return>", lambda e: self.envoyer())
+
+            send_btn = tk.Button(bottom_frame, text="Envoyer", bg="#10A37F", fg="#FFFFFF", font=("Arial", 10, "bold"), bd=0, padx=12, pady=6, command=self.envoyer)
+            send_btn.pack(side=tk.RIGHT)
+
+            self.ajouter_message("KADERBOT", "Bonjour ! Je suis KADERBOT NOVA V14. Pose-moi une question ou utilise 'retiens: sujet = définition'.", "bot")
+
+        def prefill(self, text):
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, text)
+            self.entry.focus()
+
+        def ajouter_message(self, auteur, texte, tag):
+            self.chat_area.config(state=tk.NORMAL)
+            if auteur:
+                self.chat_area.insert(tk.END, f"\\n[{auteur}]\\n", tag)
+            self.chat_area.insert(tk.END, f"{texte}\\n", tag)
+            self.chat_area.see(tk.END)
+            self.chat_area.config(state=tk.DISABLED)
+
+        def envoyer(self):
+            txt = self.entry.get().strip()
+            if not txt: return
+            self.entry.delete(0, tk.END)
+            self.ajouter_message("Toi", txt, "user")
+            source, rep = traiter_message_texte(txt)
+            self.stats_lbl.config(text=f"{len(memoire)} faits")
+            self.ajouter_message(f"KADERBOT | {source}", rep, "bot")
+
+    try:
+        root = tk.Tk()
+        app = KaderbotTkApp(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"[!] Erreur au lancement de l'interface graphique Tkinter ({e}).")
+        print("[*] Bascule automatique sur la Console Interactive...")
+        lancer_mode_console()
+
+# ==============================================================================
+# POINT D'ENTREE PRINCIPAL
+# ==============================================================================
+if __name__ == "__main__":
+    if MODE_CIBLE == "GUI":
+        lancer_mode_tkinter()
+    elif MODE_CIBLE == "CONSOLE":
+        lancer_mode_console()
+    else: # AUTO
+        try:
+            import tkinter as tk
+            lancer_mode_tkinter()
+        except Exception:
+            lancer_mode_console()
+`;
+
+    const filename =
+      mode === 'console'
+        ? 'kaderbot_v14_pydroid_terminal.py'
+        : mode === 'gui'
+        ? 'kaderbot_v14_pydroid_tkinter.py'
+        : 'kaderbot_v14_pydroid.py';
+
+    res.setHeader('Content-Type', 'text/x-python');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(pythonScript);
+  } catch (err: any) {
+    console.error('Erreur export pydroid:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Vite middleware in dev or static files in production
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Serveur KADERBOT NOVA opérationnel sur http://localhost:${PORT}`);
+  });
+}
+
+startServer();
+
+```
+
+---
+
+## 📄 Fichier : `src/main.tsx`
+
+```typescript
+import {createRoot} from 'react-dom/client';
+import App from './App.tsx';
+import './index.css';
+
+createRoot(document.getElementById('root')!).render(<App />);
+
+```
+
+---
+
+## 📄 Fichier : `src/App.tsx`
+
+```typescript
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  MessageSquare,
+  Brain,
+  Scale,
+  Wrench,
+  FolderTree,
+} from 'lucide-react';
+
+import {
+  AppConfig,
+  ChatMessage,
+  LinksStore,
+  MemoryStore,
+  RulesStore,
+  SynonymsStore,
+} from './types/kaderbot';
+import {
+  SEED_MEMORY,
+  SEED_RULES,
+  SEED_LINKS,
+  sansAccent,
+  estSalutation,
+  repondreSalutation,
+  detecterEtat,
+  repondreEtat,
+  extraireX,
+  extraireQuantificateur,
+  phraseDef,
+  repondrePourquoi,
+  deduireChaine,
+  deduireGeneralisation,
+  construirePhraseGeneralisation,
+  apprendreDeLLM,
+  rechercherFlou,
+  naviguerLiens,
+  trouverLiensCommuns,
+  corriger,
+  trouverQuestionReponse,
+  estRequeteDefinition,
+  nettoyerMemoirePolluee,
+} from './core/cognitiveEngine';
+import { Header } from './components/Header';
+import { ChatTab } from './components/ChatTab';
+import { KnowledgeGraphTab } from './components/KnowledgeGraphTab';
+import { RulesTab } from './components/RulesTab';
+import { ToolsTab } from './components/ToolsTab';
+import { SessionsTab } from './components/SessionsTab';
+import { ActionMenuModal } from './components/ActionMenuModal';
+import { SettingsModal } from './components/SettingsModal';
+import { apiService } from './services/apiService';
+
+export default function App() {
+  // Admin detection via URL (?admin=true)
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('admin') === 'true';
+  });
+
+  const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
+
+  // Keep admin status synced on URL changes
+  useEffect(() => {
+    const checkAdmin = () => {
+      const params = new URLSearchParams(window.location.search);
+      setIsAdmin(params.get('admin') === 'true');
+    };
+    window.addEventListener('popstate', checkAdmin);
+    return () => window.removeEventListener('popstate', checkAdmin);
+  }, []);
+
+  // When not in admin mode, restrict active tab to 'chat' or 'tools'
+  useEffect(() => {
+    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
+      setActiveTab('chat');
+    }
+  }, [isAdmin, activeTab]);
+
+  // Modals state
+  const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+  // Configuration
+  const [config, setConfig] = useState<AppConfig>(() => {
+    const saved = localStorage.getItem('kaderbot_config');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.groqModel === 'llama-3.3-70b-versatile' || !parsed.groqModel) {
+          parsed.groqModel = 'openai/gpt-oss-120b';
+        }
+        return parsed;
+      } catch {}
+    }
+    return {
+      provider: 'gemini',
+      geminiApiKey: '',
+      groqApiKey: '',
+      groqModel: 'openai/gpt-oss-120b',
+      geminiModel: 'gemini-3.8-flash',
+      systemPrompt:
+        'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
+        'Tu réponds toujours en français, en 2 à 4 phrases maximum. ' +
+        'Tu ne fais pas de listes à puces sauf si on te le demande. ' +
+        'Tu es chaleureux mais pas excessif.',
+      activeSession: 'defaut',
+      soundEnabled: false,
+      autoLearnFromLLM: true,
+    };
+  });
+
+  // Sessions state
+  const [sessions, setSessions] = useState<string[]>(() => {
+    const saved = localStorage.getItem('kaderbot_sessions');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return ['defaut'];
+  });
+
+  // Knowledge base state for active session
+  const [memoire, setMemoire] = useState<MemoryStore>(() => {
+    const saved = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        nettoyerMemoirePolluee(parsed);
+        return parsed;
+      } catch {}
+    }
+    return { ...SEED_MEMORY };
+  });
+
+  const [regles, setRegles] = useState<RulesStore>(() => {
+    const saved = localStorage.getItem(`kaderbot_regles_${config.activeSession}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return SEED_RULES;
+  });
+
+  const [liens, setLiens] = useState<LinksStore>(() => {
+    const saved = localStorage.getItem(`kaderbot_liens_${config.activeSession}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return SEED_LINKS;
+  });
+
+  const [synonymes, setSynonymes] = useState<SynonymsStore>(() => {
+    const saved = localStorage.getItem(`kaderbot_synonymes_${config.activeSession}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      ordi: 'ordinateur',
+      bagnole: 'voiture',
+      auto: 'voiture',
+    };
+  });
+
+  // Pronoun context history
+  const [contexte, setContexte] = useState<string[]>([]);
+  const [chatPrefill, setChatPrefill] = useState('');
+  const [dernieresIdees, setDernieresIdees] = useState<string[]>([]);
+  const [groqLog, setGroqLog] = useState<Array<{ q: string; r: string; time: string }>>([]);
+
+  // Messages list
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const hour = new Date().getHours();
+    let welcome = 'Bonjour, prêt pour une nouvelle session inspirante ?';
+    if (hour >= 12 && hour < 18) {
+      welcome = "Bon après-midi, je suis là pour t'aider.";
+    } else if (hour >= 18 || hour < 6) {
+      welcome = 'Bonsoir, envie de discuter ou d’apprendre ensemble ?';
+    }
+
+    return [
+      {
+        id: 'welcome',
+        author: 'KB',
+        text: `${welcome} Je suis KADERBOT NOVA V14. Pose-moi une question, enseigne-moi un fait avec "retiens: ...", ou explore les déductions logiques.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        meta: { source: 'systeme' },
+      },
+    ];
+  });
+
+  const [isThinking, setIsThinking] = useState(false);
+
+  // Server Memory Synchronization (Requirement 4: Share data live between Admin and Public)
+  const lastServerTimestamp = useRef<string>('');
+  const isSyncingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchSharedMemory = async () => {
+      if (isSyncingRef.current) return;
+      try {
+        const remote = await apiService.loadMemoryFromServer();
+        if (remote && isMounted) {
+          const remoteUpdated = (remote as any).updatedAt || '';
+          if (remoteUpdated && remoteUpdated === lastServerTimestamp.current) {
+            return;
+          }
+          if (remote.memoire && Object.keys(remote.memoire).length > 0) {
+            setMemoire(remote.memoire);
+          }
+          if (remote.regles && Object.keys(remote.regles).length > 0) {
+            setRegles(remote.regles);
+          }
+          if (remote.liens && Object.keys(remote.liens).length > 0) {
+            setLiens(remote.liens);
+          }
+          if (remote.synonymes && Object.keys(remote.synonymes).length > 0) {
+            setSynonymes(remote.synonymes);
+          }
+          if (remote.sessions && remote.sessions.length > 0) {
+            setSessions(remote.sessions);
+          }
+          if (remoteUpdated) {
+            lastServerTimestamp.current = remoteUpdated;
+          }
+        }
+      } catch (err) {
+        // Silently keep local state if offline
+      }
+    };
+
+    fetchSharedMemory();
+    const interval = setInterval(fetchSharedMemory, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Sync to localStorage & Server disk
+  useEffect(() => {
+    localStorage.setItem('kaderbot_config', JSON.stringify(config));
+  }, [config]);
+
+  useEffect(() => {
+    localStorage.setItem('kaderbot_sessions', JSON.stringify(sessions));
+  }, [sessions]);
+
+  useEffect(() => {
+    localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(memoire));
+    localStorage.setItem(`kaderbot_regles_${config.activeSession}`, JSON.stringify(regles));
+    localStorage.setItem(`kaderbot_liens_${config.activeSession}`, JSON.stringify(liens));
+    localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(synonymes));
+
+    // Save to server backend so updates made in Admin mode are shared to all users
+    isSyncingRef.current = true;
+    apiService
+      .saveMemoryToServer({
+        memoire,
+        regles,
+        liens,
+        synonymes,
+        sessions,
+      })
+      .then(res => {
+        if (res && res.savedAt) {
+          lastServerTimestamp.current = res.savedAt;
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        isSyncingRef.current = false;
+      });
+  }, [memoire, regles, liens, synonymes, config.activeSession, sessions]);
+
+  // Adjust hits on specific concept definition
+  const handleAdjustHits = (sujet: string, entryIdx: number, delta: number) => {
+    setMemoire(prev => {
+      const list = prev[sujet];
+      if (!list || !list[entryIdx]) return prev;
+      const updated = [...list];
+      const newHits = Math.max(0, (updated[entryIdx].hits || 0) + delta);
+      updated[entryIdx] = { ...updated[entryIdx], hits: newHits };
+      return { ...prev, [sujet]: updated };
+    });
+  };
+
+  // Handle switching sessions
+  const handleSelectSession = (newSession: string) => {
+    if (newSession === config.activeSession) return;
+    setConfig(prev => ({ ...prev, activeSession: newSession }));
+
+    const savedMemo = localStorage.getItem(`kaderbot_memoire_${newSession}`);
+    const savedRegles = localStorage.getItem(`kaderbot_regles_${newSession}`);
+    const savedLiens = localStorage.getItem(`kaderbot_liens_${newSession}`);
+
+    setMemoire(savedMemo ? JSON.parse(savedMemo) : SEED_MEMORY);
+    setRegles(savedRegles ? JSON.parse(savedRegles) : SEED_RULES);
+    setLiens(savedLiens ? JSON.parse(savedLiens) : SEED_LINKS);
+
+    addBotMessage(`Session chargée : ${newSession}`);
+  };
+
+  const handleCreateSession = (name: string) => {
+    if (sessions.includes(name)) return;
+    const updated = [...sessions, name];
+    setSessions(updated);
+    handleSelectSession(name);
+  };
+
+  const addBotMessage = (
+    text: string,
+    meta?: ChatMessage['meta'],
+    confidence?: number
+  ) => {
+    const newMsg: ChatMessage = {
+      id: `kb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      author: 'KB',
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      confidence,
+      meta,
+    };
+    setMessages(prev => [...prev, newMsg]);
+
+    // Audio narration if enabled
+    if (config.soundEnabled && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'fr-FR';
+      window.speechSynthesis.speak(u);
+    }
+  };
+
+  // Adjust cognitive weight
+  const handleAdjustWeight = (sujet: string, delta: number) => {
+    setMemoire(prev => {
+      const copy = { ...prev };
+      if (!copy[sujet] || copy[sujet].length === 0) return prev;
+      const list = copy[sujet].map((entry, idx) => {
+        if (idx === 0) {
+          const newWeight = Math.max(0.1, Math.min(1.0, entry.poids + delta));
+          return {
+            ...entry,
+            poids: Number(newWeight.toFixed(2)),
+            hits: entry.hits + 1,
+            last_used: new Date().toISOString(),
+          };
+        }
+        return entry;
+      });
+      copy[sujet] = list;
+      return copy;
+    });
+
+    const isPositive = delta > 0;
+    addBotMessage(
+      isPositive
+        ? `Parfait ! J'ai renforcé ma certitude sur "${sujet}" (+${delta}).`
+        : `Compris ! J'ai baissé mon indice de confiance sur "${sujet}" (${delta}).`
+    );
+  };
+
+  // Add rule helper
+  const handleAddRule = (
+    quant: 'tous' | 'aucun' | 'certains',
+    sujet: string,
+    prop: string,
+    poids = 0.85
+  ) => {
+    const s = sujet.toLowerCase().trim();
+    const p = prop.toLowerCase().trim();
+    setRegles(prev => {
+      const copy = { ...prev };
+      const current = copy[s] ? [...copy[s]] : [];
+      const existing = current.find(r => r.quant === quant && r.prop === p);
+      if (existing) {
+        existing.poids = Math.min(1.0, existing.poids + 0.1);
+        existing.hits += 1;
+        existing.last_used = new Date().toISOString();
+      } else {
+        current.push({
+          quant,
+          prop: p,
+          poids,
+          hits: 1,
+          last_used: new Date().toISOString(),
+          created: new Date().toISOString(),
+        });
+      }
+      copy[s] = current;
+      return copy;
+    });
+  };
+
+  const handleDeleteRule = (sujet: string, prop: string) => {
+    setRegles(prev => {
+      const copy = { ...prev };
+      if (!copy[sujet]) return prev;
+      copy[sujet] = copy[sujet].filter(r => r.prop !== prop);
+      if (copy[sujet].length === 0) delete copy[sujet];
+      return copy;
+    });
+  };
+
+  const handleAddLink = (source: string, target: string) => {
+    const s = source.toLowerCase().trim();
+    const t = target.toLowerCase().trim();
+    if (!s || !t || s === t) return;
+    setLiens(prev => {
+      const copy = { ...prev };
+      const current = copy[s] ? [...copy[s]] : [];
+      if (!current.includes(t)) {
+        current.push(t);
+        copy[s] = current;
+      }
+      return copy;
+    });
+  };
+
+  const handleDeleteLink = (source: string, target: string) => {
+    setLiens(prev => {
+      const copy = { ...prev };
+      if (!copy[source]) return prev;
+      copy[source] = copy[source].filter(item => item !== target);
+      if (copy[source].length === 0) delete copy[source];
+      return copy;
+    });
+  };
+
+  // CORE COGNITIVE NLP DISPATCHER
+  // Faithfully executing every capability from the user's Python code
+  const handleProcessUserMessage = async (rawMessage: string) => {
+    const text = rawMessage.trim();
+    if (!text) return;
+
+    // Add user message
+    const userMsg: ChatMessage = {
+      id: `user_${Date.now()}`,
+      author: 'Toi',
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    const msgLower = text.toLowerCase();
+    const msgClean = sansAccent(msgLower);
+
+    // 1. Context commands
+    if (msgLower === 'reset contexte' || msgLower === 'vider contexte') {
+      setContexte([]);
+      addBotMessage('Contexte cognitif réinitialisé.', { source: 'systeme' });
+      return;
+    }
+
+    if (msgLower === 'contexte') {
+      if (contexte.length === 0) {
+        addBotMessage('Aucun échange en contexte actuellement.', { source: 'systeme' });
+      } else {
+        addBotMessage(`Contexte actuel (${contexte.length} concepts récents) : ${contexte.join(' → ')}`, { source: 'systeme' });
+      }
+      return;
+    }
+
+    // 2. Groq toggle & status commands
+    if (msgLower === 'groq on') {
+      setConfig(prev => ({ ...prev, provider: 'groq' }));
+      addBotMessage('Moteur Groq activé.', { source: 'systeme' });
+      return;
+    }
+
+    if (msgLower === 'groq off') {
+      setConfig(prev => ({ ...prev, provider: 'local_only' }));
+      addBotMessage('Mode 100% local activé (Groq désactivé).', { source: 'systeme' });
+      return;
+    }
+
+    if (msgLower === 'groq statut') {
+      addBotMessage(
+        `Statut IA :\nMoteur actif : ${config.provider}\nModèle : ${config.provider === 'groq' ? config.groqModel : config.geminiModel}\nApprentissage auto : ${config.autoLearnFromLLM ? 'Activé' : 'Désactivé'}`
+      );
+      return;
+    }
+
+    // 3. Direct Groq question
+    if (msgLower.startsWith('groq:')) {
+      const q = text.slice(5).trim();
+      if (!q) {
+        addBotMessage('Format : groq: ta question');
+        return;
+      }
+      setIsThinking(true);
+      try {
+        const res = await apiService.chat({
+          prompt: q,
+          history: messages.slice(-5).map(m => ({
+            role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
+            content: m.text,
+          })),
+          provider: 'groq',
+          groqModel: config.groqModel || 'openai/gpt-oss-120b',
+          systemPrompt: config.systemPrompt,
+        });
+        addBotMessage(res.text, { source: res.provider === 'gemini' ? 'gemini' : 'groq' });
+        setGroqLog(prev => [{ q, r: res.text, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
+        if (config.autoLearnFromLLM) {
+          const learned = apprendreDeLLM(q, res.text, memoire, 'groq');
+          if (learned) {
+            setMemoire({ ...memoire });
+            setContexte(prev => [...prev, learned.sujet]);
+          }
+        }
+      } catch (err: any) {
+        addBotMessage(`(Groq) Erreur : ${err.message}`, { source: 'systeme' });
+      } finally {
+        setIsThinking(false);
+      }
+      return;
+    }
+
+    // 4. Session commands
+    if (msgLower === 'session' || msgLower === 'session active') {
+      addBotMessage(
+        `Session active : ${config.activeSession}\nSujets en mémoire : ${Object.keys(memoire).length}\nRègles actives : ${Object.values(regles).reduce((acc, l) => acc + l.length, 0)}`
+      );
+      return;
+    }
+
+    if (msgLower === 'sessions' || msgLower === 'lister: sessions') {
+      addBotMessage(`Sessions disponibles :\n${sessions.map(s => ` - ${s}${s === config.activeSession ? ' (active)' : ''}`).join('\n')}\n\nPour changer : écris "session <nom>"`);
+      return;
+    }
+
+    if (msgLower.startsWith('session ')) {
+      const newName = text.split(' ')[1]?.trim().toLowerCase();
+      if (newName) {
+        handleCreateSession(newName);
+        return;
+      }
+    }
+
+    // 5. Taxonomy & Link commands: lie:, delie:, liens:, cousins:
+    if (msgLower.startsWith('lie:') || msgLower.startsWith('lie ')) {
+      const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(3).trim();
+      if (rest.includes('->')) {
+        const [source, target] = rest.split('->').map(s => s.trim().toLowerCase());
+        handleAddLink(source, target);
+        addBotMessage(`Lien cognitif établi : ${source} -> ${target}`, { source: 'local_memoire' });
+        return;
+      }
+      addBotMessage('Format requis : lie: source -> cible (ex: lie: moineau -> oiseau)');
+      return;
+    }
+
+    if (msgLower.startsWith('delie:') || msgLower.startsWith('delie ')) {
+      const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(5).trim();
+      if (rest.includes('->')) {
+        const [source, target] = rest.split('->').map(s => s.trim().toLowerCase());
+        handleDeleteLink(source, target);
+        addBotMessage(`Lien supprimé : ${source} -> ${target}`, { source: 'local_memoire' });
+        return;
+      }
+      addBotMessage('Format requis : delie: source -> cible');
+      return;
+    }
+
+    if (msgLower.startsWith('liens:') || msgLower.startsWith('liens ')) {
+      const target = text.includes(':') ? text.split(':')[1].trim().toLowerCase() : text.slice(5).trim().toLowerCase();
+      const parents = liens[target] || [];
+      const children = Object.keys(liens).filter(k => (liens[k] || []).includes(target));
+      const chain = naviguerLiens(target, liens, 8);
+      let rep = `Liens pour "${target}" :\nParents : ${parents.join(', ') || 'aucun'}\nEnfants : ${children.join(', ') || 'aucun'}`;
+      if (chain.length > 1) {
+        rep += `\nChaîne complète : ${chain.join(' → ')}`;
+      }
+      addBotMessage(rep, { source: 'local_memoire' });
+      return;
+    }
+
+    if (msgLower.startsWith('cousins:') || msgLower.startsWith('cousins ')) {
+      const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
+      const [s1, s2] = rest.split(',').map(s => s.trim().toLowerCase());
+      if (s1 && s2) {
+        const communs = trouverLiensCommuns(s1, s2, liens);
+        addBotMessage(
+          communs.length > 0
+            ? `Ancêtres conceptuels communs entre ${s1} et ${s2} : ${communs.join(', ')}`
+            : `Aucun ancêtre commun trouvé entre ${s1} et ${s2}.`
+        );
+        return;
+      }
+      addBotMessage('Format : cousins: sujet1, sujet2');
+      return;
+    }
+
+    // 6. Translation commands: "traduis en anglais: ...", "traduis en espagnol: ..."
+    if (msgLower.startsWith('traduis en ') || msgLower.startsWith('traduis ')) {
+      if (!text.includes(':')) {
+        addBotMessage('Format : traduis en anglais: ton texte ici');
+        return;
+      }
+      const [entete, ...corpsParts] = text.split(':');
+      const corps = corpsParts.join(':').trim();
+      if (!corps) {
+        addBotMessage('Il manque le texte à traduire.');
+        return;
+      }
+      const enteteClean = sansAccent(entete.toLowerCase()).replace(/^traduis(?:\s+en)?\s*/, '').trim();
+      const languesMap: Record<string, string> = {
+        anglais: 'English', english: 'English',
+        arabe: 'Arabic', arabic: 'Arabic',
+        espagnol: 'Spanish', spanish: 'Spanish',
+        allemand: 'German', german: 'German',
+        italien: 'Italian', italian: 'Italian',
+        portugais: 'Portuguese', portuguese: 'Portuguese',
+        russe: 'Russian', russian: 'Russian',
+        chinois: 'Chinese', chinese: 'Chinese',
+        japonais: 'Japanese', japanese: 'Japanese',
+        coreen: 'Korean', korean: 'Korean',
+        turc: 'Turkish', turkish: 'Turkish',
+        neerlandais: 'Dutch', dutch: 'Dutch',
+        peul: 'Fula', fula: 'Fula',
+        bambara: 'Bambara', wolof: 'Wolof',
+        swahili: 'Swahili',
+        francais: 'French', french: 'French',
+      };
+
+      const cible = languesMap[enteteClean] || 'English';
+      setIsThinking(true);
+      try {
+        const result = await apiService.traduire({
+          text: corps,
+          targetLang: cible,
+          provider: config.provider,
+        });
+        addBotMessage(result, { source: 'systeme' });
+      } catch (err: any) {
+        addBotMessage(`Erreur traduction : ${err.message}`, { source: 'systeme' });
+      } finally {
+        setIsThinking(false);
+      }
+      return;
+    }
+
+    // 7. Text Correction: "corrige: ..."
+    if (msgLower.startsWith('corrige:') || msgLower.startsWith('corrige ')) {
+      const corps = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
+      if (!corps) {
+        addBotMessage('Format : corrige: ton texte');
+        return;
+      }
+      setIsThinking(true);
+      try {
+        const result = await apiService.corriger({
+          text: corps,
+          provider: config.provider,
+        });
+        addBotMessage(result, { source: 'systeme' });
+      } catch (err: any) {
+        addBotMessage(`Erreur correction : ${err.message}`, { source: 'systeme' });
+      } finally {
+        setIsThinking(false);
+      }
+      return;
+    }
+
+    // 8. Ideas Generator: "idees 5: theme" or "idees 3 drole: theme"
+    if (msgLower.startsWith('idees ') || msgLower.startsWith('idées ') || msgLower.startsWith('idees:')) {
+      if (!text.includes(':')) {
+        addBotMessage('Format : idees 5: theme  ou  idees 3 drole: theme');
+        return;
+      }
+      const [entete, ...corpsParts] = text.split(':');
+      const theme = corpsParts.join(':').trim();
+      const matchNb = entete.match(/\d+/);
+      const count = matchNb ? Math.max(1, Math.min(15, parseInt(matchNb[0], 10))) : 5;
+      let style = 'creatif';
+      for (const st of ['serieux', 'drole', 'poetique', 'absurde', 'creatif', 'scientifique', 'philosophique']) {
+        if (entete.toLowerCase().includes(st)) {
+          style = st;
+          break;
+        }
+      }
+
+      setIsThinking(true);
+      try {
+        const result = await apiService.genererIdees({
+          theme,
+          count,
+          style,
+          provider: config.provider,
+        });
+
+        const lines = result
+          .split('\n')
+          .map(l => l.replace(/^\s*(\d+[\.\)\-:]\s*|[\-\*]\s*)/, '').trim())
+          .filter(Boolean);
+
+        setDernieresIdees(lines);
+        const formatted = [`Idées sur : ${theme}`, ...lines.map((l, i) => `${i + 1}. ${l}`)].join('\n');
+        addBotMessage(formatted, { source: 'systeme' });
+      } catch (err: any) {
+        addBotMessage(`Erreur idées : ${err.message}`, { source: 'systeme' });
+      } finally {
+        setIsThinking(false);
+      }
+      return;
+    }
+
+    // 9. Single Idea Development: "idee 1:", "idee 2:"
+    if (msgLower.startsWith('idee ') || msgLower.startsWith('idée ')) {
+      const matchNb = msgLower.match(/\d+/);
+      if (!matchNb) {
+        addBotMessage('Précise le numéro : idee 3:');
+        return;
+      }
+      const num = parseInt(matchNb[0], 10) - 1;
+      if (num < 0 || num >= dernieresIdees.length) {
+        addBotMessage(`Pas d'idée numéro ${num + 1} en mémoire récente. Génère d'abord une liste avec "idees 5: thème"`);
+        return;
+      }
+      const chosenIdea = dernieresIdees[num];
+      setIsThinking(true);
+      try {
+        const prompt = `Développe cette idée en 3 à 4 phrases claires, concrètes et inspirantes : "${chosenIdea}".`;
+        const res = await apiService.chat({
+          prompt,
+          history: [],
+          provider: config.provider,
+        });
+
+        addBotMessage(`Idée ${num + 1} développée :\n${res.text}`, { source: 'systeme' });
+
+        // Auto-save to memory
+        const sujetIdea = `idee_${num + 1}`;
+        const fact = `${chosenIdea} -> ${res.text.slice(0, 180)}`;
+        setMemoire(prev => ({
+          ...prev,
+          [sujetIdea]: [
+            {
+              def: fact,
+              poids: 0.75,
+              hits: 1,
+              source: 'auto',
+              last_used: new Date().toISOString(),
+              created: new Date().toISOString(),
+            },
+          ],
+        }));
+      } catch (err: any) {
+        addBotMessage(`Erreur développement idée : ${err.message}`, { source: 'systeme' });
+      } finally {
+        setIsThinking(false);
+      }
+      return;
+    }
+
+    // 10. Summarize: "resume: texte" or "resume: concept"
+    if (msgLower.startsWith('resume:')) {
+      const corps = text.split(':')[1]?.trim();
+      if (!corps) {
+        addBotMessage('Format : resume: ton texte ou ton concept');
+        return;
+      }
+
+      // If text is long (> 30 words), call LLM summarizer
+      if (corps.split(/\s+/).length > 25 || corps.length > 150) {
+        setIsThinking(true);
+        try {
+          const res = await apiService.resumer({
+            text: corps,
+            provider: config.provider,
+          });
+          addBotMessage(res, { source: 'systeme' });
+        } catch (err: any) {
+          addBotMessage(`Erreur résumé : ${err.message}`, { source: 'systeme' });
+        } finally {
+          setIsThinking(false);
+        }
+        return;
+      }
+
+      // Short concept summary from memory & rules
+      const xCorr = corriger(corps, memoire, regles, synonymes) || corps;
+      const defs = (memoire[xCorr] || []).map(d => d.def);
+      const rList = (regles[xCorr] || []).map(r => `${r.quant} les ${xCorr}s ${r.prop}`);
+      if (defs.length > 0 || rList.length > 0) {
+        let rep = `${xCorr} : ${defs.join('; ') || 'pas de définition'}`;
+        if (rList.length > 0) rep += `\nRègles associées : ${rList.join('; ')}`;
+        addBotMessage(rep, { source: 'local_memoire', sujet: xCorr });
+        return;
+      }
+      addBotMessage(`Aucune donnée enregistrée pour "${corps}".`);
+      return;
+    }
+
+    // 11. Synonyms management: "synonymes: canon = syn1 | syn2" or "synonymes: mot"
+    if (msgLower.startsWith('synonymes:')) {
+      const rest = text.split(':')[1]?.trim();
+      if (!rest) {
+        addBotMessage('Format : synonymes: canon = syn1 | syn2');
+        return;
+      }
+      if (rest.includes('=')) {
+        const [canonPart, synPart] = rest.split('=').map(s => s.trim().toLowerCase());
+        const synList = synPart.split('|').map(s => s.trim()).filter(Boolean);
+        if (canonPart && synList.length > 0) {
+          setSynonymes(prev => {
+            const copy = { ...prev };
+            const currentList = Array.isArray(copy[canonPart]) ? (copy[canonPart] as string[]) : [];
+            const merged = Array.from(new Set([...currentList, ...synList]));
+            copy[canonPart] = merged;
+            for (const s of synList) {
+              copy[s] = canonPart;
+            }
+            return copy;
+          });
+          addBotMessage(`Synonymes enregistrés pour "${canonPart}" : ${synList.join(', ')}`, { source: 'local_memoire' });
+          return;
+        }
+      } else {
+        const q = rest.toLowerCase();
+        if (synonymes[q]) {
+          const val = synonymes[q];
+          const rep = Array.isArray(val) ? `${q} = ${val.join(' | ')}` : `${q} -> ${val}`;
+          addBotMessage(rep, { source: 'local_memoire' });
+          return;
+        }
+        addBotMessage(`Aucun synonyme trouvé pour "${q}".`);
+        return;
+      }
+    }
+
+    // 12. Fuzzy near search: "proche: mot"
+    if (msgLower.startsWith('proche:') || msgLower.startsWith('proche ')) {
+      const target = (text.includes(':') ? text.split(':')[1] : text.slice(7)).trim().toLowerCase();
+      const keys = Array.from(new Set([...Object.keys(memoire), ...Object.keys(regles)]));
+      const candidates = keys.map(k => {
+        const kNorm = sansAccent(k);
+        const tNorm = sansAccent(target);
+        let score = kNorm === tNorm ? 1.0 : 0.0;
+        if (!score) {
+          const d = Math.max(kNorm.length, tNorm.length) - Math.abs(kNorm.length - tNorm.length);
+          score = (kNorm.includes(tNorm) || tNorm.includes(kNorm)) ? 0.75 : 0.4;
+        }
+        return { key: k, score };
+      });
+      candidates.sort((a, b) => b.score - a.score);
+      const top = candidates.filter(c => c.score >= 0.5).slice(0, 6);
+      if (top.length > 0) {
+        addBotMessage(`Sujets proches de "${target}" :\n${top.map(c => ` - ${c.key}`).join('\n')}`, { source: 'local_memoire' });
+      } else {
+        addBotMessage(`Aucun sujet proche de "${target}".`);
+      }
+      return;
+    }
+
+    // 13. Substring Search: "chercher: mot"
+    if (msgLower.startsWith('chercher:')) {
+      const q = text.split(':')[1]?.trim().toLowerCase();
+      if (!q) {
+        addBotMessage('Format : chercher: mot');
+        return;
+      }
+      const results: string[] = [];
+      for (const [k, list] of Object.entries(memoire)) {
+        if (k.includes(q)) {
+          results.push(`${k} = ${list.map(d => d.def).join(' | ')}`);
+        }
+      }
+      for (const [s, list] of Object.entries(regles)) {
+        if (s.includes(q)) {
+          for (const r of list) results.push(`${r.quant} les ${s}s ${r.prop}`);
+        }
+      }
+      addBotMessage(
+        results.length > 0
+          ? `Résultats pour "${q}" :\n${results.slice(0, 10).join('\n')}`
+          : `Rien trouvé pour "${q}".`,
+        { source: 'local_memoire' }
+      );
+      return;
+    }
+
+    // 14. Bulk forgetting: "oublier masse:" or single "oublier:"
+    if (msgLower.startsWith('oublier masse:') || msgLower.startsWith('oublier en masse:')) {
+      const rest = text.split(':')[1]?.trim() || '';
+      const items = rest.split(/[,\n;.]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+      const removed: string[] = [];
+      setMemoire(prev => {
+        const copy = { ...prev };
+        for (const item of items) {
+          if (copy[item]) {
+            delete copy[item];
+            removed.push(item);
+          }
+        }
+        return copy;
+      });
+      addBotMessage(
+        removed.length > 0
+          ? `Concepts oubliés en masse (${removed.length}) : ${removed.join(', ')}`
+          : 'Aucun concept trouvé à supprimer.',
+        { source: 'systeme' }
+      );
+      return;
+    }
+
+    if (msgLower.startsWith('oublier:')) {
+      const rest = text.split(':')[1]?.trim().toLowerCase() || '';
+      if (!rest) {
+        addBotMessage('Format : oublier: sujet ou oublier: sujet = def');
+        return;
+      }
+      if (rest.includes('=')) {
+        const [sujet, defText] = rest.split('=').map(s => s.trim());
+        setMemoire(prev => {
+          const copy = { ...prev };
+          if (copy[sujet]) {
+            copy[sujet] = copy[sujet].filter(d => !d.def.toLowerCase().includes(defText.toLowerCase()));
+            if (copy[sujet].length === 0) delete copy[sujet];
+          }
+          return copy;
+        });
+        addBotMessage(`Définition oubliée pour "${sujet}".`, { source: 'systeme' });
+        return;
+      } else {
+        let found = false;
+        if (memoire[rest]) {
+          setMemoire(prev => {
+            const copy = { ...prev };
+            delete copy[rest];
+            return copy;
+          });
+          found = true;
+        }
+        if (regles[rest]) {
+          setRegles(prev => {
+            const copy = { ...prev };
+            delete copy[rest];
+            return copy;
+          });
+          found = true;
+        }
+        addBotMessage(
+          found ? `J'ai complètement oublié "${rest}".` : `Je ne connaissais pas "${rest}".`,
+          { source: 'systeme' }
+        );
+        return;
+      }
+    }
+
+    // 15. Bulk Learning: "retiens masse: part1 . part2"
+    if (msgLower.startsWith('retiens masse:')) {
+      const rest = text.split(':')[1]?.trim() || '';
+      const parts = rest.split(/[.\n;]+/).map(p => p.trim()).filter(Boolean);
+      const ok: string[] = [];
+      const nowIso = new Date().toISOString();
+
+      setMemoire(prevMemo => {
+        const memoCopy = { ...prevMemo };
+        for (const part of parts) {
+          const rq = extraireQuantificateur(part);
+          if (rq) {
+            handleAddRule(rq.quant, rq.sujet, rq.prop, 0.85);
+            ok.push(`${rq.quant} ${rq.sujet} -> ${rq.prop}`);
+            continue;
+          }
+          if (part.includes('=')) {
+            const [sRaw, dRaw] = part.split('=').map(x => x.trim().toLowerCase());
+            if (sRaw && dRaw) {
+              const current = memoCopy[sRaw] ? [...memoCopy[sRaw]] : [];
+              current.unshift({
+                def: dRaw,
+                poids: 0.85,
+                hits: 1,
+                source: 'manuel',
+                last_used: nowIso,
+                created: nowIso,
+              });
+              memoCopy[sRaw] = current;
+              ok.push(sRaw);
+            }
+          }
+        }
+        return memoCopy;
+      });
+
+      addBotMessage(
+        ok.length > 0
+          ? `Notes enregistrées en masse (${ok.length}) :\n${ok.join(', ')}`
+          : 'Aucune note valide trouvée. Sépare tes phrases par des points.',
+        { source: 'local_memoire' }
+      );
+      return;
+    }
+
+    // 16. Single "retiens:"
+    if (msgLower.startsWith('retiens:')) {
+      const content = text.split(':')[1]?.trim();
+      if (!content) {
+        addBotMessage('Format : retiens: sujet = définition');
+        return;
+      }
+
+      // Check quantifier rule
+      const rq = extraireQuantificateur(content);
+      if (rq) {
+        handleAddRule(rq.quant, rq.sujet, rq.prop, 0.85);
+        addBotMessage(`Règle enregistrée : ${rq.quant} les ${rq.sujet}s ${rq.prop} (certitude 85%)`, { source: 'regle' }, 0.85);
+        return;
+      }
+
+      // Subject = Def1 | Def2
+      if (content.includes('=')) {
+        const [sujetRaw, defsRaw] = content.split('=').map(s => s.trim());
+        const s = sujetRaw.toLowerCase();
+        const defsList = defsRaw.split('|').map(d => d.trim()).filter(Boolean);
+        if (s && defsList.length > 0) {
+          const nowIso = new Date().toISOString();
+          setMemoire(prev => {
+            const copy = { ...prev };
+            const current = copy[s] ? [...copy[s]] : [];
+            for (const d of defsList) {
+              current.unshift({
+                def: d,
+                poids: 0.85,
+                hits: 1,
+                source: 'manuel',
+                last_used: nowIso,
+                created: nowIso,
+              });
+            }
+            copy[s] = current;
+            return copy;
+          });
+          setContexte(prev => [...prev, s]);
+          addBotMessage(`Fait retenu pour "${s}" : ${defsList.join(' | ')} (poids 0.85)`, { source: 'local_memoire', sujet: s }, 0.85);
+          return;
+        }
+      }
+      addBotMessage('Format requis : retiens: sujet = définition (ou plusieurs avec: retiens: sujet = def1 | def2)');
+      return;
+    }
+
+    // 17. Quantifiers direct input: "tous les oiseaux ont des plumes"
+    const directRq = extraireQuantificateur(text);
+    if (directRq && (msgClean.startsWith('tous') || msgClean.startsWith('aucun') || msgClean.startsWith('certains') || msgClean.startsWith('chaque'))) {
+      handleAddRule(directRq.quant, directRq.sujet, directRq.prop, 0.85);
+      addBotMessage(`Règle généralisée enregistrée : ${directRq.quant} les ${directRq.sujet}s ${directRq.prop}`, { source: 'regle' }, 0.85);
+      return;
+    }
+
+    // 18. Listing commands
+    if (msgLower.startsWith('lister:')) {
+      const target = msgLower.split(':')[1]?.trim();
+      if (target === 'memoire') {
+        const keys = Object.keys(memoire).sort();
+        addBotMessage(`Mémoire active (${keys.length} sujets) :\n${keys.slice(0, 35).join(', ')}${keys.length > 35 ? '...' : ''}`, { source: 'local_memoire' });
+        return;
+      }
+      if (target === 'regles') {
+        const lines: string[] = [];
+        for (const [s, list] of Object.entries(regles)) {
+          for (const r of list) {
+            lines.push(`${r.quant} les ${s}s ${r.prop}`);
+          }
+        }
+        addBotMessage(`Règles générales (${lines.length}) :\n${lines.join('\n') || 'Aucune règle'}`, { source: 'regle' });
+        return;
+      }
+      if (target === 'poids') {
+        const lines: string[] = [];
+        for (const [k, list] of Object.entries(memoire)) {
+          for (const m of list.slice(0, 2)) {
+            lines.push(`${k} = ${m.def} [poids ${m.poids.toFixed(2)}, hits ${m.hits}]`);
+          }
+        }
+        addBotMessage(`Coefficients de poids :\n${lines.slice(0, 15).join('\n')}`, { source: 'local_memoire' });
+        return;
+      }
+      if (target === 'incertains') {
+        const lines: string[] = [];
+        for (const [k, list] of Object.entries(memoire)) {
+          for (const m of list) {
+            if (m.poids < 0.6) {
+              lines.push(`${k} = ${m.def} [poids ${m.poids.toFixed(2)}]`);
+            }
+          }
+        }
+        addBotMessage(
+          lines.length > 0 ? `Concepts incertains :\n${lines.join('\n')}` : 'Aucun concept incertain (tous >= 60%).',
+          { source: 'local_memoire' }
+        );
+        return;
+      }
+      if (target === 'idees') {
+        addBotMessage(
+          dernieresIdees.length > 0
+            ? `Dernières idées générées :\n${dernieresIdees.map((l, i) => `${i + 1}. ${l}`).join('\n')}`
+            : 'Aucune idée archivée dans cette session.',
+          { source: 'systeme' }
+        );
+        return;
+      }
+      if (target === 'groq') {
+        addBotMessage(
+          groqLog.length > 0
+            ? `Derniers échanges LLM :\n${groqLog.slice(0, 5).map(l => `[${l.time}] Q: ${l.q}\nR: ${l.r.slice(0, 80)}...`).join('\n\n')}`
+            : 'Aucun échange LLM enregistré.',
+          { source: 'systeme' }
+        );
+        return;
+      }
+      if (target === 'stats') {
+        addBotMessage(
+          `Statistiques : ${Object.keys(memoire).length} concepts · ${Object.values(regles).reduce((a, b) => a + b.length, 0)} règles · ${Object.keys(liens).length} liaisons taxonomiques · Contexte: ${contexte.join(', ') || 'vide'}`
+        );
+        return;
+      }
+    }
+
+    // 19. Greetings
+    const salutation = estSalutation(text);
+    if (salutation) {
+      addBotMessage(repondreSalutation(salutation), { source: 'systeme' });
+      return;
+    }
+
+    // 20. Emotions & states
+    const etat = detecterEtat(text);
+    if (etat) {
+      addBotMessage(repondreEtat(etat), { source: 'systeme' });
+      return;
+    }
+
+    // 21. Reinforcement confirmations ("oui", "c'est ça", "non ce n'est pas ça")
+    if (['oui', "c'est ca", 'exact', 'parfait', 'merci'].includes(msgClean)) {
+      if (contexte.length > 0) {
+        const last = contexte[contexte.length - 1];
+        handleAdjustWeight(last, 0.1);
+        return;
+      }
+    }
+    if (['non', 'pas ca', 'faux', 'erreur'].includes(msgClean)) {
+      if (contexte.length > 0) {
+        const last = contexte[contexte.length - 1];
+        handleAdjustWeight(last, -0.15);
+        return;
+      }
+    }
+
+    // 22. Causal Questions: "pourquoi le moineau vole ?" or "pourquoi l'aigle respire ?"
+    if (msgClean.includes('pourquoi')) {
+      const whyAnswer = repondrePourquoi(text, memoire, regles, liens, synonymes);
+      if (whyAnswer) {
+        const s = extraireX(text, memoire, regles, synonymes, contexte);
+        if (s) setContexte(prev => [...prev, s]);
+        addBotMessage(whyAnswer, { source: 'deduction', sujet: s || undefined });
+        return;
+      }
+    }
+
+    // 23. Question-Réponse mémorisée (recherche précise par combinaison de mots-clés de la question)
+    const qaMatch = trouverQuestionReponse(text, memoire);
+    if (qaMatch) {
+      qaMatch.entry.hits += 1;
+      qaMatch.entry.last_used = new Date().toISOString();
+      setMemoire({ ...memoire });
+      setContexte(prev => [...prev, qaMatch.sujet]);
+      addBotMessage(
+        qaMatch.entry.def,
+        { source: 'local_memoire', sujet: qaMatch.sujet },
+        qaMatch.entry.poids
+      );
+      return;
+    }
+
+    // 24. Demande de Définition de Concept ("c'est quoi le moineau ?", "parle-moi de python", "moineau")
+    const defCheck = estRequeteDefinition(text);
+    if (defCheck.estDef && defCheck.concept) {
+      const candX = corriger(defCheck.concept, memoire, regles, synonymes) || defCheck.concept;
+      const localDef = phraseDef(candX, text, memoire, regles, liens, synonymes);
+      if (localDef) {
+        setContexte(prev => [...prev, candX]);
+        const bestEntry = memoire[candX]?.[0];
+        addBotMessage(localDef, { source: 'local_memoire', sujet: candX }, bestEntry?.poids || 0.85);
+        return;
+      }
+    }
+
+    // 25. Recherche Floue uniquement sur requêtes courtes (1 à 3 mots max)
+    const wordsCount = text.trim().split(/\s+/).length;
+    if (wordsCount <= 3) {
+      const flouMatch = rechercherFlou(text, memoire, regles, 0.72);
+      if (flouMatch) {
+        const flouDef = phraseDef(flouMatch, text, memoire, regles, liens, synonymes);
+        if (flouDef) {
+          setContexte(prev => [...prev, flouMatch]);
+          addBotMessage(`Tu voulais sans doute parler de "${flouMatch}" : ${flouDef}`, { source: 'local_memoire', sujet: flouMatch });
+          return;
+        }
+      }
+    }
+
+    // 26. Fallback en mode local_only
+    if (config.provider === 'local_only') {
+      const candX = extraireX(text, memoire, regles, synonymes, contexte);
+      addBotMessage(
+        candX
+          ? `Je n'ai pas encore d'information sur "${candX}" dans ma mémoire locale. Enseigne-le moi avec: retiens: ${candX} = ...`
+          : "Je n'ai pas compris en mode local. Tu peux m'enseigner ce fait avec: retiens: sujet = définition",
+        { source: 'systeme' }
+      );
+      return;
+    }
+
+    // Call LLM
+    setIsThinking(true);
+    try {
+      const historyFormatted = messages.slice(-5).map(m => ({
+        role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
+        content: m.text,
+      }));
+
+      const res = await apiService.chat({
+        prompt: text,
+        history: historyFormatted,
+        provider: config.provider,
+        groqModel: config.groqModel || 'openai/gpt-oss-120b',
+        systemPrompt: config.systemPrompt,
+      });
+
+      const responseText = res.text;
+
+      addBotMessage(
+        responseText,
+        { source: res.provider === 'groq' ? 'groq' : 'gemini' },
+        0.8
+      );
+
+      setGroqLog(prev => [{ q: text, r: responseText, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
+
+      // Apprentissage automatique du couple Question + Réponse (Q&A)
+      if (config.autoLearnFromLLM) {
+        const learned = apprendreDeLLM(text, responseText, memoire, res.provider === 'groq' ? 'groq' : 'gemini');
+        if (learned) {
+          setMemoire({ ...memoire });
+          setContexte(prev => [...prev, learned.sujet]);
+        }
+      }
+    } catch (err: any) {
+      addBotMessage(`Erreur de connexion : ${err.message}`, { source: 'systeme' });
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 h-full w-full max-h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
+      {/* Top Header - Fixé en haut, toujours visible */}
+      <Header
+        config={config}
+        onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
+        sessions={sessions}
+        onSelectSession={handleSelectSession}
+        onOpenSettings={() => {
+          if (isAdmin) setIsSettingsModalOpen(true);
+        }}
+        onOpenActionsMenu={() => {
+          if (isAdmin) setIsActionsModalOpen(true);
+        }}
+        conceptsCount={Object.keys(memoire).length}
+        rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
+        isAdmin={isAdmin}
+      />
+
+      {/* Main View Workspace - flex-1 min-h-0 overflow-hidden */}
+      <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
+        {activeTab === 'chat' && (
+          <ChatTab
+            messages={messages}
+            isThinking={isThinking}
+            onSendMessage={handleProcessUserMessage}
+            onClearMessages={() => setMessages([])}
+            onAdjustWeight={handleAdjustWeight}
+            soundEnabled={config.soundEnabled}
+            activeSession={config.activeSession}
+            prefilledText={chatPrefill}
+            onClearPrefill={() => setChatPrefill('')}
+            onOpenActions={() => {
+              if (isAdmin) setIsActionsModalOpen(true);
+            }}
+            isAdmin={isAdmin}
+          />
+        )}
+
+        {activeTab === 'graph' && isAdmin && (
+          <KnowledgeGraphTab
+            memoire={memoire}
+            regles={regles}
+            liens={liens}
+            synonymes={synonymes}
+            onAddDefinition={(s, d) => {
+              const nowIso = new Date().toISOString();
+              setMemoire(prev => {
+                const copy = { ...prev };
+                const current = copy[s] ? [...copy[s]] : [];
+                current.unshift({
+                  def: d,
+                  poids: 0.85,
+                  hits: 1,
+                  source: 'manuel',
+                  last_used: nowIso,
+                  created: nowIso,
+                });
+                copy[s] = current;
+                return copy;
+              });
+            }}
+            onDeleteConcept={s => {
+              setMemoire(prev => {
+                const copy = { ...prev };
+                delete copy[s];
+                return copy;
+              });
+            }}
+            onAdjustWeight={handleAdjustWeight}
+            onAdjustHits={handleAdjustHits}
+            onAddLink={handleAddLink}
+            onDeleteLink={handleDeleteLink}
+            onAskQuestionAbout={s => {
+              setActiveTab('chat');
+              handleProcessUserMessage(`c'est quoi ${s} ?`);
+            }}
+          />
+        )}
+
+        {activeTab === 'rules' && isAdmin && (
+          <RulesTab
+            memoire={memoire}
+            regles={regles}
+            liens={liens}
+            synonymes={synonymes}
+            onAddRule={handleAddRule}
+            onDeleteRule={handleDeleteRule}
+          />
+        )}
+
+        {activeTab === 'tools' && (
+          <ToolsTab
+            config={config}
+            onSaveToMemory={(sujet, def) => {
+              const nowIso = new Date().toISOString();
+              setMemoire(prev => ({
+                ...prev,
+                [sujet]: [
+                  {
+                    def,
+                    poids: 0.85,
+                    hits: 1,
+                    source: 'auto',
+                    last_used: nowIso,
+                    created: nowIso,
+                  },
+                ],
+              }));
+            }}
+          />
+        )}
+
+        {activeTab === 'sessions' && isAdmin && (
+          <SessionsTab
+            sessions={sessions}
+            activeSession={config.activeSession}
+            onSelectSession={handleSelectSession}
+            onCreateSession={handleCreateSession}
+            memoire={memoire}
+            regles={regles}
+            liens={liens}
+            synonymes={synonymes}
+            onUpdateMemory={(newM, newR) => {
+              setMemoire(newM);
+              setRegles(newR);
+            }}
+            onImportFullBackup={data => {
+              setMemoire(data.memoire);
+              setRegles(data.regles);
+              setLiens(data.liens);
+            }}
+            groqApiKey={config.groqApiKey}
+            groqModel={config.groqModel}
+          />
+        )}
+      </main>
+
+      {/* Bottom Navigation Tabs - Public shows only Discussion & Atelier Texte */}
+      <nav className="h-14 sm:h-16 shrink-0 flex-shrink-0 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
+        <button
+          onClick={() => setActiveTab('chat')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+            activeTab === 'chat'
+              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+          <span className="text-[10px] sm:text-xs font-semibold">Discussion</span>
+        </button>
+
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('graph')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'graph'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
+          </button>
+        )}
+
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('rules')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'rules'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
+          </button>
+        )}
+
+        <button
+          onClick={() => setActiveTab('tools')}
+          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+            activeTab === 'tools'
+              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <Wrench className="w-4 h-4 sm:w-5 sm:h-5" />
+          <span className="text-[10px] sm:text-xs font-semibold">Atelier Texte</span>
+        </button>
+
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('sessions')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'sessions'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
+          </button>
+        )}
+      </nav>
+
+      {/* Action Command Menu Modal (Admin Only) */}
+      {isAdmin && (
+        <ActionMenuModal
+          isOpen={isActionsModalOpen}
+          onClose={() => setIsActionsModalOpen(false)}
+          onSelectAction={(cmd, immediate) => {
+            if (immediate) {
+              handleProcessUserMessage(cmd);
+            } else {
+              setActiveTab('chat');
+              setChatPrefill(cmd);
+            }
+          }}
+        />
+      )}
+
+      {/* Settings Modal (Admin Only) */}
+      {isAdmin && (
+        <SettingsModal
+          isOpen={isSettingsModalOpen}
+          onClose={() => setIsSettingsModalOpen(false)}
+          config={config}
+          onSaveConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
+        />
+      )}
+    </div>
+  );
+}
+
+```
+
+---
+
+## 📄 Fichier : `src/index.css`
 
 ```css
 @import "tailwindcss";
 
 @layer base {
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
@@ -241,20 +2847,7 @@ export default defineConfig(() => {
 
 ---
 
-### Fichier : `src/main.tsx`
-
-```typescript
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import './index.css';
-
-createRoot(document.getElementById('root')!).render(<App />);
-
-```
-
----
-
-### Fichier : `src/types/kaderbot.ts`
+## 📄 Fichier : `src/types/kaderbot.ts`
 
 ```typescript
 export interface MemoryEntry {
@@ -344,7 +2937,7 @@ export interface AppConfig {
 
 ---
 
-### Fichier : `src/core/cognitiveEngine.ts`
+## 📄 Fichier : `src/core/cognitiveEngine.ts`
 
 ```typescript
 import {
@@ -1421,7 +4014,7 @@ export const SEED_LINKS: LinksStore = {
 
 ---
 
-### Fichier : `src/services/apiService.ts`
+## 📄 Fichier : `src/services/apiService.ts`
 
 ```typescript
 import { MemoryStore, RulesStore, LinksStore, SynonymsStore } from '../types/kaderbot';
@@ -1430,8 +4023,6 @@ export interface ChatApiParams {
   prompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   provider: 'gemini' | 'groq' | 'local_only';
-  geminiApiKey?: string;
-  groqApiKey?: string;
   groqModel?: string;
   systemPrompt?: string;
 }
@@ -1446,10 +4037,18 @@ export interface ChatApiResponse {
 
 export const apiService = {
   async chat(params: ChatApiParams): Promise<ChatApiResponse> {
+    // Strip any sensitive keys - Server exclusively uses process.env keys
+    const { prompt, history, provider, groqModel, systemPrompt } = params as any;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        prompt,
+        history,
+        provider,
+        groqModel,
+        systemPrompt,
+      }),
     });
 
     if (!res.ok) {
@@ -1461,25 +4060,25 @@ export const apiService = {
   },
 
   async testGroqConnection(
-    apiKey: string,
+    apiKey?: string,
     model = 'openai/gpt-oss-120b'
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
     const res = await fetch('/api/groq/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey, model }),
+      body: JSON.stringify({ apiKey: apiKey?.trim() || undefined, model }),
     });
 
     return await res.json();
   },
 
   async testGeminiConnection(
-    apiKey: string
+    apiKey?: string
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
     const res = await fetch('/api/gemini/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify({ apiKey: apiKey?.trim() || undefined }),
     });
 
     return await res.json();
@@ -1491,14 +4090,20 @@ export const apiService = {
     style: string;
     styleDesc?: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { theme, count, style, styleDesc, provider, groqModel } = params as any;
     const res = await fetch('/api/idees', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        theme,
+        count,
+        style,
+        styleDesc,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -1514,14 +4119,18 @@ export const apiService = {
     text: string;
     targetLang: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { text, targetLang, provider, groqModel } = params as any;
     const res = await fetch('/api/traduis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        text,
+        targetLang,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -1536,14 +4145,17 @@ export const apiService = {
   async corriger(params: {
     text: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { text, provider, groqModel } = params as any;
     const res = await fetch('/api/corrige', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        text,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -1558,14 +4170,17 @@ export const apiService = {
   async resumer(params: {
     text: string;
     provider: string;
-    geminiApiKey?: string;
-    groqApiKey?: string;
     groqModel?: string;
   }): Promise<string> {
+    const { text, provider, groqModel } = params as any;
     const res = await fetch('/api/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        text,
+        provider,
+        groqModel,
+      }),
     });
 
     if (!res.ok) {
@@ -1627,1525 +4242,7 @@ export const apiService = {
 
 ---
 
-### Fichier : `src/App.tsx`
-
-```typescript
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  MessageSquare,
-  Brain,
-  Scale,
-  Wrench,
-  FolderTree,
-} from 'lucide-react';
-
-import {
-  AppConfig,
-  ChatMessage,
-  LinksStore,
-  MemoryStore,
-  RulesStore,
-  SynonymsStore,
-} from './types/kaderbot';
-import {
-  SEED_MEMORY,
-  SEED_RULES,
-  SEED_LINKS,
-  sansAccent,
-  estSalutation,
-  repondreSalutation,
-  detecterEtat,
-  repondreEtat,
-  extraireX,
-  extraireQuantificateur,
-  phraseDef,
-  repondrePourquoi,
-  deduireChaine,
-  deduireGeneralisation,
-  construirePhraseGeneralisation,
-  apprendreDeLLM,
-  rechercherFlou,
-  naviguerLiens,
-  trouverLiensCommuns,
-  corriger,
-  trouverQuestionReponse,
-  estRequeteDefinition,
-  nettoyerMemoirePolluee,
-} from './core/cognitiveEngine';
-import { Header } from './components/Header';
-import { ChatTab } from './components/ChatTab';
-import { KnowledgeGraphTab } from './components/KnowledgeGraphTab';
-import { RulesTab } from './components/RulesTab';
-import { ToolsTab } from './components/ToolsTab';
-import { SessionsTab } from './components/SessionsTab';
-import { ActionMenuModal } from './components/ActionMenuModal';
-import { SettingsModal } from './components/SettingsModal';
-import { apiService } from './services/apiService';
-
-export default function App() {
-  // Admin detection via URL (?admin=true)
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('admin') === 'true';
-  });
-
-  const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
-
-  // Keep admin status synced on URL changes
-  useEffect(() => {
-    const checkAdmin = () => {
-      const params = new URLSearchParams(window.location.search);
-      setIsAdmin(params.get('admin') === 'true');
-    };
-    window.addEventListener('popstate', checkAdmin);
-    return () => window.removeEventListener('popstate', checkAdmin);
-  }, []);
-
-  // When not in admin mode, restrict active tab to 'chat' or 'tools'
-  useEffect(() => {
-    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
-      setActiveTab('chat');
-    }
-  }, [isAdmin, activeTab]);
-
-  // Modals state
-  const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-
-  // Configuration
-  const [config, setConfig] = useState<AppConfig>(() => {
-    const saved = localStorage.getItem('kaderbot_config');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.groqModel === 'llama-3.3-70b-versatile' || !parsed.groqModel) {
-          parsed.groqModel = 'openai/gpt-oss-120b';
-        }
-        return parsed;
-      } catch {}
-    }
-    return {
-      provider: 'gemini',
-      geminiApiKey: '',
-      groqApiKey: '',
-      groqModel: 'openai/gpt-oss-120b',
-      geminiModel: 'gemini-3.8-flash',
-      systemPrompt:
-        'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
-        'Tu réponds toujours en français, en 2 à 4 phrases maximum. ' +
-        'Tu ne fais pas de listes à puces sauf si on te le demande. ' +
-        'Tu es chaleureux mais pas excessif.',
-      activeSession: 'defaut',
-      soundEnabled: false,
-      autoLearnFromLLM: true,
-    };
-  });
-
-  // Sessions state
-  const [sessions, setSessions] = useState<string[]>(() => {
-    const saved = localStorage.getItem('kaderbot_sessions');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return ['defaut'];
-  });
-
-  // Knowledge base state for active session
-  const [memoire, setMemoire] = useState<MemoryStore>(() => {
-    const saved = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        nettoyerMemoirePolluee(parsed);
-        return parsed;
-      } catch {}
-    }
-    return { ...SEED_MEMORY };
-  });
-
-  const [regles, setRegles] = useState<RulesStore>(() => {
-    const saved = localStorage.getItem(`kaderbot_regles_${config.activeSession}`);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return SEED_RULES;
-  });
-
-  const [liens, setLiens] = useState<LinksStore>(() => {
-    const saved = localStorage.getItem(`kaderbot_liens_${config.activeSession}`);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return SEED_LINKS;
-  });
-
-  const [synonymes, setSynonymes] = useState<SynonymsStore>(() => {
-    const saved = localStorage.getItem(`kaderbot_synonymes_${config.activeSession}`);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return {
-      ordi: 'ordinateur',
-      bagnole: 'voiture',
-      auto: 'voiture',
-    };
-  });
-
-  // Pronoun context history
-  const [contexte, setContexte] = useState<string[]>([]);
-  const [chatPrefill, setChatPrefill] = useState('');
-  const [dernieresIdees, setDernieresIdees] = useState<string[]>([]);
-  const [groqLog, setGroqLog] = useState<Array<{ q: string; r: string; time: string }>>([]);
-
-  // Messages list
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const hour = new Date().getHours();
-    let welcome = 'Bonjour, prêt pour une nouvelle session inspirante ?';
-    if (hour >= 12 && hour < 18) {
-      welcome = "Bon après-midi, je suis là pour t'aider.";
-    } else if (hour >= 18 || hour < 6) {
-      welcome = 'Bonsoir, envie de discuter ou d’apprendre ensemble ?';
-    }
-
-    return [
-      {
-        id: 'welcome',
-        author: 'KB',
-        text: `${welcome} Je suis KADERBOT NOVA V14. Pose-moi une question, enseigne-moi un fait avec "retiens: ...", ou explore les déductions logiques.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        meta: { source: 'systeme' },
-      },
-    ];
-  });
-
-  const [isThinking, setIsThinking] = useState(false);
-
-  // Server Memory Synchronization (Requirement 4: Share data live between Admin and Public)
-  const lastServerTimestamp = useRef<string>('');
-  const isSyncingRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    let isMounted = true;
-    const fetchSharedMemory = async () => {
-      if (isSyncingRef.current) return;
-      try {
-        const remote = await apiService.loadMemoryFromServer();
-        if (remote && isMounted) {
-          const remoteUpdated = (remote as any).updatedAt || '';
-          if (remoteUpdated && remoteUpdated === lastServerTimestamp.current) {
-            return;
-          }
-          if (remote.memoire && Object.keys(remote.memoire).length > 0) {
-            setMemoire(remote.memoire);
-          }
-          if (remote.regles && Object.keys(remote.regles).length > 0) {
-            setRegles(remote.regles);
-          }
-          if (remote.liens && Object.keys(remote.liens).length > 0) {
-            setLiens(remote.liens);
-          }
-          if (remote.synonymes && Object.keys(remote.synonymes).length > 0) {
-            setSynonymes(remote.synonymes);
-          }
-          if (remote.sessions && remote.sessions.length > 0) {
-            setSessions(remote.sessions);
-          }
-          if (remoteUpdated) {
-            lastServerTimestamp.current = remoteUpdated;
-          }
-        }
-      } catch (err) {
-        // Silently keep local state if offline
-      }
-    };
-
-    fetchSharedMemory();
-    const interval = setInterval(fetchSharedMemory, 5000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-  // Sync to localStorage & Server disk
-  useEffect(() => {
-    localStorage.setItem('kaderbot_config', JSON.stringify(config));
-  }, [config]);
-
-  useEffect(() => {
-    localStorage.setItem('kaderbot_sessions', JSON.stringify(sessions));
-  }, [sessions]);
-
-  useEffect(() => {
-    localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(memoire));
-    localStorage.setItem(`kaderbot_regles_${config.activeSession}`, JSON.stringify(regles));
-    localStorage.setItem(`kaderbot_liens_${config.activeSession}`, JSON.stringify(liens));
-    localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(synonymes));
-
-    // Save to server backend so updates made in Admin mode are shared to all users
-    isSyncingRef.current = true;
-    apiService
-      .saveMemoryToServer({
-        memoire,
-        regles,
-        liens,
-        synonymes,
-        sessions,
-      })
-      .then(res => {
-        if (res && res.savedAt) {
-          lastServerTimestamp.current = res.savedAt;
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        isSyncingRef.current = false;
-      });
-  }, [memoire, regles, liens, synonymes, config.activeSession, sessions]);
-
-  // Adjust hits on specific concept definition
-  const handleAdjustHits = (sujet: string, entryIdx: number, delta: number) => {
-    setMemoire(prev => {
-      const list = prev[sujet];
-      if (!list || !list[entryIdx]) return prev;
-      const updated = [...list];
-      const newHits = Math.max(0, (updated[entryIdx].hits || 0) + delta);
-      updated[entryIdx] = { ...updated[entryIdx], hits: newHits };
-      return { ...prev, [sujet]: updated };
-    });
-  };
-
-  // Handle switching sessions
-  const handleSelectSession = (newSession: string) => {
-    if (newSession === config.activeSession) return;
-    setConfig(prev => ({ ...prev, activeSession: newSession }));
-
-    const savedMemo = localStorage.getItem(`kaderbot_memoire_${newSession}`);
-    const savedRegles = localStorage.getItem(`kaderbot_regles_${newSession}`);
-    const savedLiens = localStorage.getItem(`kaderbot_liens_${newSession}`);
-
-    setMemoire(savedMemo ? JSON.parse(savedMemo) : SEED_MEMORY);
-    setRegles(savedRegles ? JSON.parse(savedRegles) : SEED_RULES);
-    setLiens(savedLiens ? JSON.parse(savedLiens) : SEED_LINKS);
-
-    addBotMessage(`Session chargée : ${newSession}`);
-  };
-
-  const handleCreateSession = (name: string) => {
-    if (sessions.includes(name)) return;
-    const updated = [...sessions, name];
-    setSessions(updated);
-    handleSelectSession(name);
-  };
-
-  const addBotMessage = (
-    text: string,
-    meta?: ChatMessage['meta'],
-    confidence?: number
-  ) => {
-    const newMsg: ChatMessage = {
-      id: `kb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      author: 'KB',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      confidence,
-      meta,
-    };
-    setMessages(prev => [...prev, newMsg]);
-
-    // Audio narration if enabled
-    if (config.soundEnabled && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'fr-FR';
-      window.speechSynthesis.speak(u);
-    }
-  };
-
-  // Adjust cognitive weight
-  const handleAdjustWeight = (sujet: string, delta: number) => {
-    setMemoire(prev => {
-      const copy = { ...prev };
-      if (!copy[sujet] || copy[sujet].length === 0) return prev;
-      const list = copy[sujet].map((entry, idx) => {
-        if (idx === 0) {
-          const newWeight = Math.max(0.1, Math.min(1.0, entry.poids + delta));
-          return {
-            ...entry,
-            poids: Number(newWeight.toFixed(2)),
-            hits: entry.hits + 1,
-            last_used: new Date().toISOString(),
-          };
-        }
-        return entry;
-      });
-      copy[sujet] = list;
-      return copy;
-    });
-
-    const isPositive = delta > 0;
-    addBotMessage(
-      isPositive
-        ? `Parfait ! J'ai renforcé ma certitude sur "${sujet}" (+${delta}).`
-        : `Compris ! J'ai baissé mon indice de confiance sur "${sujet}" (${delta}).`
-    );
-  };
-
-  // Add rule helper
-  const handleAddRule = (
-    quant: 'tous' | 'aucun' | 'certains',
-    sujet: string,
-    prop: string,
-    poids = 0.85
-  ) => {
-    const s = sujet.toLowerCase().trim();
-    const p = prop.toLowerCase().trim();
-    setRegles(prev => {
-      const copy = { ...prev };
-      const current = copy[s] ? [...copy[s]] : [];
-      const existing = current.find(r => r.quant === quant && r.prop === p);
-      if (existing) {
-        existing.poids = Math.min(1.0, existing.poids + 0.1);
-        existing.hits += 1;
-        existing.last_used = new Date().toISOString();
-      } else {
-        current.push({
-          quant,
-          prop: p,
-          poids,
-          hits: 1,
-          last_used: new Date().toISOString(),
-          created: new Date().toISOString(),
-        });
-      }
-      copy[s] = current;
-      return copy;
-    });
-  };
-
-  const handleDeleteRule = (sujet: string, prop: string) => {
-    setRegles(prev => {
-      const copy = { ...prev };
-      if (!copy[sujet]) return prev;
-      copy[sujet] = copy[sujet].filter(r => r.prop !== prop);
-      if (copy[sujet].length === 0) delete copy[sujet];
-      return copy;
-    });
-  };
-
-  const handleAddLink = (source: string, target: string) => {
-    const s = source.toLowerCase().trim();
-    const t = target.toLowerCase().trim();
-    if (!s || !t || s === t) return;
-    setLiens(prev => {
-      const copy = { ...prev };
-      const current = copy[s] ? [...copy[s]] : [];
-      if (!current.includes(t)) {
-        current.push(t);
-        copy[s] = current;
-      }
-      return copy;
-    });
-  };
-
-  const handleDeleteLink = (source: string, target: string) => {
-    setLiens(prev => {
-      const copy = { ...prev };
-      if (!copy[source]) return prev;
-      copy[source] = copy[source].filter(item => item !== target);
-      if (copy[source].length === 0) delete copy[source];
-      return copy;
-    });
-  };
-
-  // CORE COGNITIVE NLP DISPATCHER
-  // Faithfully executing every capability from the user's Python code
-  const handleProcessUserMessage = async (rawMessage: string) => {
-    const text = rawMessage.trim();
-    if (!text) return;
-
-    // Add user message
-    const userMsg: ChatMessage = {
-      id: `user_${Date.now()}`,
-      author: 'Toi',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages(prev => [...prev, userMsg]);
-
-    const msgLower = text.toLowerCase();
-    const msgClean = sansAccent(msgLower);
-
-    // 1. Context commands
-    if (msgLower === 'reset contexte' || msgLower === 'vider contexte') {
-      setContexte([]);
-      addBotMessage('Contexte cognitif réinitialisé.', { source: 'systeme' });
-      return;
-    }
-
-    if (msgLower === 'contexte') {
-      if (contexte.length === 0) {
-        addBotMessage('Aucun échange en contexte actuellement.', { source: 'systeme' });
-      } else {
-        addBotMessage(`Contexte actuel (${contexte.length} concepts récents) : ${contexte.join(' → ')}`, { source: 'systeme' });
-      }
-      return;
-    }
-
-    // 2. Groq toggle & status commands
-    if (msgLower === 'groq on') {
-      setConfig(prev => ({ ...prev, provider: 'groq' }));
-      addBotMessage('Moteur Groq activé.', { source: 'systeme' });
-      return;
-    }
-
-    if (msgLower === 'groq off') {
-      setConfig(prev => ({ ...prev, provider: 'local_only' }));
-      addBotMessage('Mode 100% local activé (Groq désactivé).', { source: 'systeme' });
-      return;
-    }
-
-    if (msgLower === 'groq statut') {
-      addBotMessage(
-        `Statut IA :\nMoteur actif : ${config.provider}\nModèle : ${config.provider === 'groq' ? config.groqModel : config.geminiModel}\nApprentissage auto : ${config.autoLearnFromLLM ? 'Activé' : 'Désactivé'}`
-      );
-      return;
-    }
-
-    // 3. Direct Groq question
-    if (msgLower.startsWith('groq:')) {
-      const q = text.slice(5).trim();
-      if (!q) {
-        addBotMessage('Format : groq: ta question');
-        return;
-      }
-      setIsThinking(true);
-      try {
-        const res = await apiService.chat({
-          prompt: q,
-          history: messages.slice(-5).map(m => ({
-            role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
-            content: m.text,
-          })),
-          provider: 'groq',
-          geminiApiKey: config.geminiApiKey,
-          groqApiKey: config.groqApiKey,
-          groqModel: config.groqModel || 'openai/gpt-oss-120b',
-          systemPrompt: config.systemPrompt,
-        });
-        addBotMessage(res.text, { source: res.provider === 'gemini' ? 'gemini' : 'groq' });
-        setGroqLog(prev => [{ q, r: res.text, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
-        if (config.autoLearnFromLLM) {
-          const learned = apprendreDeLLM(q, res.text, memoire, 'groq');
-          if (learned) {
-            setMemoire({ ...memoire });
-            setContexte(prev => [...prev, learned.sujet]);
-          }
-        }
-      } catch (err: any) {
-        addBotMessage(`(Groq) Erreur : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 4. Session commands
-    if (msgLower === 'session' || msgLower === 'session active') {
-      addBotMessage(
-        `Session active : ${config.activeSession}\nSujets en mémoire : ${Object.keys(memoire).length}\nRègles actives : ${Object.values(regles).reduce((acc, l) => acc + l.length, 0)}`
-      );
-      return;
-    }
-
-    if (msgLower === 'sessions' || msgLower === 'lister: sessions') {
-      addBotMessage(`Sessions disponibles :\n${sessions.map(s => ` - ${s}${s === config.activeSession ? ' (active)' : ''}`).join('\n')}\n\nPour changer : écris "session <nom>"`);
-      return;
-    }
-
-    if (msgLower.startsWith('session ')) {
-      const newName = text.split(' ')[1]?.trim().toLowerCase();
-      if (newName) {
-        handleCreateSession(newName);
-        return;
-      }
-    }
-
-    // 5. Taxonomy & Link commands: lie:, delie:, liens:, cousins:
-    if (msgLower.startsWith('lie:') || msgLower.startsWith('lie ')) {
-      const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(3).trim();
-      if (rest.includes('->')) {
-        const [source, target] = rest.split('->').map(s => s.trim().toLowerCase());
-        handleAddLink(source, target);
-        addBotMessage(`Lien cognitif établi : ${source} -> ${target}`, { source: 'local_memoire' });
-        return;
-      }
-      addBotMessage('Format requis : lie: source -> cible (ex: lie: moineau -> oiseau)');
-      return;
-    }
-
-    if (msgLower.startsWith('delie:') || msgLower.startsWith('delie ')) {
-      const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(5).trim();
-      if (rest.includes('->')) {
-        const [source, target] = rest.split('->').map(s => s.trim().toLowerCase());
-        handleDeleteLink(source, target);
-        addBotMessage(`Lien supprimé : ${source} -> ${target}`, { source: 'local_memoire' });
-        return;
-      }
-      addBotMessage('Format requis : delie: source -> cible');
-      return;
-    }
-
-    if (msgLower.startsWith('liens:') || msgLower.startsWith('liens ')) {
-      const target = text.includes(':') ? text.split(':')[1].trim().toLowerCase() : text.slice(5).trim().toLowerCase();
-      const parents = liens[target] || [];
-      const children = Object.keys(liens).filter(k => (liens[k] || []).includes(target));
-      const chain = naviguerLiens(target, liens, 8);
-      let rep = `Liens pour "${target}" :\nParents : ${parents.join(', ') || 'aucun'}\nEnfants : ${children.join(', ') || 'aucun'}`;
-      if (chain.length > 1) {
-        rep += `\nChaîne complète : ${chain.join(' → ')}`;
-      }
-      addBotMessage(rep, { source: 'local_memoire' });
-      return;
-    }
-
-    if (msgLower.startsWith('cousins:') || msgLower.startsWith('cousins ')) {
-      const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
-      const [s1, s2] = rest.split(',').map(s => s.trim().toLowerCase());
-      if (s1 && s2) {
-        const communs = trouverLiensCommuns(s1, s2, liens);
-        addBotMessage(
-          communs.length > 0
-            ? `Ancêtres conceptuels communs entre ${s1} et ${s2} : ${communs.join(', ')}`
-            : `Aucun ancêtre commun trouvé entre ${s1} et ${s2}.`
-        );
-        return;
-      }
-      addBotMessage('Format : cousins: sujet1, sujet2');
-      return;
-    }
-
-    // 6. Translation commands: "traduis en anglais: ...", "traduis en espagnol: ..."
-    if (msgLower.startsWith('traduis en ') || msgLower.startsWith('traduis ')) {
-      if (!text.includes(':')) {
-        addBotMessage('Format : traduis en anglais: ton texte ici');
-        return;
-      }
-      const [entete, ...corpsParts] = text.split(':');
-      const corps = corpsParts.join(':').trim();
-      if (!corps) {
-        addBotMessage('Il manque le texte à traduire.');
-        return;
-      }
-      const enteteClean = sansAccent(entete.toLowerCase()).replace(/^traduis(?:\s+en)?\s*/, '').trim();
-      const languesMap: Record<string, string> = {
-        anglais: 'English', english: 'English',
-        arabe: 'Arabic', arabic: 'Arabic',
-        espagnol: 'Spanish', spanish: 'Spanish',
-        allemand: 'German', german: 'German',
-        italien: 'Italian', italian: 'Italian',
-        portugais: 'Portuguese', portuguese: 'Portuguese',
-        russe: 'Russian', russian: 'Russian',
-        chinois: 'Chinese', chinese: 'Chinese',
-        japonais: 'Japanese', japanese: 'Japanese',
-        coreen: 'Korean', korean: 'Korean',
-        turc: 'Turkish', turkish: 'Turkish',
-        neerlandais: 'Dutch', dutch: 'Dutch',
-        peul: 'Fula', fula: 'Fula',
-        bambara: 'Bambara', wolof: 'Wolof',
-        swahili: 'Swahili',
-        francais: 'French', french: 'French',
-      };
-
-      const cible = languesMap[enteteClean] || 'English';
-      setIsThinking(true);
-      try {
-        const result = await apiService.traduire({
-          text: corps,
-          targetLang: cible,
-          provider: config.provider,
-          groqApiKey: config.groqApiKey,
-        });
-        addBotMessage(result, { source: 'systeme' });
-      } catch (err: any) {
-        addBotMessage(`Erreur traduction : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 7. Text Correction: "corrige: ..."
-    if (msgLower.startsWith('corrige:') || msgLower.startsWith('corrige ')) {
-      const corps = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
-      if (!corps) {
-        addBotMessage('Format : corrige: ton texte');
-        return;
-      }
-      setIsThinking(true);
-      try {
-        const result = await apiService.corriger({
-          text: corps,
-          provider: config.provider,
-          groqApiKey: config.groqApiKey,
-        });
-        addBotMessage(result, { source: 'systeme' });
-      } catch (err: any) {
-        addBotMessage(`Erreur correction : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 8. Ideas Generator: "idees 5: theme" or "idees 3 drole: theme"
-    if (msgLower.startsWith('idees ') || msgLower.startsWith('idées ') || msgLower.startsWith('idees:')) {
-      if (!text.includes(':')) {
-        addBotMessage('Format : idees 5: theme  ou  idees 3 drole: theme');
-        return;
-      }
-      const [entete, ...corpsParts] = text.split(':');
-      const theme = corpsParts.join(':').trim();
-      const matchNb = entete.match(/\d+/);
-      const count = matchNb ? Math.max(1, Math.min(15, parseInt(matchNb[0], 10))) : 5;
-      let style = 'creatif';
-      for (const st of ['serieux', 'drole', 'poetique', 'absurde', 'creatif', 'scientifique', 'philosophique']) {
-        if (entete.toLowerCase().includes(st)) {
-          style = st;
-          break;
-        }
-      }
-
-      setIsThinking(true);
-      try {
-        const result = await apiService.genererIdees({
-          theme,
-          count,
-          style,
-          provider: config.provider,
-          groqApiKey: config.groqApiKey,
-        });
-
-        const lines = result
-          .split('\n')
-          .map(l => l.replace(/^\s*(\d+[\.\)\-:]\s*|[\-\*]\s*)/, '').trim())
-          .filter(Boolean);
-
-        setDernieresIdees(lines);
-        const formatted = [`Idées sur : ${theme}`, ...lines.map((l, i) => `${i + 1}. ${l}`)].join('\n');
-        addBotMessage(formatted, { source: 'systeme' });
-      } catch (err: any) {
-        addBotMessage(`Erreur idées : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 9. Single Idea Development: "idee 1:", "idee 2:"
-    if (msgLower.startsWith('idee ') || msgLower.startsWith('idée ')) {
-      const matchNb = msgLower.match(/\d+/);
-      if (!matchNb) {
-        addBotMessage('Précise le numéro : idee 3:');
-        return;
-      }
-      const num = parseInt(matchNb[0], 10) - 1;
-      if (num < 0 || num >= dernieresIdees.length) {
-        addBotMessage(`Pas d'idée numéro ${num + 1} en mémoire récente. Génère d'abord une liste avec "idees 5: thème"`);
-        return;
-      }
-      const chosenIdea = dernieresIdees[num];
-      setIsThinking(true);
-      try {
-        const prompt = `Développe cette idée en 3 à 4 phrases claires, concrètes et inspirantes : "${chosenIdea}".`;
-        const res = await apiService.chat({
-          prompt,
-          history: [],
-          provider: config.provider,
-          geminiApiKey: config.geminiApiKey,
-          groqApiKey: config.groqApiKey,
-        });
-
-        addBotMessage(`Idée ${num + 1} développée :\n${res.text}`, { source: 'systeme' });
-
-        // Auto-save to memory
-        const sujetIdea = `idee_${num + 1}`;
-        const fact = `${chosenIdea} -> ${res.text.slice(0, 180)}`;
-        setMemoire(prev => ({
-          ...prev,
-          [sujetIdea]: [
-            {
-              def: fact,
-              poids: 0.75,
-              hits: 1,
-              source: 'auto',
-              last_used: new Date().toISOString(),
-              created: new Date().toISOString(),
-            },
-          ],
-        }));
-      } catch (err: any) {
-        addBotMessage(`Erreur développement idée : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 10. Summarize: "resume: texte" or "resume: concept"
-    if (msgLower.startsWith('resume:')) {
-      const corps = text.split(':')[1]?.trim();
-      if (!corps) {
-        addBotMessage('Format : resume: ton texte ou ton concept');
-        return;
-      }
-
-      // If text is long (> 30 words), call LLM summarizer
-      if (corps.split(/\s+/).length > 25 || corps.length > 150) {
-        setIsThinking(true);
-        try {
-          const res = await apiService.resumer({
-            text: corps,
-            provider: config.provider,
-            groqApiKey: config.groqApiKey,
-          });
-          addBotMessage(res, { source: 'systeme' });
-        } catch (err: any) {
-          addBotMessage(`Erreur résumé : ${err.message}`, { source: 'systeme' });
-        } finally {
-          setIsThinking(false);
-        }
-        return;
-      }
-
-      // Short concept summary from memory & rules
-      const xCorr = corriger(corps, memoire, regles, synonymes) || corps;
-      const defs = (memoire[xCorr] || []).map(d => d.def);
-      const rList = (regles[xCorr] || []).map(r => `${r.quant} les ${xCorr}s ${r.prop}`);
-      if (defs.length > 0 || rList.length > 0) {
-        let rep = `${xCorr} : ${defs.join('; ') || 'pas de définition'}`;
-        if (rList.length > 0) rep += `\nRègles associées : ${rList.join('; ')}`;
-        addBotMessage(rep, { source: 'local_memoire', sujet: xCorr });
-        return;
-      }
-      addBotMessage(`Aucune donnée enregistrée pour "${corps}".`);
-      return;
-    }
-
-    // 11. Synonyms management: "synonymes: canon = syn1 | syn2" or "synonymes: mot"
-    if (msgLower.startsWith('synonymes:')) {
-      const rest = text.split(':')[1]?.trim();
-      if (!rest) {
-        addBotMessage('Format : synonymes: canon = syn1 | syn2');
-        return;
-      }
-      if (rest.includes('=')) {
-        const [canonPart, synPart] = rest.split('=').map(s => s.trim().toLowerCase());
-        const synList = synPart.split('|').map(s => s.trim()).filter(Boolean);
-        if (canonPart && synList.length > 0) {
-          setSynonymes(prev => {
-            const copy = { ...prev };
-            const currentList = Array.isArray(copy[canonPart]) ? (copy[canonPart] as string[]) : [];
-            const merged = Array.from(new Set([...currentList, ...synList]));
-            copy[canonPart] = merged;
-            for (const s of synList) {
-              copy[s] = canonPart;
-            }
-            return copy;
-          });
-          addBotMessage(`Synonymes enregistrés pour "${canonPart}" : ${synList.join(', ')}`, { source: 'local_memoire' });
-          return;
-        }
-      } else {
-        const q = rest.toLowerCase();
-        if (synonymes[q]) {
-          const val = synonymes[q];
-          const rep = Array.isArray(val) ? `${q} = ${val.join(' | ')}` : `${q} -> ${val}`;
-          addBotMessage(rep, { source: 'local_memoire' });
-          return;
-        }
-        addBotMessage(`Aucun synonyme trouvé pour "${q}".`);
-        return;
-      }
-    }
-
-    // 12. Fuzzy near search: "proche: mot"
-    if (msgLower.startsWith('proche:') || msgLower.startsWith('proche ')) {
-      const target = (text.includes(':') ? text.split(':')[1] : text.slice(7)).trim().toLowerCase();
-      const keys = Array.from(new Set([...Object.keys(memoire), ...Object.keys(regles)]));
-      const candidates = keys.map(k => {
-        const kNorm = sansAccent(k);
-        const tNorm = sansAccent(target);
-        let score = kNorm === tNorm ? 1.0 : 0.0;
-        if (!score) {
-          const d = Math.max(kNorm.length, tNorm.length) - Math.abs(kNorm.length - tNorm.length);
-          score = (kNorm.includes(tNorm) || tNorm.includes(kNorm)) ? 0.75 : 0.4;
-        }
-        return { key: k, score };
-      });
-      candidates.sort((a, b) => b.score - a.score);
-      const top = candidates.filter(c => c.score >= 0.5).slice(0, 6);
-      if (top.length > 0) {
-        addBotMessage(`Sujets proches de "${target}" :\n${top.map(c => ` - ${c.key}`).join('\n')}`, { source: 'local_memoire' });
-      } else {
-        addBotMessage(`Aucun sujet proche de "${target}".`);
-      }
-      return;
-    }
-
-    // 13. Substring Search: "chercher: mot"
-    if (msgLower.startsWith('chercher:')) {
-      const q = text.split(':')[1]?.trim().toLowerCase();
-      if (!q) {
-        addBotMessage('Format : chercher: mot');
-        return;
-      }
-      const results: string[] = [];
-      for (const [k, list] of Object.entries(memoire)) {
-        if (k.includes(q)) {
-          results.push(`${k} = ${list.map(d => d.def).join(' | ')}`);
-        }
-      }
-      for (const [s, list] of Object.entries(regles)) {
-        if (s.includes(q)) {
-          for (const r of list) results.push(`${r.quant} les ${s}s ${r.prop}`);
-        }
-      }
-      addBotMessage(
-        results.length > 0
-          ? `Résultats pour "${q}" :\n${results.slice(0, 10).join('\n')}`
-          : `Rien trouvé pour "${q}".`,
-        { source: 'local_memoire' }
-      );
-      return;
-    }
-
-    // 14. Bulk forgetting: "oublier masse:" or single "oublier:"
-    if (msgLower.startsWith('oublier masse:') || msgLower.startsWith('oublier en masse:')) {
-      const rest = text.split(':')[1]?.trim() || '';
-      const items = rest.split(/[,\n;.]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
-      const removed: string[] = [];
-      setMemoire(prev => {
-        const copy = { ...prev };
-        for (const item of items) {
-          if (copy[item]) {
-            delete copy[item];
-            removed.push(item);
-          }
-        }
-        return copy;
-      });
-      addBotMessage(
-        removed.length > 0
-          ? `Concepts oubliés en masse (${removed.length}) : ${removed.join(', ')}`
-          : 'Aucun concept trouvé à supprimer.',
-        { source: 'systeme' }
-      );
-      return;
-    }
-
-    if (msgLower.startsWith('oublier:')) {
-      const rest = text.split(':')[1]?.trim().toLowerCase() || '';
-      if (!rest) {
-        addBotMessage('Format : oublier: sujet ou oublier: sujet = def');
-        return;
-      }
-      if (rest.includes('=')) {
-        const [sujet, defText] = rest.split('=').map(s => s.trim());
-        setMemoire(prev => {
-          const copy = { ...prev };
-          if (copy[sujet]) {
-            copy[sujet] = copy[sujet].filter(d => !d.def.toLowerCase().includes(defText.toLowerCase()));
-            if (copy[sujet].length === 0) delete copy[sujet];
-          }
-          return copy;
-        });
-        addBotMessage(`Définition oubliée pour "${sujet}".`, { source: 'systeme' });
-        return;
-      } else {
-        let found = false;
-        if (memoire[rest]) {
-          setMemoire(prev => {
-            const copy = { ...prev };
-            delete copy[rest];
-            return copy;
-          });
-          found = true;
-        }
-        if (regles[rest]) {
-          setRegles(prev => {
-            const copy = { ...prev };
-            delete copy[rest];
-            return copy;
-          });
-          found = true;
-        }
-        addBotMessage(
-          found ? `J'ai complètement oublié "${rest}".` : `Je ne connaissais pas "${rest}".`,
-          { source: 'systeme' }
-        );
-        return;
-      }
-    }
-
-    // 15. Bulk Learning: "retiens masse: part1 . part2"
-    if (msgLower.startsWith('retiens masse:')) {
-      const rest = text.split(':')[1]?.trim() || '';
-      const parts = rest.split(/[.\n;]+/).map(p => p.trim()).filter(Boolean);
-      const ok: string[] = [];
-      const nowIso = new Date().toISOString();
-
-      setMemoire(prevMemo => {
-        const memoCopy = { ...prevMemo };
-        for (const part of parts) {
-          const rq = extraireQuantificateur(part);
-          if (rq) {
-            handleAddRule(rq.quant, rq.sujet, rq.prop, 0.85);
-            ok.push(`${rq.quant} ${rq.sujet} -> ${rq.prop}`);
-            continue;
-          }
-          if (part.includes('=')) {
-            const [sRaw, dRaw] = part.split('=').map(x => x.trim().toLowerCase());
-            if (sRaw && dRaw) {
-              const current = memoCopy[sRaw] ? [...memoCopy[sRaw]] : [];
-              current.unshift({
-                def: dRaw,
-                poids: 0.85,
-                hits: 1,
-                source: 'manuel',
-                last_used: nowIso,
-                created: nowIso,
-              });
-              memoCopy[sRaw] = current;
-              ok.push(sRaw);
-            }
-          }
-        }
-        return memoCopy;
-      });
-
-      addBotMessage(
-        ok.length > 0
-          ? `Notes enregistrées en masse (${ok.length}) :\n${ok.join(', ')}`
-          : 'Aucune note valide trouvée. Sépare tes phrases par des points.',
-        { source: 'local_memoire' }
-      );
-      return;
-    }
-
-    // 16. Single "retiens:"
-    if (msgLower.startsWith('retiens:')) {
-      const content = text.split(':')[1]?.trim();
-      if (!content) {
-        addBotMessage('Format : retiens: sujet = définition');
-        return;
-      }
-
-      // Check quantifier rule
-      const rq = extraireQuantificateur(content);
-      if (rq) {
-        handleAddRule(rq.quant, rq.sujet, rq.prop, 0.85);
-        addBotMessage(`Règle enregistrée : ${rq.quant} les ${rq.sujet}s ${rq.prop} (certitude 85%)`, { source: 'regle' }, 0.85);
-        return;
-      }
-
-      // Subject = Def1 | Def2
-      if (content.includes('=')) {
-        const [sujetRaw, defsRaw] = content.split('=').map(s => s.trim());
-        const s = sujetRaw.toLowerCase();
-        const defsList = defsRaw.split('|').map(d => d.trim()).filter(Boolean);
-        if (s && defsList.length > 0) {
-          const nowIso = new Date().toISOString();
-          setMemoire(prev => {
-            const copy = { ...prev };
-            const current = copy[s] ? [...copy[s]] : [];
-            for (const d of defsList) {
-              current.unshift({
-                def: d,
-                poids: 0.85,
-                hits: 1,
-                source: 'manuel',
-                last_used: nowIso,
-                created: nowIso,
-              });
-            }
-            copy[s] = current;
-            return copy;
-          });
-          setContexte(prev => [...prev, s]);
-          addBotMessage(`Fait retenu pour "${s}" : ${defsList.join(' | ')} (poids 0.85)`, { source: 'local_memoire', sujet: s }, 0.85);
-          return;
-        }
-      }
-      addBotMessage('Format requis : retiens: sujet = définition (ou plusieurs avec: retiens: sujet = def1 | def2)');
-      return;
-    }
-
-    // 17. Quantifiers direct input: "tous les oiseaux ont des plumes"
-    const directRq = extraireQuantificateur(text);
-    if (directRq && (msgClean.startsWith('tous') || msgClean.startsWith('aucun') || msgClean.startsWith('certains') || msgClean.startsWith('chaque'))) {
-      handleAddRule(directRq.quant, directRq.sujet, directRq.prop, 0.85);
-      addBotMessage(`Règle généralisée enregistrée : ${directRq.quant} les ${directRq.sujet}s ${directRq.prop}`, { source: 'regle' }, 0.85);
-      return;
-    }
-
-    // 18. Listing commands
-    if (msgLower.startsWith('lister:')) {
-      const target = msgLower.split(':')[1]?.trim();
-      if (target === 'memoire') {
-        const keys = Object.keys(memoire).sort();
-        addBotMessage(`Mémoire active (${keys.length} sujets) :\n${keys.slice(0, 35).join(', ')}${keys.length > 35 ? '...' : ''}`, { source: 'local_memoire' });
-        return;
-      }
-      if (target === 'regles') {
-        const lines: string[] = [];
-        for (const [s, list] of Object.entries(regles)) {
-          for (const r of list) {
-            lines.push(`${r.quant} les ${s}s ${r.prop}`);
-          }
-        }
-        addBotMessage(`Règles générales (${lines.length}) :\n${lines.join('\n') || 'Aucune règle'}`, { source: 'regle' });
-        return;
-      }
-      if (target === 'poids') {
-        const lines: string[] = [];
-        for (const [k, list] of Object.entries(memoire)) {
-          for (const m of list.slice(0, 2)) {
-            lines.push(`${k} = ${m.def} [poids ${m.poids.toFixed(2)}, hits ${m.hits}]`);
-          }
-        }
-        addBotMessage(`Coefficients de poids :\n${lines.slice(0, 15).join('\n')}`, { source: 'local_memoire' });
-        return;
-      }
-      if (target === 'incertains') {
-        const lines: string[] = [];
-        for (const [k, list] of Object.entries(memoire)) {
-          for (const m of list) {
-            if (m.poids < 0.6) {
-              lines.push(`${k} = ${m.def} [poids ${m.poids.toFixed(2)}]`);
-            }
-          }
-        }
-        addBotMessage(
-          lines.length > 0 ? `Concepts incertains :\n${lines.join('\n')}` : 'Aucun concept incertain (tous >= 60%).',
-          { source: 'local_memoire' }
-        );
-        return;
-      }
-      if (target === 'idees') {
-        addBotMessage(
-          dernieresIdees.length > 0
-            ? `Dernières idées générées :\n${dernieresIdees.map((l, i) => `${i + 1}. ${l}`).join('\n')}`
-            : 'Aucune idée archivée dans cette session.',
-          { source: 'systeme' }
-        );
-        return;
-      }
-      if (target === 'groq') {
-        addBotMessage(
-          groqLog.length > 0
-            ? `Derniers échanges LLM :\n${groqLog.slice(0, 5).map(l => `[${l.time}] Q: ${l.q}\nR: ${l.r.slice(0, 80)}...`).join('\n\n')}`
-            : 'Aucun échange LLM enregistré.',
-          { source: 'systeme' }
-        );
-        return;
-      }
-      if (target === 'stats') {
-        addBotMessage(
-          `Statistiques : ${Object.keys(memoire).length} concepts · ${Object.values(regles).reduce((a, b) => a + b.length, 0)} règles · ${Object.keys(liens).length} liaisons taxonomiques · Contexte: ${contexte.join(', ') || 'vide'}`
-        );
-        return;
-      }
-    }
-
-    // 19. Greetings
-    const salutation = estSalutation(text);
-    if (salutation) {
-      addBotMessage(repondreSalutation(salutation), { source: 'systeme' });
-      return;
-    }
-
-    // 20. Emotions & states
-    const etat = detecterEtat(text);
-    if (etat) {
-      addBotMessage(repondreEtat(etat), { source: 'systeme' });
-      return;
-    }
-
-    // 21. Reinforcement confirmations ("oui", "c'est ça", "non ce n'est pas ça")
-    if (['oui', "c'est ca", 'exact', 'parfait', 'merci'].includes(msgClean)) {
-      if (contexte.length > 0) {
-        const last = contexte[contexte.length - 1];
-        handleAdjustWeight(last, 0.1);
-        return;
-      }
-    }
-    if (['non', 'pas ca', 'faux', 'erreur'].includes(msgClean)) {
-      if (contexte.length > 0) {
-        const last = contexte[contexte.length - 1];
-        handleAdjustWeight(last, -0.15);
-        return;
-      }
-    }
-
-    // 22. Causal Questions: "pourquoi le moineau vole ?" or "pourquoi l'aigle respire ?"
-    if (msgClean.includes('pourquoi')) {
-      const whyAnswer = repondrePourquoi(text, memoire, regles, liens, synonymes);
-      if (whyAnswer) {
-        const s = extraireX(text, memoire, regles, synonymes, contexte);
-        if (s) setContexte(prev => [...prev, s]);
-        addBotMessage(whyAnswer, { source: 'deduction', sujet: s || undefined });
-        return;
-      }
-    }
-
-    // 23. Question-Réponse mémorisée (recherche précise par combinaison de mots-clés de la question)
-    const qaMatch = trouverQuestionReponse(text, memoire);
-    if (qaMatch) {
-      qaMatch.entry.hits += 1;
-      qaMatch.entry.last_used = new Date().toISOString();
-      setMemoire({ ...memoire });
-      setContexte(prev => [...prev, qaMatch.sujet]);
-      addBotMessage(
-        qaMatch.entry.def,
-        { source: 'local_memoire', sujet: qaMatch.sujet },
-        qaMatch.entry.poids
-      );
-      return;
-    }
-
-    // 24. Demande de Définition de Concept ("c'est quoi le moineau ?", "parle-moi de python", "moineau")
-    const defCheck = estRequeteDefinition(text);
-    if (defCheck.estDef && defCheck.concept) {
-      const candX = corriger(defCheck.concept, memoire, regles, synonymes) || defCheck.concept;
-      const localDef = phraseDef(candX, text, memoire, regles, liens, synonymes);
-      if (localDef) {
-        setContexte(prev => [...prev, candX]);
-        const bestEntry = memoire[candX]?.[0];
-        addBotMessage(localDef, { source: 'local_memoire', sujet: candX }, bestEntry?.poids || 0.85);
-        return;
-      }
-    }
-
-    // 25. Recherche Floue uniquement sur requêtes courtes (1 à 3 mots max)
-    const wordsCount = text.trim().split(/\s+/).length;
-    if (wordsCount <= 3) {
-      const flouMatch = rechercherFlou(text, memoire, regles, 0.72);
-      if (flouMatch) {
-        const flouDef = phraseDef(flouMatch, text, memoire, regles, liens, synonymes);
-        if (flouDef) {
-          setContexte(prev => [...prev, flouMatch]);
-          addBotMessage(`Tu voulais sans doute parler de "${flouMatch}" : ${flouDef}`, { source: 'local_memoire', sujet: flouMatch });
-          return;
-        }
-      }
-    }
-
-    // 26. Fallback en mode local_only
-    if (config.provider === 'local_only') {
-      const candX = extraireX(text, memoire, regles, synonymes, contexte);
-      addBotMessage(
-        candX
-          ? `Je n'ai pas encore d'information sur "${candX}" dans ma mémoire locale. Enseigne-le moi avec: retiens: ${candX} = ...`
-          : "Je n'ai pas compris en mode local. Tu peux m'enseigner ce fait avec: retiens: sujet = définition",
-        { source: 'systeme' }
-      );
-      return;
-    }
-
-    // Call LLM
-    setIsThinking(true);
-    try {
-      const historyFormatted = messages.slice(-5).map(m => ({
-        role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
-        content: m.text,
-      }));
-
-      const res = await apiService.chat({
-        prompt: text,
-        history: historyFormatted,
-        provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
-        groqModel: config.groqModel || 'openai/gpt-oss-120b',
-        systemPrompt: config.systemPrompt,
-      });
-
-      const responseText = res.text;
-
-      addBotMessage(
-        responseText,
-        { source: res.provider === 'groq' ? 'groq' : 'gemini' },
-        0.8
-      );
-
-      setGroqLog(prev => [{ q: text, r: responseText, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
-
-      // Apprentissage automatique du couple Question + Réponse (Q&A)
-      if (config.autoLearnFromLLM) {
-        const learned = apprendreDeLLM(text, responseText, memoire, res.provider === 'groq' ? 'groq' : 'gemini');
-        if (learned) {
-          setMemoire({ ...memoire });
-          setContexte(prev => [...prev, learned.sujet]);
-        }
-      }
-    } catch (err: any) {
-      addBotMessage(`Erreur de connexion : ${err.message}`, { source: 'systeme' });
-    } finally {
-      setIsThinking(false);
-    }
-  };
-
-  return (
-    <div className="h-screen h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
-      {/* Top Header */}
-      <Header
-        config={config}
-        onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
-        sessions={sessions}
-        onSelectSession={handleSelectSession}
-        onOpenSettings={() => {
-          if (isAdmin) setIsSettingsModalOpen(true);
-        }}
-        onOpenActionsMenu={() => {
-          if (isAdmin) setIsActionsModalOpen(true);
-        }}
-        conceptsCount={Object.keys(memoire).length}
-        rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
-        isAdmin={isAdmin}
-      />
-
-      {/* Main View Workspace */}
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-        {activeTab === 'chat' && (
-          <ChatTab
-            messages={messages}
-            isThinking={isThinking}
-            onSendMessage={handleProcessUserMessage}
-            onClearMessages={() => setMessages([])}
-            onAdjustWeight={handleAdjustWeight}
-            soundEnabled={config.soundEnabled}
-            activeSession={config.activeSession}
-            prefilledText={chatPrefill}
-            onClearPrefill={() => setChatPrefill('')}
-            onOpenActions={() => {
-              if (isAdmin) setIsActionsModalOpen(true);
-            }}
-            isAdmin={isAdmin}
-          />
-        )}
-
-        {activeTab === 'graph' && isAdmin && (
-          <KnowledgeGraphTab
-            memoire={memoire}
-            regles={regles}
-            liens={liens}
-            synonymes={synonymes}
-            onAddDefinition={(s, d) => {
-              const nowIso = new Date().toISOString();
-              setMemoire(prev => {
-                const copy = { ...prev };
-                const current = copy[s] ? [...copy[s]] : [];
-                current.unshift({
-                  def: d,
-                  poids: 0.85,
-                  hits: 1,
-                  source: 'manuel',
-                  last_used: nowIso,
-                  created: nowIso,
-                });
-                copy[s] = current;
-                return copy;
-              });
-            }}
-            onDeleteConcept={s => {
-              setMemoire(prev => {
-                const copy = { ...prev };
-                delete copy[s];
-                return copy;
-              });
-            }}
-            onAdjustWeight={handleAdjustWeight}
-            onAdjustHits={handleAdjustHits}
-            onAddLink={handleAddLink}
-            onDeleteLink={handleDeleteLink}
-            onAskQuestionAbout={s => {
-              setActiveTab('chat');
-              handleProcessUserMessage(`c'est quoi ${s} ?`);
-            }}
-          />
-        )}
-
-        {activeTab === 'rules' && isAdmin && (
-          <RulesTab
-            memoire={memoire}
-            regles={regles}
-            liens={liens}
-            synonymes={synonymes}
-            onAddRule={handleAddRule}
-            onDeleteRule={handleDeleteRule}
-          />
-        )}
-
-        {activeTab === 'tools' && (
-          <ToolsTab
-            config={config}
-            onSaveToMemory={(sujet, def) => {
-              const nowIso = new Date().toISOString();
-              setMemoire(prev => ({
-                ...prev,
-                [sujet]: [
-                  {
-                    def,
-                    poids: 0.85,
-                    hits: 1,
-                    source: 'auto',
-                    last_used: nowIso,
-                    created: nowIso,
-                  },
-                ],
-              }));
-            }}
-          />
-        )}
-
-        {activeTab === 'sessions' && isAdmin && (
-          <SessionsTab
-            sessions={sessions}
-            activeSession={config.activeSession}
-            onSelectSession={handleSelectSession}
-            onCreateSession={handleCreateSession}
-            memoire={memoire}
-            regles={regles}
-            liens={liens}
-            synonymes={synonymes}
-            onUpdateMemory={(newM, newR) => {
-              setMemoire(newM);
-              setRegles(newR);
-            }}
-            onImportFullBackup={data => {
-              setMemoire(data.memoire);
-              setRegles(data.regles);
-              setLiens(data.liens);
-            }}
-            groqApiKey={config.groqApiKey}
-            groqModel={config.groqModel}
-          />
-        )}
-      </main>
-
-      {/* Bottom Navigation Tabs - Public shows only Discussion & Atelier Texte */}
-      <nav className="h-14 sm:h-16 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
-        <button
-          onClick={() => setActiveTab('chat')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'chat'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Discussion</span>
-        </button>
-
-        {isAdmin && (
-          <button
-            onClick={() => setActiveTab('graph')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'graph'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
-          </button>
-        )}
-
-        {isAdmin && (
-          <button
-            onClick={() => setActiveTab('rules')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'rules'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
-          </button>
-        )}
-
-        <button
-          onClick={() => setActiveTab('tools')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'tools'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <Wrench className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Atelier Texte</span>
-        </button>
-
-        {isAdmin && (
-          <button
-            onClick={() => setActiveTab('sessions')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'sessions'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
-          </button>
-        )}
-      </nav>
-
-      {/* Action Command Menu Modal (Admin Only) */}
-      {isAdmin && (
-        <ActionMenuModal
-          isOpen={isActionsModalOpen}
-          onClose={() => setIsActionsModalOpen(false)}
-          onSelectAction={(cmd, immediate) => {
-            if (immediate) {
-              handleProcessUserMessage(cmd);
-            } else {
-              setActiveTab('chat');
-              setChatPrefill(cmd);
-            }
-          }}
-        />
-      )}
-
-      {/* Settings Modal (Admin Only) */}
-      {isAdmin && (
-        <SettingsModal
-          isOpen={isSettingsModalOpen}
-          onClose={() => setIsSettingsModalOpen(false)}
-          config={config}
-          onSaveConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
-        />
-      )}
-    </div>
-  );
-}
-
-```
-
----
-
-### Fichier : `src/components/Header.tsx`
+## 📄 Fichier : `src/components/Header.tsx`
 
 ```typescript
 import React from 'react';
@@ -3199,7 +4296,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-3 py-2 sm:px-6 sm:py-2.5 transition-all">
+    <header className="sticky top-0 z-40 w-full shrink-0 flex-shrink-0 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-3 py-2 sm:px-6 sm:py-2.5 transition-all">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-2.5 md:gap-4">
         {/* Tier 1: Brand & Action Controls */}
         <div className="flex items-center justify-between gap-2 min-w-0">
@@ -3354,7 +4451,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 ---
 
-### Fichier : `src/components/ChatTab.tsx`
+## 📄 Fichier : `src/components/ChatTab.tsx`
 
 ```typescript
 import React, { useState, useRef, useEffect } from 'react';
@@ -3678,8 +4775,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         </button>
       </div>
 
-      {/* Quick Action Pills */}
-      <div className="flex-shrink-0 px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
+      {/* Quick Action Pills - Fixed above input */}
+      <div className="shrink-0 flex-shrink-0 px-3 sm:px-6 py-1.5 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar">
         {quickPills.map((pill, idx) => (
           <button
             key={idx}
@@ -3692,7 +4789,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       </div>
 
       {/* Input Form Bar - Permanently fixed at bottom of chat */}
-      <div className="flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
+      <div className="shrink-0 flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
         <form onSubmit={handleFormSubmit} className="max-w-7xl mx-auto flex items-center gap-2">
           {/* Voice input button */}
           <button
@@ -3749,7 +4846,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
 ---
 
-### Fichier : `src/components/KnowledgeGraphTab.tsx`
+## 📄 Fichier : `src/components/KnowledgeGraphTab.tsx`
 
 ```typescript
 import React, { useState, useMemo } from 'react';
@@ -4275,7 +5372,7 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
 
 ---
 
-### Fichier : `src/components/RulesTab.tsx`
+## 📄 Fichier : `src/components/RulesTab.tsx`
 
 ```typescript
 import React, { useState } from 'react';
@@ -4590,7 +5687,7 @@ export const RulesTab: React.FC<RulesTabProps> = ({
 
 ---
 
-### Fichier : `src/components/ToolsTab.tsx`
+## 📄 Fichier : `src/components/ToolsTab.tsx`
 
 ```typescript
 import React, { useState } from 'react';
@@ -4663,8 +5760,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         style: selectedStyle,
         styleDesc,
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
 
@@ -4697,8 +5792,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         prompt,
         history: [],
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
 
@@ -4724,8 +5817,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         text: transInput.trim(),
         targetLang: transLang,
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
       setTransResult(result);
@@ -4744,8 +5835,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       const result = await apiService.corriger({
         text: corrigeInput.trim(),
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
       setCorrigeResult(result);
@@ -4764,8 +5853,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       const result = await apiService.resumer({
         text: resumeInput.trim(),
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
       setResumeResult(result);
@@ -5151,7 +6238,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
 
 ---
 
-### Fichier : `src/components/SessionsTab.tsx`
+## 📄 Fichier : `src/components/SessionsTab.tsx`
 
 ```typescript
 import React, { useState } from 'react';
@@ -5573,7 +6660,7 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
 
 ---
 
-### Fichier : `src/components/SettingsModal.tsx`
+## 📄 Fichier : `src/components/SettingsModal.tsx`
 
 ```typescript
 import React, { useState } from 'react';
@@ -5686,19 +6773,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleTestGroq = async () => {
-    if (!groqKey.trim()) {
-      setTestResult({
-        ok: false,
-        message: 'Veuillez coller votre clé API Groq (commençant par gsk_...)',
-      });
-      return;
-    }
-
     setIsTestingGroq(true);
     setTestResult(null);
 
     try {
-      const res = await apiService.testGroqConnection(groqKey.trim(), groqModel);
+      const res = await apiService.testGroqConnection(groqKey.trim() || undefined, groqModel);
       if (res.ok) {
         setTestResult({
           ok: true,
@@ -6078,7 +7157,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
 ---
 
-### Fichier : `src/components/ActionMenuModal.tsx`
+## 📄 Fichier : `src/components/ActionMenuModal.tsx`
 
 ```typescript
 import React, { useState } from 'react';
@@ -6327,1209 +7406,3 @@ export const ActionMenuModal: React.FC<ActionMenuModalProps> = ({
 ```
 
 ---
-
-### Fichier : `src/hooks/usePWAInstall.ts`
-
-```typescript
-import { useEffect, useState } from 'react';
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-}
-
-export function usePWAInstall() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
-
-  useEffect(() => {
-    // Check if running in standalone mode (already installed)
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    setIsInstalled(isStandalone);
-
-    // Detect iOS devices
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(isIOSDevice);
-
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
-  }, []);
-
-  const install = async () => {
-    if (!deferredPrompt) return false;
-    await deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      return true;
-    }
-    return false;
-  };
-
-  return {
-    isInstallable: !!deferredPrompt,
-    isInstalled,
-    isIOS,
-    install,
-  };
-}
-
-```
-
----
-
-### Fichier : `server.ts`
-
-```typescript
-import express from 'express';
-import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { GoogleGenAI } from '@google/genai';
-
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const app = express();
-const PORT = 3000;
-
-app.use(express.json({ limit: '10mb' }));
-
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
-
-// Initialize Gemini SDK
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
-
-const DEFAULT_SYSTEM_PROMPT =
-  'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
-  'Tu réponds toujours en français, en 2 à 4 phrases maximum. ' +
-  'Tu ne fais pas de listes à puces sauf si on te le demande. ' +
-  'Tu es chaleureux mais pas excessif.';
-
-// Helper to normalize and resolve Groq model IDs accurately
-export function resolveGroqModel(requestedModel?: string): string {
-  if (!requestedModel) return 'openai/gpt-oss-120b';
-  const clean = requestedModel.trim();
-  const lower = clean.toLowerCase();
-
-  // OpenAI GPT-OSS on Groq
-  if (lower.includes('gpt-oss-20b') || lower.includes('gpt20b')) {
-    return 'openai/gpt-oss-20b';
-  }
-  if (
-    lower === 'openai/gpt-oss-120b' ||
-    lower.includes('gpt-oss-120b') ||
-    lower.includes('gpt120b') ||
-    lower.includes('gpt-120b') ||
-    lower.includes('gpt') ||
-    lower.includes('oss')
-  ) {
-    return 'openai/gpt-oss-120b';
-  }
-
-  // Deprecated models migration
-  if (lower.includes('llama-3.3-70b-versatile')) {
-    return 'llama-3.3-70b-specdec';
-  }
-
-  // Qwen on Groq
-  if (lower.includes('qwen')) {
-    return 'qwen/qwen3.8-27b';
-  }
-
-  // Llama 3.1 8B Instant
-  if (lower.includes('llama-3.1-8b') || lower.includes('llama3-8b')) {
-    return 'llama-3.1-8b-instant';
-  }
-
-  return clean;
-}
-
-// Helper to call Groq with candidate fallback and clean error management
-async function callGroqWithFallback(
-  prompt: string,
-  systemPrompt: string,
-  apiKey: string,
-  requestedModel = 'openai/gpt-oss-120b',
-  history: Array<{ role: string; content: string }> = []
-): Promise<{ text: string; actualModel: string }> {
-  const primaryModel = resolveGroqModel(requestedModel);
-
-  // Candidate models to try in order on Groq
-  const candidateModels = Array.from(
-    new Set([
-      primaryModel,
-      'openai/gpt-oss-120b',
-      'llama-3.1-8b-instant',
-      'llama-3.3-70b-specdec',
-      'qwen/qwen3.8-27b',
-      'mixtral-8x7b-32768',
-    ])
-  );
-
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: prompt },
-  ];
-
-  let lastError = '';
-
-  for (const modelToTry of candidateModels) {
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: modelToTry,
-          messages,
-          temperature: 0.7,
-          max_tokens: 800,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content?.trim() || '';
-        return { text: content, actualModel: modelToTry };
-      }
-
-      const errData = await response.json().catch(() => null);
-      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
-      lastError = errMsg;
-
-      // If 404 (model not found / deprecated), try next candidate model
-      if (response.status === 404) {
-        console.warn(`Modèle Groq "${modelToTry}" non accessible (404), tentative avec modèle suivant...`);
-        continue;
-      } else {
-        // e.g. 401 invalid api key or 429 rate limit - no point trying other models with same key
-        break;
-      }
-    } catch (e: any) {
-      lastError = e.message;
-    }
-  }
-
-  throw new Error(`Groq: ${lastError}`);
-}
-
-// Helper to call Gemini with multi-model fallback in case of temporary 503/429 spikes
-async function callGeminiWithFallback(
-  fullPrompt: string,
-  systemInstruction?: string,
-  customApiKey?: string
-): Promise<{ text: string; model: string }> {
-  const clientToUse =
-    customApiKey && customApiKey.trim()
-      ? new GoogleGenAI({
-          apiKey: customApiKey.trim(),
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        })
-      : ai;
-
-  const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
-  let lastError: any = null;
-
-  for (const m of modelsToTry) {
-    try {
-      const response = await clientToUse.models.generateContent({
-        model: m,
-        contents: fullPrompt,
-        config: systemInstruction ? { systemInstruction } : undefined,
-      });
-      const text = response.text?.trim();
-      if (text) {
-        return { text, model: m };
-      }
-    } catch (err: any) {
-      console.warn(`Gemini modèle ${m} indisponible (${err.message}), tentative modèle suivant...`);
-      lastError = err;
-    }
-  }
-
-  throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
-}
-
-// 0. Gemini Connection Tester Endpoint
-app.post('/api/gemini/test', async (req, res) => {
-  try {
-    const { apiKey } = req.body;
-    const keyToUse = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY;
-    if (!keyToUse) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Aucune clé API Gemini fournie ni configurée sur le serveur.',
-      });
-    }
-
-    const testClient = new GoogleGenAI({
-      apiKey: keyToUse.trim(),
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-
-    const start = Date.now();
-    const result = await testClient.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: 'Réponds en un seul mot: "Connecté".',
-    });
-    const latencyMs = Date.now() - start;
-
-    return res.json({
-      ok: true,
-      model: 'gemini-3.8-flash',
-      latencyMs,
-      reply: result.text?.trim() || 'Connecté',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// 0.1 Groq Connection & Model Tester Endpoint
-app.post('/api/groq/test', async (req, res) => {
-  try {
-    const { apiKey, model = 'openai/gpt-oss-120b' } = req.body;
-    if (!apiKey || !apiKey.trim()) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Veuillez saisir une clé API Groq (gsk_...) pour effectuer le test.',
-      });
-    }
-
-    const resolvedModel = resolveGroqModel(model);
-    const start = Date.now();
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey.trim()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: resolvedModel,
-        messages: [{ role: 'user', content: 'Réponds en un seul mot: "Connecté".' }],
-        max_tokens: 20,
-      }),
-    });
-
-    const latencyMs = Date.now() - start;
-
-    if (response.ok) {
-      const data = await response.json();
-      const reply = data.choices?.[0]?.message?.content?.trim() || 'Connecté';
-      return res.json({
-        ok: true,
-        model: resolvedModel,
-        latencyMs,
-        reply,
-      });
-    }
-
-    const errData = await response.json().catch(() => null);
-    const errMsg = errData?.error?.message || `Erreur HTTP ${response.status}`;
-    return res.status(response.status).json({
-      ok: false,
-      status: response.status,
-      error: errMsg,
-      model: resolvedModel,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// 1. Chat endpoint (Gemini or Groq)
-app.post('/api/chat', async (req, res) => {
-  try {
-    const {
-      prompt,
-      history = [],
-      provider = 'gemini',
-      geminiApiKey,
-      groqApiKey,
-      groqModel = 'openai/gpt-oss-120b',
-      systemPrompt = DEFAULT_SYSTEM_PROMPT,
-    } = req.body;
-
-    if (!prompt) {
-      return res.status(400).json({ error: 'Prompt requis' });
-    }
-
-    const formattedHistory = history
-      .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
-      .join('\n');
-    const fullPrompt = `${systemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
-
-    // A. Groq Provider
-    if (provider === 'groq') {
-      const keyToUse = groqApiKey || process.env.GROQ_API_KEY;
-
-      if (!keyToUse) {
-        console.warn('Pas de clé Groq renseignée, bascule fluide sur Gemini');
-        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
-        return res.json({
-          text: geminiRes.text,
-          provider: 'gemini',
-          model: geminiRes.model,
-          isFallback: true,
-          fallbackReason: 'Aucune clé Groq configurée',
-        });
-      }
-
-      try {
-        const { text, actualModel } = await callGroqWithFallback(prompt, systemPrompt, keyToUse, groqModel, history);
-        return res.json({ text, provider: 'groq', model: actualModel });
-      } catch (groqErr: any) {
-        console.warn(`Groq indisponible (${groqErr.message}), bascule de secours sur Gemini...`);
-        const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
-        return res.json({
-          text: geminiRes.text,
-          provider: 'gemini',
-          model: geminiRes.model,
-          isFallback: true,
-          fallbackReason: groqErr.message,
-        });
-      }
-    }
-
-    // B. Default: Gemini 3.8 Flash (Server-Side or Admin Custom Key)
-    const geminiRes = await callGeminiWithFallback(fullPrompt, undefined, geminiApiKey);
-    return res.json({ text: geminiRes.text, provider: 'gemini', model: geminiRes.model });
-  } catch (error: any) {
-    console.error('Erreur /api/chat:', error);
-    return res.status(500).json({ error: error.message || 'Erreur serveur KADERBOT' });
-  }
-});
-
-// 2. Ideas Generator endpoint
-app.post('/api/idees', async (req, res) => {
-  try {
-    const {
-      theme,
-      count = 5,
-      style = 'creatif',
-      styleDesc = '',
-      provider = 'gemini',
-      geminiApiKey,
-      groqApiKey,
-      groqModel = 'openai/gpt-oss-120b',
-    } = req.body;
-
-    const prompt = `Génère exactement ${count} idées courtes sur le thème : "${theme}". Style demandé: ${styleDesc || style}. Format obligatoire : une idée par ligne, numérotée de 1 à ${count}. Pas d'introduction ni de conclusion.`;
-
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
-      try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text } = await callGroqWithFallback(prompt, "Tu es un générateur d'idées créatif et concis.", key, groqModel);
-        return res.json({ text });
-      } catch (err) {
-        console.warn('Groq idees failed, falling back to Gemini');
-      }
-    }
-
-    const geminiRes = await callGeminiWithFallback(prompt, "Tu es un générateur d'idées créatif et percutant.", geminiApiKey);
-    return res.json({ text: geminiRes.text });
-  } catch (error: any) {
-    console.error('Erreur /api/idees:', error);
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-// 3. Translation endpoint
-app.post('/api/traduis', async (req, res) => {
-  try {
-    const { text, targetLang, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
-    const prompt = `Traduis le texte suivant en ${targetLang}. Réponds UNIQUEMENT par la traduction exacte, sans commentaire, guillemets ni introduction:\n\n${text}`;
-
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
-      try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un traducteur professionnel expert.', key, groqModel);
-        return res.json({ text: result });
-      } catch (err) {
-        console.warn('Groq traduis failed, falling back to Gemini');
-      }
-    }
-
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un traducteur polyglotte de précision. Tu retournes exclusivement le texte traduit.', geminiApiKey);
-    return res.json({ text: geminiRes.text });
-  } catch (error: any) {
-    console.error('Erreur /api/traduis:', error);
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-// 4. Corrector endpoint
-app.post('/api/corrige', async (req, res) => {
-  try {
-    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
-    const prompt = `Corrige les fautes d'orthographe, de grammaire et de ponctuation du texte suivant en gardant le sens et le ton. Réponds uniquement par le texte corrigé:\n\n${text}`;
-
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
-      try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un correcteur professionnel.', key, groqModel);
-        return res.json({ text: result });
-      } catch (err) {
-        console.warn('Groq corrige failed, falling back to Gemini');
-      }
-    }
-
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un correcteur linguistique d’élite. Tu renvoies exclusivement le texte corrigé.', geminiApiKey);
-    return res.json({ text: geminiRes.text });
-  } catch (error: any) {
-    console.error('Erreur /api/corrige:', error);
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-// 5. Summarizer endpoint
-app.post('/api/resume', async (req, res) => {
-  try {
-    const { text, provider = 'gemini', geminiApiKey, groqApiKey, groqModel = 'openai/gpt-oss-120b' } = req.body;
-    const prompt = `Résume le texte suivant en 2 à 3 phrases claires, précises et directes. Réponds uniquement par le résumé:\n\n${text}`;
-
-    if (provider === 'groq' && (groqApiKey || process.env.GROQ_API_KEY)) {
-      try {
-        const key = groqApiKey || process.env.GROQ_API_KEY;
-        const { text: result } = await callGroqWithFallback(prompt, 'Tu es un expert en synthèse documentaire.', key, groqModel);
-        return res.json({ text: result });
-      } catch (err) {
-        console.warn('Groq resume failed, falling back to Gemini');
-      }
-    }
-
-    const geminiRes = await callGeminiWithFallback(prompt, 'Tu es un synthétiseur d’informations. Rédige un résumé dense et limpide.', geminiApiKey);
-    return res.json({ text: geminiRes.text });
-  } catch (error: any) {
-    console.error('Erreur /api/resume:', error);
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-// 6. Memory Persistence (Load & Save to JSON disk file)
-app.get('/api/memory', (req, res) => {
-  try {
-    if (fs.existsSync(MEMORY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
-      return res.json(data);
-    }
-    return res.json({ memoire: {}, regles: {}, liens: {}, synonymes: {}, sessions: ['defaut'] });
-  } catch (err: any) {
-    console.error('Erreur lecture mémoire:', err);
-    return res.status(500).json({ error: 'Erreur lecture stockage' });
-  }
-});
-
-app.post('/api/memory/save', (req, res) => {
-  try {
-    const { memoire, regles, liens, synonymes, sessions } = req.body;
-    fs.writeFileSync(
-      MEMORY_FILE,
-      JSON.stringify({ memoire, regles, liens, synonymes, sessions, updatedAt: new Date().toISOString() }, null, 2),
-      'utf-8'
-    );
-    return res.json({ success: true, savedAt: new Date().toISOString() });
-  } catch (err: any) {
-    console.error('Erreur sauvegarde mémoire:', err);
-    return res.status(500).json({ error: 'Erreur écriture stockage' });
-  }
-});
-
-// Route de téléchargement de l'archive ZIP complète du projet web
-app.get('/api/export-project-zip', (req, res) => {
-  try {
-    const zipPath = path.resolve(__dirname, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_projet_complet.zip');
-    if (fs.existsSync(zipPath)) {
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="kaderbot-projet-web-complet.zip"');
-      return res.sendFile(zipPath);
-    } else {
-      return res.status(404).json({ error: "L'archive ZIP n'est pas encore générée." });
-    }
-  } catch (err) {
-    console.error('Erreur export zip:', err);
-    return res.status(500).json({ error: 'Erreur lors du téléchargement du zip' });
-  }
-});
-
-// 7. Python Pydroid 3 Export Script (Multi-mode: Console & Tkinter)
-app.post('/api/export-pydroid', (req, res) => {
-  try {
-    const {
-      memoire = {},
-      regles = {},
-      liens = {},
-      synonymes = {},
-      groqApiKey = '',
-      groqModel = 'openai/gpt-oss-120b',
-      mode = 'auto', // 'auto' | 'console' | 'gui'
-    } = req.body;
-    const resolvedModel = resolveGroqModel(groqModel);
-
-    // Encode memory and rules safely in Base64 so Python json.loads NEVER fails on null, true, false or quotes
-    const b64Memoire = Buffer.from(JSON.stringify(memoire)).toString('base64');
-    const b64Regles = Buffer.from(JSON.stringify(regles)).toString('base64');
-    const b64Liens = Buffer.from(JSON.stringify(liens)).toString('base64');
-    const b64Synonymes = Buffer.from(JSON.stringify(synonymes)).toString('base64');
-
-    const defaultTargetMode = mode === 'console' ? 'CONSOLE' : mode === 'gui' ? 'GUI' : 'AUTO';
-
-    const pythonScript = `# -*- coding: utf-8 -*-
-"""
-================================================================================
-KADERBOT NOVA V14 - APPLICATION COMPLETE MULTI-MODE POUR PYDROID 3 (ANDROID)
-================================================================================
-Généré par KADERBOT NOVA Web Studio.
-Ce script est conçu pour fonctionner SANS AUCUN CRASH sur Pydroid 3 (Android).
-
-CARACTERISTIQUES :
-- Mode hybride intelligent : Console interactive ultra-fluide ou Interface Tkinter
-- Tolérance zéro crash : Si Tkinter n'est pas installé sur Android, bascule
-  automatiquement sur la Console interactive
-- Moteur cognitif complet : Déduction symbolique, causalité 'pourquoi',
-  recherche floue (difflib), et association sémantique Question-Réponse
-- Sauvegarde locale automatique dans 'kaderbot_memoire.json' sur votre téléphone
-- Connectivité Groq Cloud ultra-rapide (${resolvedModel})
-================================================================================
-"""
-
-import sys
-import os
-import json
-import base64
-import re
-import difflib
-import unicodedata
-import threading
-import urllib.request
-import urllib.error
-from datetime import datetime
-
-# ==============================================================================
-# CONFIGURATION & MODE D'EXECUTION
-# ==============================================================================
-# Modes possibles : 'CONSOLE' (recommandé Pydroid 3), 'GUI' (Tkinter), ou 'AUTO'
-MODE_CIBLE = "${defaultTargetMode}"
-
-API_KEY = "${groqApiKey}"
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL_GROQ = "${resolvedModel}"
-GROQ_ACTIF = bool(API_KEY.strip())
-
-SYSTEM_PROMPT = (
-    "Tu es KADERBOT, un assistant cognitif sympa, concis et curieux. "
-    "Tu réponds toujours en français, en 2 à 4 phrases maximum."
-)
-
-DATA_FILE = "kaderbot_memoire.json"
-
-# ==============================================================================
-# CHARGEMENT DES BASES DE CONNAISSANCES (DECODAGE BASE64 ULTRA-STABLE)
-# ==============================================================================
-def _decoder_base64_json(payload_b64):
-    try:
-        raw_bytes = base64.b64decode(payload_b64.encode('utf-8'))
-        return json.loads(raw_bytes.decode('utf-8'))
-    except Exception as e:
-        print("[!] Erreur décodage interne:", e)
-        return {}
-
-memoire = _decoder_base64_json("${b64Memoire}")
-regles = _decoder_base64_json("${b64Regles}")
-liens = _decoder_base64_json("${b64Liens}")
-synonymes = _decoder_base64_json("${b64Synonymes}")
-
-contexte = []
-historique_chat = []
-
-# ==============================================================================
-# PERSISTANCE LOCALE ANDROID
-# ==============================================================================
-def sauvegarder_donnees():
-    try:
-        data = {
-            "memoire": memoire,
-            "regles": regles,
-            "liens": liens,
-            "synonymes": synonymes,
-            "updated_at": datetime.now().isoformat()
-        }
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        print("[!] Erreur sauvegarde locale :", e)
-        return False
-
-def charger_donnees():
-    global memoire, regles, liens, synonymes
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                d = json.load(f)
-                if "memoire" in d: memoire.update(d["memoire"])
-                if "regles" in d: regles.update(d["regles"])
-                if "liens" in d: liens.update(d["liens"])
-                if "synonymes" in d: synonymes.update(d["synonymes"])
-        except Exception as e:
-            print("[!] Erreur chargement sauvegarde :", e)
-
-charger_donnees()
-
-# ==============================================================================
-# OUTILS LINGUISTIQUES & EXTRACTION SEMANTIQUE
-# ==============================================================================
-MOTS_INTERROGATIFS_ET_VIDES = {
-    'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'd', 'l',
-    'ce', 'cet', 'cette', 'ces', 'mon', 'ton', 'son', 'ma', 'ta', 'sa',
-    'qui', 'que', 'quoi', 'quel', 'quelle', 'quels', 'quelles',
-    'comment', 'pourquoi', 'quand', 'est', 'sont', 'ete', 'etre',
-    'avoir', 'fait', 'font', 'bonjour', 'salut', "s'il", 'te', 'plait'
-}
-
-def sans_accent(t):
-    if not t: return ""
-    return "".join(c for c in unicodedata.normalize("NFD", str(t)) if unicodedata.category(c) != "Mn").lower()
-
-PONCT_SET = set(['?', '!', '.', ',', ';', ':', '"', chr(39), '(', ')', '[', ']', '{', '}', '-'])
-
-def nettoyer_ponctuation(chaine):
-    return "".join(" " if c in PONCT_SET else c for c in chaine)
-
-def normaliser_question_cle(q):
-    s = sans_accent(q)
-    s = nettoyer_ponctuation(s)
-    tokens = [w.strip() for w in s.split() if w.strip()]
-    tokens_significatifs = [w for w in tokens if w not in MOTS_INTERROGATIFS_ET_VIDES and len(w) > 2]
-    return " ".join(tokens_significatifs if tokens_significatifs else tokens)
-
-def extraire_mots_cles(q):
-    s = sans_accent(q)
-    s = nettoyer_ponctuation(s)
-    tokens = [w.strip() for w in s.split() if w.strip()]
-    return set([w for w in tokens if w not in MOTS_INTERROGATIFS_ET_VIDES and len(w) > 2])
-
-def rechercher_flou(texte, memoire_dict, regles_dict, seuil=0.72):
-    t_clean = sans_accent(texte).strip()
-    clefs = list(set(list(memoire_dict.keys()) + list(regles_dict.keys())))
-    if not clefs: return None
-    matches = difflib.get_close_matches(t_clean, [sans_accent(k) for k in clefs], n=1, cutoff=seuil)
-    if matches:
-        matched_norm = matches[0]
-        for k in clefs:
-            if sans_accent(k) == matched_norm:
-                return k
-    return None
-
-def trouver_question_reponse(question, memoire_dict, seuil=0.70):
-    if not question or not memoire_dict: return None
-    q_norm = normaliser_question_cle(question)
-    q_mots = extraire_mots_cles(question)
-    if not q_norm and not q_mots: return None
-
-    meilleur = None
-    meilleur_score = 0.0
-
-    for sujet, entries in memoire_dict.items():
-        if not entries: continue
-        entry = entries[0]
-        is_qa = entry.get("type") == "question_reponse" or bool(entry.get("question_origine")) or " " in sujet
-        if not is_qa: continue
-
-        sujet_norm = normaliser_question_cle(entry.get("question_origine") or sujet)
-        sujet_mots = set(entry.get("mots_cles") or list(extraire_mots_cles(sujet_norm)))
-
-        if q_norm == sujet_norm:
-            return {"sujet": sujet, "entry": entry, "score": 1.0}
-
-        score = 0.0
-        if q_mots and sujet_mots:
-            intersection = q_mots.intersection(sujet_mots)
-            union = q_mots.union(sujet_mots)
-            score = len(intersection) / float(len(union)) if union else 0.0
-
-        if score > meilleur_score:
-            meilleur_score = score
-            meilleur = {"sujet": sujet, "entry": entry, "score": score}
-
-    if meilleur and meilleur_score >= seuil:
-        return meilleur
-    return None
-
-def est_requete_definition(texte):
-    t = sans_accent(texte).strip().rstrip("?.! ")
-    prefixes = [
-        "c'est quoi", "cest quoi", "qu'est ce que", "qu'est-ce que",
-        "qu'est ce qu'", "qu'est-ce qu'", "qui est", "parle moi de",
-        "parle-moi de", "definition de", "definir", "definis"
-    ]
-    for pref in prefixes:
-        if t.startswith(pref):
-            reste = t[len(pref):].strip()
-            for art in ["le ", "la ", "les ", "un ", "une ", "des ", "l'", "d'"]:
-                if reste.startswith(art):
-                    reste = reste[len(art):].strip()
-                    break
-            mots = reste.split()
-            if mots:
-                return mots[0]
-    mots_totaux = t.split()
-    if len(mots_totaux) == 1:
-        mot = mots_totaux[0]
-        if len(mot) >= 3 and mot not in ["bonjour", "salut", "merci", "aide", "oui", "non"]:
-            return mot
-    elif len(mots_totaux) == 2 and mots_totaux[0] in ["le", "la", "les", "un", "une", "des", "ce", "cet", "cette"]:
-        return mots_totaux[1]
-    return None
-
-def extraire_x(texte, memoire_dict, regles_dict, syn_dict, ctx_list):
-    t = sans_accent(texte).strip().rstrip("?.! ")
-    if "pourquoi" in t:
-        idx = t.find("pourquoi")
-        reste = t[idx + 8:].strip()
-        for art in ["le ", "la ", "les ", "un ", "une ", "l'", "d'"]:
-            if reste.startswith(art):
-                reste = reste[len(art):].strip()
-                break
-        mots = reste.split()
-        if mots:
-            return mots[0]
-    c_def = est_requete_definition(texte)
-    if c_def:
-        return c_def
-    for p in ["il", "elle", "lui", "ceci", "cela"]:
-        if p in t.split() and ctx_list:
-            return ctx_list[-1]
-    return None
-
-def deduire_chaine(sujet, liens_dict, max_depth=6):
-    chemin = [sujet]
-    curr = sujet
-    for _ in range(max_depth):
-        parents = liens_dict.get(curr, [])
-        if parents:
-            curr = parents[0]
-            chemin.append(curr)
-        else:
-            break
-    return chemin
-
-def repondre_pourquoi(texte, memoire_dict, regles_dict, liens_dict, syn_dict):
-    sujet = extraire_x(texte, memoire_dict, regles_dict, syn_dict, contexte)
-    if not sujet: return None
-    chaine = deduire_chaine(sujet, liens_dict)
-    for ancetre in chaine:
-        if ancetre in regles_dict:
-            for r in regles_dict[ancetre]:
-                if r.get("quant") in ["tous", "chaque"]:
-                    return f"Parce que {sujet} est un {ancetre}, et que tous les {ancetre}s {r.get('prop')}."
-    return None
-
-def apprendre_de_groq(question, reponse, memoire_dict):
-    q_clean = sans_accent(question).strip()
-    concept = est_requete_definition(question)
-    if concept:
-        sujet = concept
-        prem_phrase = reponse.split(".")[0].strip()
-        if len(prem_phrase) > 10:
-            if sujet not in memoire_dict:
-                memoire_dict[sujet] = []
-            memoire_dict[sujet].insert(0, {
-                "def": prem_phrase,
-                "poids": 0.85,
-                "hits": 1,
-                "source": "groq",
-                "type": "concept",
-                "question_origine": question,
-                "last_used": datetime.now().isoformat(),
-                "created": datetime.now().isoformat()
-            })
-            sauvegarder_donnees()
-            return sujet
-    else:
-        # Enregistrer Question + Réponse (Q&R)
-        canonical_q = " ".join(nettoyer_ponctuation(q_clean).split())
-        if len(canonical_q) > 4:
-            mots_cles = list(extraire_mots_cles(question))
-            if canonical_q not in memoire_dict:
-                memoire_dict[canonical_q] = []
-            memoire_dict[canonical_q].insert(0, {
-                "def": reponse.strip(),
-                "poids": 0.85,
-                "hits": 1,
-                "source": "groq",
-                "type": "question_reponse",
-                "mots_cles": mots_cles,
-                "question_origine": question,
-                "last_used": datetime.now().isoformat(),
-                "created": datetime.now().isoformat()
-            })
-            sauvegarder_donnees()
-            return canonical_q
-    return None
-
-# ==============================================================================
-# APPEL API GROQ
-# ==============================================================================
-def appeler_groq_sync(prompt, history_list):
-    if not API_KEY.strip():
-        return "Clé Groq non configurée. Ouvre les paramètres ou définis API_KEY."
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for h in history_list[-4:]:
-        messages.append(h)
-    messages.append({"role": "user", "content": prompt})
-
-    payload = json.dumps({
-        "model": MODEL_GROQ,
-        "messages": messages,
-        "temperature": 0.7,
-        "max_tokens": 600
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        API_URL,
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {API_KEY.strip()}",
-            "Content-Type": "application/json",
-            "User-Agent": "kaderbot-pydroid-v14"
-        }
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=12) as response:
-            res_data = json.loads(response.read().decode("utf-8"))
-            return res_data["choices"][0]["message"]["content"].strip()
-    except urllib.error.HTTPError as e:
-        err_msg = e.read().decode("utf-8", errors="ignore")
-        return f"Erreur Groq ({e.code}) : {err_msg}"
-    except Exception as e:
-        return f"Erreur connexion : {str(e)}"
-
-# ==============================================================================
-# DISPATCHER CENTRAL DE TRAITEMENT DES MESSAGES
-# ==============================================================================
-def traiter_message_texte(texte):
-    """
-    Traite un message et retourne un tuple : (type_source, message_reponse)
-    type_source : 'LOCAL', 'DEDUCTION', 'GROQ', 'COMMANDE', 'SYSTEME'
-    """
-    txt = texte.strip()
-    if not txt:
-        return ("SYSTEME", "Message vide.")
-    txt_lower = txt.lower()
-
-    # 1. Commande retiens
-    if txt_lower.startswith("retiens:"):
-        corps = txt[8:].strip()
-        if "=" in corps:
-            s, d = [p.strip() for p in corps.split("=", 1)]
-            s_clean = s.lower()
-            if s_clean not in memoire: memoire[s_clean] = []
-            memoire[s_clean].insert(0, {
-                "def": d, "poids": 0.85, "hits": 1, "source": "manuel",
-                "type": "concept",
-                "last_used": datetime.now().isoformat(), "created": datetime.now().isoformat()
-            })
-            contexte.append(s_clean)
-            sauvegarder_donnees()
-            return ("COMMANDE", f"Fait retenu pour '{s_clean}' : {d}")
-        return ("SYSTEME", "Format : retiens: sujet = définition")
-
-    # 2. Commande lie
-    if txt_lower.startswith("lie:"):
-        corps = txt[4:].strip()
-        if "->" in corps:
-            src, dst = [p.strip().lower() for p in corps.split("->", 1)]
-            if src not in liens: liens[src] = []
-            if dst not in liens[src]: liens[src].append(dst)
-            sauvegarder_donnees()
-            return ("DEDUCTION", f"Lien d'héritage établi : {src} -> {dst}")
-        return ("SYSTEME", "Format : lie: moineau -> oiseau")
-
-    # 3. Commande lister
-    if txt_lower.startswith("lister:"):
-        cible = txt_lower[7:].strip()
-        if cible == "memoire":
-            keys = sorted(list(memoire.keys()))
-            return ("SYSTEME", f"Mémoire ({len(keys)} sujets) :\\n" + ", ".join(keys[:35]))
-        if cible == "regles":
-            return ("SYSTEME", f"Règles ({len(regles)} catégories) :\\n" + ", ".join(regles.keys()))
-        if cible == "liens":
-            lignes = [f"{k} -> {', '.join(v)}" for k, v in liens.items()]
-            return ("SYSTEME", "Liens d'héritage :\\n" + "\\n".join(lignes[:20]))
-
-    # 4. Question causale 'pourquoi'
-    if "pourquoi" in txt_lower:
-        rep = repondre_pourquoi(txt, memoire, regles, liens, synonymes)
-        if rep:
-            return ("DEDUCTION", rep)
-
-    # 5. Recherche Question-Réponse (Q&R enregistrée)
-    qa_match = trouver_question_reponse(txt, memoire)
-    if qa_match:
-        entry = qa_match["entry"]
-        rep = entry.get("def", "")
-        return ("LOCAL", rep)
-
-    # 6. Définition directe de concept
-    x = extraire_x(txt, memoire, regles, synonymes, contexte)
-    if x and x in memoire:
-        contexte.append(x)
-        defs = [item["def"] for item in memoire[x]]
-        return ("LOCAL", f"{x.capitalize()} : " + " ; ".join(defs))
-
-    # 7. Recherche floue Levenshtein (en cas de faute de frappe)
-    flou = rechercher_flou(txt, memoire, regles)
-    if flou and flou in memoire:
-        contexte.append(flou)
-        defs = [item["def"] for item in memoire[flou]]
-        return ("LOCAL", f"(Tu voulais dire '{flou}' ?) : " + " ; ".join(defs))
-
-    # 8. Fallback Groq Cloud
-    if GROQ_ACTIF:
-        rep = appeler_groq_sync(txt, historique_chat)
-        historique_chat.append({"role": "user", "content": txt})
-        historique_chat.append({"role": "assistant", "content": rep})
-        apprendre_de_groq(txt, rep, memoire)
-        return ("GROQ", rep)
-
-    return ("LOCAL", f"Je ne connais pas encore ce sujet. Enseigne-le moi avec : retiens: {txt} = ...")
-
-# ==============================================================================
-# MODE 1 : INTERFACE CONSOLE / TERMINAL INTERACTIF (100% GARANTI SUR PYDROID 3)
-# ==============================================================================
-def lancer_mode_console():
-    banner = f"""
-================================================================================
-          KADERBOT NOVA V14 - MOTEUR COGNITIF HYBRIDE (PYDROID 3)
-================================================================================
-[INFO] Mémoire locale chargée : {len(memoire)} entrées | {len(regles)} règles | {len(liens)} liens
-[INFO] Modèle Groq actif : {"OUI (" + MODEL_GROQ + ")" if GROQ_ACTIF else "NON (Mode local seul)"}
---------------------------------------------------------------------------------
-Commandes utiles :
-  • Poser une question   : "c'est quoi le moineau ?", "pourquoi le faucon vole ?"
-  • Apprendre un concept : "retiens: pigeon = oiseau urbain"
-  • Créer un lien Is-A   : "lie: pigeon -> oiseau"
-  • Inspecter la mémoire : "lister: memoire" ou "lister: regles"
-  • Quitter              : "quitter" ou "exit"
-================================================================================
-"""
-    print(banner)
-
-    while True:
-        try:
-            user_input = input("\\n[Toi] > ").strip()
-            if not user_input:
-                continue
-
-            if user_input.lower() in ["quitter", "exit", "quit", "q"]:
-                print("\\n[KADERBOT] Au revoir et à bientôt ! Données sauvegardées.")
-                sauvegarder_donnees()
-                break
-
-            source, reponse = traiter_message_texte(user_input)
-            prefixe = f"[KADERBOT | {source}]"
-            print(f"\\n{prefixe}\\n{reponse}")
-
-        except (KeyboardInterrupt, EOFError):
-            print("\\n\\n[KADERBOT] Interruption détectée. Données sauvegardées.")
-            sauvegarder_donnees()
-            break
-        except Exception as err:
-            print(f"[!] Erreur inattendue : {err}")
-
-# ==============================================================================
-# MODE 2 : INTERFACE GRAPHIQUE TKINTER (SI DISPONIBLE SUR ANDROID)
-# ==============================================================================
-def lancer_mode_tkinter():
-    try:
-        import tkinter as tk
-        from tkinter import scrolledtext
-    except Exception as e:
-        print(f"[!] Tkinter n'est pas disponible dans ce Pydroid 3 ({e}).")
-        print("[*] Bascule automatique sur la Console Interactive...")
-        lancer_mode_console()
-        return
-
-    class KaderbotTkApp:
-        def __init__(self, root):
-            self.root = root
-            self.root.title("KADERBOT NOVA V14 - Pydroid 3")
-            self.root.geometry("480x760")
-            self.root.configure(bg="#050508")
-
-            # Bannière supérieure
-            top_frame = tk.Frame(root, bg="#090B10", padx=10, pady=8)
-            top_frame.pack(fill=tk.X)
-
-            title_lbl = tk.Label(top_frame, text="KADERBOT NOVA V14", fg="#10A37F", bg="#090B10", font=("Arial", 13, "bold"))
-            title_lbl.pack(side=tk.LEFT)
-
-            self.stats_lbl = tk.Label(top_frame, text=f"{len(memoire)} faits", fg="#718096", bg="#090B10", font=("Arial", 9))
-            self.stats_lbl.pack(side=tk.RIGHT)
-
-            # Zone de discussion
-            self.chat_area = scrolledtext.ScrolledText(root, bg="#0B0E17", fg="#E2E8F0", font=("Arial", 11), wrap=tk.WORD, bd=0, padx=10, pady=10)
-            self.chat_area.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self.chat_area.tag_config("user", foreground="#63B3ED", justify="right")
-            self.chat_area.tag_config("bot", foreground="#48BB78")
-            self.chat_area.tag_config("system", foreground="#A0AEC0", font=("Arial", 9, "italic"))
-
-            # Raccourcis tactiles
-            pills_frame = tk.Frame(root, bg="#050508")
-            pills_frame.pack(fill=tk.X, padx=8, pady=2)
-            pills = [("C'est quoi...", "c'est quoi "), ("Pourquoi...", "pourquoi "), ("Retiens", "retiens: "), ("Mémoire", "lister: memoire")]
-            for label, cmd in pills:
-                btn = tk.Button(pills_frame, text=label, bg="#161822", fg="#CBD5E0", font=("Arial", 8), bd=1, relief=tk.FLAT, padx=6, pady=2,
-                                command=lambda c=cmd: self.prefill(c))
-                btn.pack(side=tk.LEFT, padx=2)
-
-            # Zone d'envoi
-            bottom_frame = tk.Frame(root, bg="#090B10", padx=8, pady=6)
-            bottom_frame.pack(fill=tk.X)
-            self.entry = tk.Entry(bottom_frame, bg="#161822", fg="#FFFFFF", insertbackground="#10A37F", font=("Arial", 11), bd=1, relief=tk.FLAT)
-            self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=(0, 6))
-            self.entry.bind("<Return>", lambda e: self.envoyer())
-
-            send_btn = tk.Button(bottom_frame, text="Envoyer", bg="#10A37F", fg="#FFFFFF", font=("Arial", 10, "bold"), bd=0, padx=12, pady=6, command=self.envoyer)
-            send_btn.pack(side=tk.RIGHT)
-
-            self.ajouter_message("KADERBOT", "Bonjour ! Je suis KADERBOT NOVA V14. Pose-moi une question ou utilise 'retiens: sujet = définition'.", "bot")
-
-        def prefill(self, text):
-            self.entry.delete(0, tk.END)
-            self.entry.insert(0, text)
-            self.entry.focus()
-
-        def ajouter_message(self, auteur, texte, tag):
-            self.chat_area.config(state=tk.NORMAL)
-            if auteur:
-                self.chat_area.insert(tk.END, f"\\n[{auteur}]\\n", tag)
-            self.chat_area.insert(tk.END, f"{texte}\\n", tag)
-            self.chat_area.see(tk.END)
-            self.chat_area.config(state=tk.DISABLED)
-
-        def envoyer(self):
-            txt = self.entry.get().strip()
-            if not txt: return
-            self.entry.delete(0, tk.END)
-            self.ajouter_message("Toi", txt, "user")
-            source, rep = traiter_message_texte(txt)
-            self.stats_lbl.config(text=f"{len(memoire)} faits")
-            self.ajouter_message(f"KADERBOT | {source}", rep, "bot")
-
-    try:
-        root = tk.Tk()
-        app = KaderbotTkApp(root)
-        root.mainloop()
-    except Exception as e:
-        print(f"[!] Erreur au lancement de l'interface graphique Tkinter ({e}).")
-        print("[*] Bascule automatique sur la Console Interactive...")
-        lancer_mode_console()
-
-# ==============================================================================
-# POINT D'ENTREE PRINCIPAL
-# ==============================================================================
-if __name__ == "__main__":
-    if MODE_CIBLE == "GUI":
-        lancer_mode_tkinter()
-    elif MODE_CIBLE == "CONSOLE":
-        lancer_mode_console()
-    else: # AUTO
-        try:
-            import tkinter as tk
-            lancer_mode_tkinter()
-        except Exception:
-            lancer_mode_console()
-`;
-
-    const filename =
-      mode === 'console'
-        ? 'kaderbot_v14_pydroid_terminal.py'
-        : mode === 'gui'
-        ? 'kaderbot_v14_pydroid_tkinter.py'
-        : 'kaderbot_v14_pydroid.py';
-
-    res.setHeader('Content-Type', 'text/x-python');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send(pythonScript);
-  } catch (err: any) {
-    console.error('Erreur export pydroid:', err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Vite middleware in dev or static files in production
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Serveur KADERBOT NOVA opérationnel sur http://localhost:${PORT}`);
-  });
-}
-
-startServer();
-
-```
-
----
-

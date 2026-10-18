@@ -68,8 +68,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         style: selectedStyle,
         styleDesc,
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
 
@@ -102,8 +100,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         prompt,
         history: [],
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
 
@@ -129,8 +125,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
         text: transInput.trim(),
         targetLang: transLang,
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
       setTransResult(result);
@@ -149,8 +143,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       const result = await apiService.corriger({
         text: corrigeInput.trim(),
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
       setCorrigeResult(result);
@@ -169,8 +161,6 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       const result = await apiService.resumer({
         text: resumeInput.trim(),
         provider: config.provider,
-        geminiApiKey: config.geminiApiKey,
-        groqApiKey: config.groqApiKey,
         groqModel: config.groqModel,
       });
       setResumeResult(result);
