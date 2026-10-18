@@ -20,6 +20,8 @@ import {
   X,
   MessageSquare,
   Clock,
+  Pencil,
+  Search,
 } from 'lucide-react';
 import { ChatMessage, ChatThread } from '../types/kaderbot';
 
@@ -40,6 +42,7 @@ interface ChatTabProps {
   onSelectThread?: (threadId: string) => void;
   onNewThread?: () => void;
   onDeleteThread?: (threadId: string) => void;
+  onRenameThread?: (threadId: string, newTitle: string) => void;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -59,11 +62,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onSelectThread,
   onNewThread,
   onDeleteThread,
+  onRenameThread,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +96,22 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
+
+  // Auto-focus rename field when editing a thread title
+  useEffect(() => {
+    if (editingThreadId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingThreadId]);
+
+  const handleSaveRename = (threadId: string) => {
+    const trimmed = editingTitle.trim();
+    if (trimmed) {
+      onRenameThread?.(threadId, trimmed);
+    }
+    setEditingThreadId(null);
+  };
 
   // Voice Speech Recognition
   const handleToggleVoice = () => {
@@ -188,6 +213,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
+  const filteredThreads = (threads || []).filter(t => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (t.title || '').toLowerCase().includes(q);
+  });
+
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] cyber-bg">
       {/* Top Thread & History Subheader Bar */}
@@ -267,6 +298,29 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               </button>
             </div>
 
+            {/* Search Input Bar (Feature 2) */}
+            <div className="px-3 py-2 border-b border-gray-800/80 bg-[#07090F]/70">
+              <div className="relative flex items-center">
+                <Search className="w-3.5 h-3.5 text-gray-500 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Rechercher une discussion..."
+                  className="w-full bg-[#121622] border border-gray-800 rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50 transition shadow-inner"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 text-gray-500 hover:text-white"
+                    title="Effacer la recherche"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Threads List */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5 overscroll-contain">
               {(!threads || threads.length === 0) ? (
@@ -277,57 +331,144 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                     Posez votre première question pour sauvegarder automatiquement ce fil !
                   </p>
                 </div>
+              ) : filteredThreads.length === 0 ? (
+                <div className="py-10 text-center text-gray-500 text-xs px-4">
+                  <Search className="w-7 h-7 text-gray-700 mx-auto mb-2 opacity-60" />
+                  <p className="font-semibold text-gray-400">Aucun résultat trouvé</p>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Aucune discussion ne correspond à « {searchQuery} »
+                  </p>
+                </div>
               ) : (
-                threads.map(thread => {
+                filteredThreads.map(thread => {
                   const isActive = thread.id === activeThreadId;
+                  const isEditing = editingThreadId === thread.id;
                   const dateStr = formatThreadDate(thread.updatedAt || thread.createdAt);
                   return (
                     <div
                       key={thread.id}
                       onClick={() => {
+                        if (isEditing) return;
                         onSelectThread?.(thread.id);
                         setIsHistoryOpen(false);
                       }}
-                      className={`group flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition border text-left ${
+                      className={`group flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl transition border text-left ${
                         isActive
                           ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200 shadow-sm'
                           : 'bg-gray-900/60 hover:bg-gray-800/90 border-gray-800/80 text-gray-300 hover:text-white'
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <MessageSquare
-                            className={`w-3.5 h-3.5 shrink-0 ${
-                              isActive ? 'text-emerald-400' : 'text-gray-500 group-hover:text-gray-300'
-                            }`}
+                      {isEditing ? (
+                        <div
+                          onClick={e => e.stopPropagation()}
+                          className="flex items-center gap-1.5 w-full"
+                        >
+                          <input
+                            ref={editInputRef}
+                            type="text"
+                            value={editingTitle}
+                            onChange={e => setEditingTitle(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleSaveRename(thread.id);
+                              if (e.key === 'Escape') setEditingThreadId(null);
+                            }}
+                            className="flex-1 bg-[#161B26] border border-emerald-500/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none"
+                            placeholder="Nouveau titre..."
                           />
-                          <p className="text-xs font-semibold truncate leading-tight">
-                            {thread.title}
-                          </p>
+                          <button
+                            onClick={() => handleSaveRename(thread.id)}
+                            className="p-1.5 rounded-md bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 transition"
+                            title="Valider le renommage"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setEditingThreadId(null)}
+                            className="p-1.5 rounded-md hover:bg-gray-800 text-gray-400 transition"
+                            title="Annuler"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <div className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
-                          <Clock className="w-2.5 h-2.5 text-gray-600" />
-                          <span>{dateStr}</span>
-                          <span>·</span>
-                          <span>
-                            {thread.messages.filter(m => m.author === 'Toi').length} msg
-                          </span>
-                        </div>
-                      </div>
+                      ) : (
+                        <>
+                          <div className="min-w-0 flex-1 cursor-pointer">
+                            <div className="flex items-center gap-1.5">
+                              <MessageSquare
+                                className={`w-3.5 h-3.5 shrink-0 ${
+                                  isActive ? 'text-emerald-400' : 'text-gray-500 group-hover:text-gray-300'
+                                }`}
+                              />
+                              <p className="text-xs font-semibold truncate leading-tight">
+                                {thread.title}
+                              </p>
+                            </div>
+                            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
+                              <Clock className="w-2.5 h-2.5 text-gray-600" />
+                              <span>{dateStr}</span>
+                              <span>·</span>
+                              <span>
+                                {thread.messages.filter(m => m.author === 'Toi').length} msg
+                              </span>
+                            </div>
+                          </div>
 
-                      {/* Trash can delete button (Requirement 5) */}
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          if (confirm('Supprimer cette discussion ?')) {
-                            onDeleteThread?.(thread.id);
-                          }
-                        }}
-                        className="opacity-60 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-950/60 hover:text-rose-400 text-gray-500 transition active:scale-90"
-                        title="Supprimer la discussion"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            {confirmingDeleteId === thread.id ? (
+                              <div
+                                onClick={e => e.stopPropagation()}
+                                className="flex items-center gap-1 bg-rose-950/80 border border-rose-700/60 px-2 py-0.5 rounded-lg text-[11px] text-rose-200"
+                              >
+                                <span>Supprimer ?</span>
+                                <button
+                                  onClick={() => {
+                                    onDeleteThread?.(thread.id);
+                                    setConfirmingDeleteId(null);
+                                  }}
+                                  className="p-1 hover:bg-rose-600/50 rounded text-rose-100 font-bold transition"
+                                  title="Confirmer la suppression"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setConfirmingDeleteId(null)}
+                                  className="p-1 hover:bg-gray-800 rounded text-gray-400 transition"
+                                  title="Annuler"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                {/* Rename button (Feature 1 - icône de crayon) */}
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setEditingThreadId(thread.id);
+                                    setEditingTitle(thread.title);
+                                  }}
+                                  className="opacity-60 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-gray-700/80 hover:text-cyan-300 text-gray-400 transition active:scale-90"
+                                  title="Modifier le titre de la discussion"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Trash can delete button (Requirement 5) */}
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setConfirmingDeleteId(thread.id);
+                                  }}
+                                  className="opacity-60 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-950/60 hover:text-rose-400 text-gray-500 transition active:scale-90"
+                                  title="Supprimer la discussion"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   );
                 })

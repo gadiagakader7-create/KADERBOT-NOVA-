@@ -404,6 +404,17 @@ export default function App() {
     }
   };
 
+  // Rename a thread (Feature 1)
+  const handleRenameThread = (threadId: string, newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    setThreads(prev =>
+      prev.map(t =>
+        t.id === threadId ? { ...t, title: trimmed, updatedAt: new Date().toISOString() } : t
+      )
+    );
+  };
+
   // Adjust cognitive weight
   const handleAdjustWeight = (sujet: string, delta: number) => {
     setMemoire(prev => {
@@ -1398,6 +1409,7 @@ export default function App() {
             onSelectThread={handleSelectThread}
             onNewThread={handleNewThread}
             onDeleteThread={handleDeleteThread}
+            onRenameThread={handleRenameThread}
           />
         )}
 
