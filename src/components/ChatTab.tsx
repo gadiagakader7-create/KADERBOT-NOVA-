@@ -15,8 +15,13 @@ import {
   Share2,
   Copy,
   Check,
+  History,
+  Plus,
+  X,
+  MessageSquare,
+  Clock,
 } from 'lucide-react';
-import { ChatMessage } from '../types/kaderbot';
+import { ChatMessage, ChatThread } from '../types/kaderbot';
 
 interface ChatTabProps {
   messages: ChatMessage[];
@@ -30,6 +35,11 @@ interface ChatTabProps {
   onClearPrefill?: () => void;
   onOpenActions?: () => void;
   isAdmin?: boolean;
+  threads?: ChatThread[];
+  activeThreadId?: string | null;
+  onSelectThread?: (threadId: string) => void;
+  onNewThread?: () => void;
+  onDeleteThread?: (threadId: string) => void;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -44,10 +54,16 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onClearPrefill,
   onOpenActions,
   isAdmin = false,
+  threads = [],
+  activeThreadId = null,
+  onSelectThread,
+  onNewThread,
+  onDeleteThread,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -151,8 +167,176 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     { label: 'Lister mémoire', text: 'lister: memoire' },
   ];
 
+  const activeThread = (threads || []).find(t => t.id === activeThreadId);
+
+  const formatThreadDate = (isoStr: string) => {
+    try {
+      const d = new Date(isoStr);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      if (isToday) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) {
+        return 'Hier';
+      }
+      return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+    } catch {
+      return '';
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] cyber-bg">
+      {/* Top Thread & History Subheader Bar */}
+      <div className="shrink-0 flex-shrink-0 px-3 sm:px-4 py-2 bg-[#090B10]/95 border-b border-gray-800/80 flex items-center justify-between gap-2 z-10">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={() => setIsHistoryOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-emerald-500/40 text-xs font-semibold text-gray-200 transition active:scale-95 shrink-0 shadow-xs"
+            title="Ouvrir l'historique des discussions"
+          >
+            <History className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Historique</span>
+            {(threads?.length || 0) > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono">
+                {threads?.length}
+              </span>
+            )}
+          </button>
+
+          {/* Current discussion title indicator */}
+          <div className="min-w-0 flex items-center gap-1.5 text-xs text-gray-400">
+            <span className="hidden sm:inline text-gray-700">|</span>
+            <span className="truncate font-medium text-gray-300 max-w-[130px] sm:max-w-[280px]">
+              {activeThread ? activeThread.title : 'Nouvelle discussion'}
+            </span>
+          </div>
+        </div>
+
+        {/* Quick New Discussion button */}
+        <button
+          onClick={onNewThread}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition active:scale-95 shrink-0 shadow-xs"
+          title="Démarrer une nouvelle discussion vierge"
+        >
+          <Plus className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="hidden sm:inline">Nouvelle discussion</span>
+        </button>
+      </div>
+
+      {/* Slide-over History Drawer (ChatGPT style side panel) */}
+      {isHistoryOpen && (
+        <div className="absolute inset-0 z-50 flex">
+          {/* Backdrop overlay */}
+          <div
+            onClick={() => setIsHistoryOpen(false)}
+            className="absolute inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+          />
+
+          {/* Drawer content panel */}
+          <div className="relative w-full max-w-[300px] sm:max-w-xs bg-[#090B10] border-r border-gray-800 flex flex-col h-full shadow-2xl z-10 animate-in slide-in-from-left duration-200">
+            {/* Drawer Header */}
+            <div className="p-3.5 border-b border-gray-800 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-white font-bold text-xs sm:text-sm">
+                <History className="w-4 h-4 text-emerald-400" />
+                <span>Discussions ({threads?.length || 0})</span>
+              </div>
+              <button
+                onClick={() => setIsHistoryOpen(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
+                title="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* "+ Nouvelle discussion" Button (ChatGPT style) */}
+            <div className="p-3 border-b border-gray-800/80">
+              <button
+                onClick={() => {
+                  onNewThread?.();
+                  setIsHistoryOpen(false);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-950/40 transition active:scale-98"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nouvelle discussion</span>
+              </button>
+            </div>
+
+            {/* Threads List */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 overscroll-contain">
+              {(!threads || threads.length === 0) ? (
+                <div className="py-12 text-center text-gray-500 text-xs px-4">
+                  <MessageSquare className="w-8 h-8 text-gray-700 mx-auto mb-2 opacity-50" />
+                  <p className="font-semibold text-gray-400">Aucune discussion</p>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Posez votre première question pour sauvegarder automatiquement ce fil !
+                  </p>
+                </div>
+              ) : (
+                threads.map(thread => {
+                  const isActive = thread.id === activeThreadId;
+                  const dateStr = formatThreadDate(thread.updatedAt || thread.createdAt);
+                  return (
+                    <div
+                      key={thread.id}
+                      onClick={() => {
+                        onSelectThread?.(thread.id);
+                        setIsHistoryOpen(false);
+                      }}
+                      className={`group flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition border text-left ${
+                        isActive
+                          ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200 shadow-sm'
+                          : 'bg-gray-900/60 hover:bg-gray-800/90 border-gray-800/80 text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <MessageSquare
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isActive ? 'text-emerald-400' : 'text-gray-500 group-hover:text-gray-300'
+                            }`}
+                          />
+                          <p className="text-xs font-semibold truncate leading-tight">
+                            {thread.title}
+                          </p>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
+                          <Clock className="w-2.5 h-2.5 text-gray-600" />
+                          <span>{dateStr}</span>
+                          <span>·</span>
+                          <span>
+                            {thread.messages.filter(m => m.author === 'Toi').length} msg
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Trash can delete button (Requirement 5) */}
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (confirm('Supprimer cette discussion ?')) {
+                            onDeleteThread?.(thread.id);
+                          }
+                        }}
+                        className="opacity-60 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-950/60 hover:text-rose-400 text-gray-500 transition active:scale-90"
+                        title="Supprimer la discussion"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Messages Scroll Area - Only this container scrolls */}
       <div
         ref={scrollContainerRef}
@@ -371,14 +555,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             <span className="hidden sm:inline">Envoyer</span>
           </button>
 
-          {/* Clear Button */}
+          {/* New Discussion Button */}
           <button
             type="button"
-            onClick={onClearMessages}
-            className="p-2.5 sm:p-3 rounded-xl bg-gray-900 border border-gray-800 text-gray-500 hover:text-rose-400 hover:border-gray-700 transition"
-            title="Effacer l'historique de discussion"
+            onClick={onNewThread || onClearMessages}
+            className="p-2.5 sm:p-3 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 hover:text-emerald-400 hover:border-emerald-500/40 transition active:scale-95"
+            title="Démarrer une nouvelle discussion"
           >
-            <Trash2 className="w-4 h-4" />
+            <Plus className="w-4 h-4" />
           </button>
         </form>
       </div>

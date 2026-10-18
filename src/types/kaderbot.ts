@@ -39,6 +39,14 @@ export interface ChatMessage {
   };
 }
 
+export interface ChatThread {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
+
 export interface IdeaItem {
   id: number;
   title: string;

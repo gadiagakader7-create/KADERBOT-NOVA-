@@ -10,6 +10,7 @@ import {
 import {
   AppConfig,
   ChatMessage,
+  ChatThread,
   LinksStore,
   MemoryStore,
   RulesStore,
@@ -174,8 +175,8 @@ export default function App() {
   const [dernieresIdees, setDernieresIdees] = useState<string[]>([]);
   const [groqLog, setGroqLog] = useState<Array<{ q: string; r: string; time: string }>>([]);
 
-  // Messages list
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+  // Helper for fresh welcome message
+  const getWelcomeMessage = (): ChatMessage => {
     const hour = new Date().getHours();
     let welcome = 'Bonjour, prêt pour une nouvelle session inspirante ?';
     if (hour >= 12 && hour < 18) {
@@ -184,16 +185,44 @@ export default function App() {
       welcome = 'Bonsoir, envie de discuter ou d’apprendre ensemble ?';
     }
 
-    return [
-      {
-        id: 'welcome',
-        author: 'KB',
-        text: `${welcome} Je suis KADERBOT NOVA V14. Pose-moi une question, enseigne-moi un fait avec "retiens: ...", ou explore les déductions logiques.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        meta: { source: 'systeme' },
-      },
-    ];
+    return {
+      id: 'welcome',
+      author: 'KB',
+      text: `${welcome} Je suis KADERBOT NOVA V14. Pose-moi une question, enseigne-moi un fait avec "retiens: ...", ou explore les déductions logiques.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      meta: { source: 'systeme' },
+    };
+  };
+
+  // Chat Threads state saved in localStorage (ChatGPT style)
+  const [threads, setThreads] = useState<ChatThread[]>(() => {
+    const saved = localStorage.getItem('kaderbot_chat_threads');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Erreur lecture threads:', e);
+      }
+    }
+    return [];
   });
+
+  // Current active thread ID (null = nouvelle discussion vierge)
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const activeThreadIdRef = useRef<string | null>(null);
+
+  // Messages list - starts with fresh welcome message on new discussion
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [getWelcomeMessage()]);
+
+  // Keep activeThreadIdRef in sync for callbacks
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId;
+  }, [activeThreadId]);
+
+  // Persist threads to localStorage
+  useEffect(() => {
+    localStorage.setItem('kaderbot_chat_threads', JSON.stringify(threads));
+  }, [threads]);
 
   const [isThinking, setIsThinking] = useState(false);
 
@@ -330,12 +359,48 @@ export default function App() {
     };
     setMessages(prev => [...prev, newMsg]);
 
+    // Also update current active thread in threads list
+    const currentThreadId = activeThreadIdRef.current;
+    if (currentThreadId) {
+      setThreads(prev =>
+        prev.map(t =>
+          t.id === currentThreadId
+            ? { ...t, updatedAt: new Date().toISOString(), messages: [...t.messages, newMsg] }
+            : t
+        )
+      );
+    }
+
     // Audio narration if enabled
     if (config.soundEnabled && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'fr-FR';
       window.speechSynthesis.speak(u);
+    }
+  };
+
+  // Switch to an existing thread
+  const handleSelectThread = (threadId: string) => {
+    const target = threads.find(t => t.id === threadId);
+    if (!target) return;
+    activeThreadIdRef.current = target.id;
+    setActiveThreadId(target.id);
+    setMessages(target.messages && target.messages.length > 0 ? target.messages : [getWelcomeMessage()]);
+  };
+
+  // Start a fresh new thread (blank conversation)
+  const handleNewThread = () => {
+    activeThreadIdRef.current = null;
+    setActiveThreadId(null);
+    setMessages([getWelcomeMessage()]);
+  };
+
+  // Delete a thread from history
+  const handleDeleteThread = (threadId: string) => {
+    setThreads(prev => prev.filter(t => t.id !== threadId));
+    if (activeThreadIdRef.current === threadId) {
+      handleNewThread();
     }
   };
 
@@ -448,6 +513,35 @@ export default function App() {
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
+
+    let currentThreadId = activeThreadIdRef.current;
+    if (!currentThreadId) {
+      // 2. Nouvelle discussion : créée et sauvegardée dès l'envoi du premier message
+      const newId = `thread_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      activeThreadIdRef.current = newId;
+      setActiveThreadId(newId);
+
+      const title = text.length > 38 ? text.slice(0, 38).trim() + '...' : text;
+      const newThread: ChatThread = {
+        id: newId,
+        title,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [...messages, userMsg],
+      };
+
+      setThreads(prev => [newThread, ...prev]);
+    } else {
+      // Met à jour la discussion active existante
+      setThreads(prev =>
+        prev.map(t =>
+          t.id === currentThreadId
+            ? { ...t, updatedAt: new Date().toISOString(), messages: [...t.messages, userMsg] }
+            : t
+        )
+      );
+    }
+
     setMessages(prev => [...prev, userMsg]);
 
     const msgLower = text.toLowerCase();
@@ -1289,7 +1383,7 @@ export default function App() {
             messages={messages}
             isThinking={isThinking}
             onSendMessage={handleProcessUserMessage}
-            onClearMessages={() => setMessages([])}
+            onClearMessages={handleNewThread}
             onAdjustWeight={handleAdjustWeight}
             soundEnabled={config.soundEnabled}
             activeSession={config.activeSession}
@@ -1299,6 +1393,11 @@ export default function App() {
               if (isAdmin) setIsActionsModalOpen(true);
             }}
             isAdmin={isAdmin}
+            threads={threads}
+            activeThreadId={activeThreadId}
+            onSelectThread={handleSelectThread}
+            onNewThread={handleNewThread}
+            onDeleteThread={handleDeleteThread}
           />
         )}
 
