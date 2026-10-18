@@ -1,6 +1,6 @@
 # 📦 KADERBOT NOVA V14 - Code Source Complet & Guide d Application Mobile
 
-Ce document contient l intégralité du code source mis à jour de **KADERBOT NOVA** (Interface Hybride, Mode Public/Admin, Clés serveur Render 100% autonomes, Affichage mobile 3 zones fixes).
+Ce document contient l intégralité du code source mis à jour de **KADERBOT NOVA** (Initialisation Gemini 100% API Key sans ADC, Groq process.env, Mode Public/Admin, Mobile 3 zones).
 
 ---
 
@@ -174,15 +174,17 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
 
-// Initialize Gemini SDK
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+// Helper to get GoogleGenAI client with explicit API Key (prevents Application Default Credentials lookup)
+function createGeminiClient(apiKey: string): GoogleGenAI {
+  return new GoogleGenAI({
+    apiKey: apiKey.trim(),
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
+  });
+}
 
 const DEFAULT_SYSTEM_PROMPT =
   'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
@@ -301,38 +303,80 @@ async function callGroqWithFallback(
   throw new Error(`Groq: ${lastError}`);
 }
 
-// Helper to call Gemini with multi-model fallback in case of temporary 503/429 spikes
+// Helper to call Gemini with explicit API Key and direct REST fallback (Never uses Application Default Credentials)
 async function callGeminiWithFallback(
   fullPrompt: string,
   systemInstruction?: string
 ): Promise<{ text: string; model: string }> {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!geminiKey) {
+    throw new Error('Variable GEMINI_API_KEY non configurée sur le serveur. Veuillez définir votre clé API Gemini.');
+  }
+
   const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastError: any = null;
 
+  // 1. Try with explicit GoogleGenAI client (with explicit apiKey)
+  try {
+    const aiClient = createGeminiClient(geminiKey);
+    for (const m of modelsToTry) {
+      try {
+        const response = await aiClient.models.generateContent({
+          model: m,
+          contents: fullPrompt,
+          config: systemInstruction ? { systemInstruction } : undefined,
+        });
+        const text = response.text?.trim();
+        if (text) {
+          return { text, model: m };
+        }
+      } catch (err: any) {
+        console.warn(`Gemini SDK modèle ${m} indisponible (${err.message}), tentative suivante...`);
+        lastError = err;
+      }
+    }
+  } catch (sdkInitErr: any) {
+    console.warn('Erreur initialisation SDK Gemini, bascule sur REST direct:', sdkInitErr.message);
+    lastError = sdkInitErr;
+  }
+
+  // 2. Direct REST Fallback (Simple API Key only, zero Google Cloud ADC or metadata)
   for (const m of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
-        model: m,
-        contents: fullPrompt,
-        config: systemInstruction ? { systemInstruction } : undefined,
-      });
-      const text = response.text?.trim();
-      if (text) {
-        return { text, model: m };
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: fullPrompt }] }],
+            systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (text) {
+          return { text, model: m };
+        }
+      } else {
+        const errJson = await response.json().catch(() => null);
+        lastError = new Error(errJson?.error?.message || `HTTP ${response.status}`);
       }
-    } catch (err: any) {
-      console.warn(`Gemini modèle ${m} indisponible (${err.message}), tentative modèle suivant...`);
-      lastError = err;
+    } catch (restErr: any) {
+      lastError = restErr;
     }
   }
 
   throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
 }
 
-// 0. Gemini Connection Tester Endpoint (Uses process.env.GEMINI_API_KEY exclusively)
+// 0. Gemini Connection Tester Endpoint (Uses process.env.GEMINI_API_KEY explicitly)
 app.post('/api/gemini/test', async (req, res) => {
   try {
-    const keyToUse = process.env.GEMINI_API_KEY || req.body?.apiKey;
+    const keyToUse = process.env.GEMINI_API_KEY?.trim() || req.body?.apiKey?.trim();
     if (!keyToUse) {
       return res.status(400).json({
         ok: false,
@@ -340,14 +384,7 @@ app.post('/api/gemini/test', async (req, res) => {
       });
     }
 
-    const testClient = new GoogleGenAI({
-      apiKey: keyToUse.trim(),
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
+    const testClient = createGeminiClient(keyToUse);
 
     const start = Date.now();
     const result = await testClient.models.generateContent({
