@@ -10,6 +10,9 @@ import {
   Activity,
   AlertTriangle,
   ExternalLink,
+  CloudUpload,
+  CloudDownload,
+  Server,
 } from 'lucide-react';
 import { AppConfig, LLMProvider } from '../types/kaderbot';
 import { apiService } from '../services/apiService';
@@ -19,6 +22,8 @@ interface SettingsModalProps {
   onClose: () => void;
   config: AppConfig;
   onSaveConfig: (updated: Partial<AppConfig>) => void;
+  onPushMemoryToServer?: () => Promise<{ success: boolean; message: string }>;
+  onPullMemoryFromServer?: () => Promise<{ success: boolean; message: string }>;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -26,6 +31,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   config,
   onSaveConfig,
+  onPushMemoryToServer,
+  onPullMemoryFromServer,
 }) => {
   const [provider, setProvider] = useState<LLMProvider>(config.provider);
   const [geminiKey, setGeminiKey] = useState(config.geminiApiKey || '');
@@ -57,9 +64,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     latencyMs?: number;
   } | null>(null);
 
+  // Synchronisation Mémoire Hybride
+  const [isModalPushing, setIsModalPushing] = useState(false);
+  const [isModalPulling, setIsModalPulling] = useState(false);
+  const [showModalPullConfirm, setShowModalPullConfirm] = useState(false);
+  const [modalSyncStatus, setModalSyncStatus] = useState<{ success: boolean; message: string } | null>(null);
+
   // Sync state when modal opens
   React.useEffect(() => {
     if (isOpen) {
+      setModalSyncStatus(null);
+      setShowModalPullConfirm(false);
       setProvider(config.provider);
       setGeminiKey(config.geminiApiKey || '');
       setGroqKey(config.groqApiKey || '');
@@ -452,6 +467,102 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               Définit le ton concis, chaleureux et curieux du bot tel qu'il a été programmé dans Pydroid 3.
             </p>
           </div>
+
+          {/* Synchronisation Mémoire Hybride (Locale + Serveur) */}
+          {(onPushMemoryToServer || onPullMemoryFromServer) && (
+            <div className="p-3.5 rounded-xl bg-gradient-to-br from-[#0B1528] to-[#080D18] border border-blue-500/30 space-y-3">
+              <div className="flex items-center gap-2 text-white">
+                <Server className="w-4 h-4 text-blue-400" />
+                <span className="text-xs font-bold">Mémoire Hybride (Serveur & Local)</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950 border border-blue-800/40 text-blue-300 ml-auto">
+                  Admin
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                L'application utilise votre mémoire locale en priorité. Utilisez ces commandes pour synchroniser manuellement avec la base centrale du serveur.
+              </p>
+
+              {modalSyncStatus && (
+                <div
+                  className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                    modalSyncStatus.success
+                      ? 'bg-emerald-950/50 border border-emerald-500/40 text-emerald-300'
+                      : 'bg-red-950/50 border border-red-500/40 text-red-300'
+                  }`}
+                >
+                  <span>{modalSyncStatus.message}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!onPushMemoryToServer) return;
+                    setIsModalPushing(true);
+                    setModalSyncStatus(null);
+                    setShowModalPullConfirm(false);
+                    try {
+                      const res = await onPushMemoryToServer();
+                      setModalSyncStatus(res);
+                    } catch (e: any) {
+                      setModalSyncStatus({ success: false, message: e.message || 'Erreur inconnue' });
+                    } finally {
+                      setIsModalPushing(false);
+                    }
+                  }}
+                  disabled={isModalPushing || isModalPulling}
+                  className="py-2.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95 shadow-md shadow-blue-950/40"
+                >
+                  <CloudUpload className="w-3.5 h-3.5" />
+                  <span>{isModalPushing ? 'Envoi...' : 'Envoyer ma mémoire au serveur'}</span>
+                </button>
+
+                {showModalPullConfirm ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setShowModalPullConfirm(false);
+                        if (!onPullMemoryFromServer) return;
+                        setIsModalPulling(true);
+                        setModalSyncStatus(null);
+                        try {
+                          const res = await onPullMemoryFromServer();
+                          setModalSyncStatus(res);
+                        } catch (e: any) {
+                          setModalSyncStatus({ success: false, message: e.message || 'Erreur inconnue' });
+                        } finally {
+                          setIsModalPulling(false);
+                        }
+                      }}
+                      disabled={isModalPulling}
+                      className="flex-1 py-2 px-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition"
+                    >
+                      Confirmer écrasement
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowModalPullConfirm(false)}
+                      className="py-2 px-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] transition"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowModalPullConfirm(true)}
+                    disabled={isModalPushing || isModalPulling}
+                    className="py-2.5 px-3 rounded-lg bg-teal-600/30 hover:bg-teal-600/50 border border-teal-500/40 disabled:opacity-40 text-teal-200 text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95"
+                  >
+                    <CloudDownload className="w-3.5 h-3.5 text-teal-400" />
+                    <span>{isModalPulling ? 'Chargement...' : 'Récupérer la mémoire du serveur'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}

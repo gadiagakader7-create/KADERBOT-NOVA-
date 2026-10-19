@@ -11,6 +11,10 @@ import {
   Smartphone,
   Brain,
   Sparkles,
+  CloudUpload,
+  CloudDownload,
+  AlertCircle,
+  Server,
 } from 'lucide-react';
 import {
   LinksStore,
@@ -38,6 +42,8 @@ interface SessionsTabProps {
   }) => void;
   groqApiKey?: string;
   groqModel?: string;
+  onPushMemoryToServer?: () => Promise<{ success: boolean; message: string }>;
+  onPullMemoryFromServer?: () => Promise<{ success: boolean; message: string }>;
 }
 
 export const SessionsTab: React.FC<SessionsTabProps> = ({
@@ -53,10 +59,77 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   onImportFullBackup,
   groqApiKey,
   groqModel,
+  onPushMemoryToServer,
+  onPullMemoryFromServer,
 }) => {
   const [newSessionName, setNewSessionName] = useState('');
   const [decayReport, setDecayReport] = useState<{ modifs: number; supprimes: number } | null>(null);
   const [isExportingPydroid, setIsExportingPydroid] = useState(false);
+
+  // Synchronisation Mémoire Hybride (Admin)
+  const [isPushing, setIsPushing] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
+  const [showPullConfirm, setShowPullConfirm] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handlePushToServer = async () => {
+    setIsPushing(true);
+    setSyncStatus(null);
+    setShowPullConfirm(false);
+    try {
+      if (onPushMemoryToServer) {
+        const res = await onPushMemoryToServer();
+        setSyncStatus(res);
+      } else {
+        await apiService.saveMemoryToServer({
+          memoire,
+          regles,
+          liens,
+          synonymes,
+          sessions,
+        });
+        setSyncStatus({
+          success: true,
+          message: `Mémoire locale envoyée au serveur avec succès (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
+        });
+      }
+    } catch (err: any) {
+      setSyncStatus({
+        success: false,
+        message: `Erreur d'envoi : ${err.message || 'Serveur indisponible'}`,
+      });
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  const handlePullFromServer = async () => {
+    setShowPullConfirm(false);
+    setIsPulling(true);
+    setSyncStatus(null);
+    try {
+      if (onPullMemoryFromServer) {
+        const res = await onPullMemoryFromServer();
+        setSyncStatus(res);
+      } else {
+        const remote = await apiService.loadMemoryFromServer();
+        if (remote) {
+          onUpdateMemory(remote.memoire || {}, remote.regles || {});
+          setSyncStatus({
+            success: true,
+            message: `Mémoire du serveur récupérée et appliquée en local (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
+          });
+        }
+      }
+    } catch (err: any) {
+      setSyncStatus({
+        success: false,
+        message: `Erreur de récupération : ${err.message || 'Serveur indisponible'}`,
+      });
+    } finally {
+      setIsPulling(false);
+    }
+  };
 
   const handleCreateSessionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,6 +231,115 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
             Bascule entre différentes mémoires isolées, lance l'oubli intelligent et exporte ton code pour Android.
           </p>
         </div>
+      </div>
+
+      {/* Synchronisation Mémoire Hybride (Admin Uniquement) */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#0B1528] to-[#080D18] border border-blue-500/30 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 flex-shrink-0">
+              <Server className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                <span>Synchronisation Mémoire Hybride (Locale + Serveur)</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950 border border-blue-800/40 text-blue-300">
+                  Mode Admin
+                </span>
+              </h3>
+              <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">
+                Priorité au stockage local (<code>localStorage</code>) pour une rapidité absolue et zéro dépendance réseau. Utilisez les commandes ci-dessous pour synchroniser manuellement avec le serveur.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Sync Action Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+          {/* Bouton 1: Envoyer ma mémoire au serveur */}
+          <div className="p-3.5 rounded-xl bg-[#080E1C] border border-blue-500/20 flex flex-col justify-between space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-blue-200 flex items-center gap-1.5">
+                <CloudUpload className="w-4 h-4 text-blue-400" />
+                <span>Sauvegarde sur le Serveur</span>
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Transmet l'état actuel de votre mémoire locale (faits, règles, liens, sessions) au serveur pour le stocker de façon pérenne.
+              </p>
+            </div>
+            <button
+              onClick={handlePushToServer}
+              disabled={isPushing || isPulling}
+              className="w-full py-2.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-blue-950/40 flex items-center justify-center gap-2 transition active:scale-95"
+            >
+              <CloudUpload className="w-4 h-4" />
+              <span>{isPushing ? 'Envoi en cours...' : 'Envoyer ma mémoire au serveur'}</span>
+            </button>
+          </div>
+
+          {/* Bouton 2: Récupérer la mémoire du serveur */}
+          <div className="p-3.5 rounded-xl bg-[#080E1C] border border-teal-500/20 flex flex-col justify-between space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-teal-200 flex items-center gap-1.5">
+                <CloudDownload className="w-4 h-4 text-teal-400" />
+                <span>Restauration depuis le Serveur</span>
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Charge la mémoire centrale du serveur distant et <strong>écrase</strong> votre mémoire locale actuelle.
+              </p>
+            </div>
+
+            {showPullConfirm ? (
+              <div className="p-2.5 rounded-lg bg-amber-950/50 border border-amber-600/50 text-xs space-y-2">
+                <p className="text-amber-200 font-semibold text-[11px]">
+                  ⚠️ Confirmer l'écrasement de la mémoire locale ?
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handlePullFromServer}
+                    disabled={isPulling}
+                    className="flex-1 py-1.5 px-2 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition"
+                  >
+                    Oui, écraser
+                  </button>
+                  <button
+                    onClick={() => setShowPullConfirm(false)}
+                    className="py-1.5 px-2 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] transition"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowPullConfirm(true)}
+                disabled={isPushing || isPulling}
+                className="w-full py-2.5 px-3 rounded-lg bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-teal-950/40 flex items-center justify-center gap-2 transition active:scale-95"
+              >
+                <CloudDownload className="w-4 h-4" />
+                <span>{isPulling ? 'Récupération en cours...' : 'Récupérer la mémoire du serveur'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Feedback de synchronisation */}
+        {syncStatus && (
+          <div
+            className={`p-3 rounded-xl border text-xs flex items-center gap-2.5 transition animate-in fade-in duration-200 ${
+              syncStatus.success
+                ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                : 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+            }`}
+          >
+            {syncStatus.success ? (
+              <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+            )}
+            <span className="leading-snug">{syncStatus.message}</span>
+          </div>
+        )}
       </div>
 
       {/* 1. Android Pydroid 3 Sync Banner */}

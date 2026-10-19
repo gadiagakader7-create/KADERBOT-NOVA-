@@ -226,54 +226,46 @@ export default function App() {
 
   const [isThinking, setIsThinking] = useState(false);
 
-  // Server Memory Synchronization (Requirement 4: Share data live between Admin and Public)
-  const lastServerTimestamp = useRef<string>('');
-  const isSyncingRef = useRef<boolean>(false);
-
+  // Architecture de Mémoire Hybride :
+  // 1. Priorité au Local : Au démarrage, lit la mémoire dans le localStorage.
+  // Si le localStorage est vide, télécharge les données de base depuis le serveur et les sauvegarde dans le localStorage.
   useEffect(() => {
-    let isMounted = true;
-    const fetchSharedMemory = async () => {
-      if (isSyncingRef.current) return;
-      try {
-        const remote = await apiService.loadMemoryFromServer();
-        if (remote && isMounted) {
-          const remoteUpdated = (remote as any).updatedAt || '';
-          if (remoteUpdated && remoteUpdated === lastServerTimestamp.current) {
-            return;
+    const localMemo = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
+    if (!localMemo) {
+      apiService
+        .loadMemoryFromServer()
+        .then(remote => {
+          if (remote) {
+            if (remote.memoire && Object.keys(remote.memoire).length > 0) {
+              setMemoire(remote.memoire);
+              localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(remote.memoire));
+            }
+            if (remote.regles && Object.keys(remote.regles).length > 0) {
+              setRegles(remote.regles);
+              localStorage.setItem(`kaderbot_regles_${config.activeSession}`, JSON.stringify(remote.regles));
+            }
+            if (remote.liens && Object.keys(remote.liens).length > 0) {
+              setLiens(remote.liens);
+              localStorage.setItem(`kaderbot_liens_${config.activeSession}`, JSON.stringify(remote.liens));
+            }
+            if (remote.synonymes && Object.keys(remote.synonymes).length > 0) {
+              setSynonymes(remote.synonymes);
+              localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(remote.synonymes));
+            }
+            if (remote.sessions && remote.sessions.length > 0) {
+              setSessions(remote.sessions);
+              localStorage.setItem('kaderbot_sessions', JSON.stringify(remote.sessions));
+            }
           }
-          if (remote.memoire && Object.keys(remote.memoire).length > 0) {
-            setMemoire(remote.memoire);
-          }
-          if (remote.regles && Object.keys(remote.regles).length > 0) {
-            setRegles(remote.regles);
-          }
-          if (remote.liens && Object.keys(remote.liens).length > 0) {
-            setLiens(remote.liens);
-          }
-          if (remote.synonymes && Object.keys(remote.synonymes).length > 0) {
-            setSynonymes(remote.synonymes);
-          }
-          if (remote.sessions && remote.sessions.length > 0) {
-            setSessions(remote.sessions);
-          }
-          if (remoteUpdated) {
-            lastServerTimestamp.current = remoteUpdated;
-          }
-        }
-      } catch (err) {
-        // Silently keep local state if offline
-      }
-    };
-
-    fetchSharedMemory();
-    const interval = setInterval(fetchSharedMemory, 5000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
+        })
+        .catch(err => {
+          console.warn('Initialisation serveur échouée ou hors-ligne, utilisation des données locales par défaut:', err);
+        });
+    }
   }, []);
 
-  // Sync to localStorage & Server disk
+  // 2. Sauvegarde Locale automatique : À chaque modification, la mémoire est sauvegardée
+  // dans le localStorage. Elle n'est plus envoyée automatiquement au serveur.
   useEffect(() => {
     localStorage.setItem('kaderbot_config', JSON.stringify(config));
   }, [config]);
@@ -287,27 +279,70 @@ export default function App() {
     localStorage.setItem(`kaderbot_regles_${config.activeSession}`, JSON.stringify(regles));
     localStorage.setItem(`kaderbot_liens_${config.activeSession}`, JSON.stringify(liens));
     localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(synonymes));
+  }, [memoire, regles, liens, synonymes, config.activeSession]);
 
-    // Save to server backend so updates made in Admin mode are shared to all users
-    isSyncingRef.current = true;
-    apiService
-      .saveMemoryToServer({
+  // 3. Boutons de synchronisation manuelle (Admin uniquement)
+  // "Envoyer ma mémoire au serveur"
+  const handlePushMemoryToServer = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await apiService.saveMemoryToServer({
         memoire,
         regles,
         liens,
         synonymes,
         sessions,
-      })
-      .then(res => {
-        if (res && res.savedAt) {
-          lastServerTimestamp.current = res.savedAt;
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        isSyncingRef.current = false;
       });
-  }, [memoire, regles, liens, synonymes, config.activeSession, sessions]);
+      return {
+        success: true,
+        message: `Mémoire locale envoyée au serveur avec succès (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Erreur d'envoi au serveur : ${err.message || 'Serveur indisponible'}`,
+      };
+    }
+  };
+
+  // "Récupérer la mémoire du serveur" (écrase la mémoire locale)
+  const handlePullMemoryFromServer = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      const remote = await apiService.loadMemoryFromServer();
+      if (!remote) throw new Error('Aucune donnée retournée par le serveur');
+
+      if (remote.memoire) {
+        setMemoire(remote.memoire);
+        localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(remote.memoire));
+      }
+      if (remote.regles) {
+        setRegles(remote.regles);
+        localStorage.setItem(`kaderbot_regles_${config.activeSession}`, JSON.stringify(remote.regles));
+      }
+      if (remote.liens) {
+        setLiens(remote.liens);
+        localStorage.setItem(`kaderbot_liens_${config.activeSession}`, JSON.stringify(remote.liens));
+      }
+      if (remote.synonymes) {
+        setSynonymes(remote.synonymes);
+        localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(remote.synonymes));
+      }
+      if (remote.sessions && remote.sessions.length > 0) {
+        setSessions(remote.sessions);
+        localStorage.setItem('kaderbot_sessions', JSON.stringify(remote.sessions));
+      }
+
+      addBotMessage('Mémoire du serveur récupérée et appliquée en local avec succès.');
+      return {
+        success: true,
+        message: `Mémoire du serveur récupérée et appliquée en local (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Erreur de récupération : ${err.message || 'Serveur indisponible'}`,
+      };
+    }
+  };
 
   // Adjust hits on specific concept definition
   const handleAdjustHits = (sujet: string, entryIdx: number, delta: number) => {
@@ -1508,6 +1543,8 @@ export default function App() {
             }}
             groqApiKey={config.groqApiKey}
             groqModel={config.groqModel}
+            onPushMemoryToServer={handlePushMemoryToServer}
+            onPullMemoryFromServer={handlePullMemoryFromServer}
           />
         )}
       </main>
@@ -1604,6 +1641,8 @@ export default function App() {
           onClose={() => setIsSettingsModalOpen(false)}
           config={config}
           onSaveConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
+          onPushMemoryToServer={handlePushMemoryToServer}
+          onPullMemoryFromServer={handlePullMemoryFromServer}
         />
       )}
     </div>
