@@ -86,6 +86,14 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // Configuration générale de KADERBOT NOVA
+  const NOVA_DEFAULT_SYSTEM_PROMPT =
+    'Tu es KADERBOT NOVA, un assistant IA expert, chaleureux et pédagogue. ' +
+    'Tu réponds toujours en français. ' +
+    'Tu dois structurer tes réponses : utilise des sauts de ligne, des listes à puces (avec des tirets) et du texte en gras (avec des astérisques *) pour les mots importants. ' +
+    'Si la question est simple, sois bref. ' +
+    'Si la question demande une explication, développe avec des paragraphes clairs. ' +
+    'Ne fais jamais un bloc de texte compact.';
+
   const [config, setConfig] = useState<AppConfig>(() => {
     const saved = localStorage.getItem('kaderbot_config');
     if (saved) {
@@ -93,6 +101,9 @@ export default function App() {
         const parsed = JSON.parse(saved);
         if (parsed.groqModel === 'llama-3.3-70b-versatile' || !parsed.groqModel) {
           parsed.groqModel = 'openai/gpt-oss-120b';
+        }
+        if (!parsed.systemPrompt || parsed.systemPrompt.includes('Tu es KADERBOT, un assistant') || parsed.systemPrompt.includes('2 à 4 phrases')) {
+          parsed.systemPrompt = NOVA_DEFAULT_SYSTEM_PROMPT;
         }
         return parsed;
       } catch {}
@@ -103,10 +114,7 @@ export default function App() {
       groqApiKey: '',
       groqModel: 'openai/gpt-oss-120b',
       geminiModel: 'gemini-3.8-flash',
-      systemPrompt:
-        'Tu es KADERBOT, un assistant conversationnel et chaleureux. ' +
-        'Tu réponds toujours en français, en 2 à 4 phrases fluides et précises. ' +
-        'Tu gardes le fil de la conversation et résous naturellement les pronoms.',
+      systemPrompt: NOVA_DEFAULT_SYSTEM_PROMPT,
       activeSession: 'defaut',
       soundEnabled: false,
       autoLearnFromLLM: true,

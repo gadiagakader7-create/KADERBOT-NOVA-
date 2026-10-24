@@ -34,10 +34,12 @@ function createGeminiClient(apiKey: string): GoogleGenAI {
 }
 
 const DEFAULT_SYSTEM_PROMPT =
-  'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
-  'Tu réponds toujours en français, en 2 à 4 phrases maximum. ' +
-  'Tu ne fais pas de listes à puces sauf si on te le demande. ' +
-  'Tu es chaleureux mais pas excessif.';
+  'Tu es KADERBOT NOVA, un assistant IA expert, chaleureux et pédagogue. ' +
+  'Tu réponds toujours en français. ' +
+  'Tu dois structurer tes réponses : utilise des sauts de ligne, des listes à puces (avec des tirets) et du texte en gras (avec des astérisques *) pour les mots importants. ' +
+  'Si la question est simple, sois bref. ' +
+  'Si la question demande une explication, développe avec des paragraphes clairs. ' +
+  'Ne fais jamais un bloc de texte compact.';
 
 // Helper to normalize and resolve Groq model IDs accurately
 export function resolveGroqModel(requestedModel?: string): string {

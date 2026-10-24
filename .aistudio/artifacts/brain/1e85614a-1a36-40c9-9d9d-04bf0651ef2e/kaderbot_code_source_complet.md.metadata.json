@@ -1,6 +1,6 @@
 {
-  "summary":  "Code source complet et mis à jour des 3 fichiers majeurs (src/core/cognitiveEngine.ts, src/types/kaderbot.ts, src/App.tsx) pour l'architecture hybride conversationnelle de KADERBOT NOVA avec embeddings Transformers.js côté client, mémoire de contexte sur 5 messages et calcul de similarité sémantique sans affichage technique.",
+  "summary":  "Documentation et code source complet de KADERBOT NOVA intégrant le formatage Markdown riche (react-markdown), le nouvel effet de frappe / streaming fluide (~20ms), le nouveau System Prompt pédagogique et structuré, et l'architecture cognitive hybride (Embeddings Transformers.js locaux + Cloud).",
   "createdAt":  "2026-10-24T19:59:42.589261904Z",
-  "updatedAt":  "2026-10-24T19:59:39.091670574Z",
+  "updatedAt":  "2026-10-24T21:20:59.702600184Z",
   "userFacing":  true
 }

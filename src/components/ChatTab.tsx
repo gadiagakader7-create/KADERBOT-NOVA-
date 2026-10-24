@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Send,
   Trash2,
@@ -24,6 +25,124 @@ import {
   Search,
 } from 'lucide-react';
 import { ChatMessage, ChatThread } from '../types/kaderbot';
+
+interface BotTypewriterMessageProps {
+  text: string;
+  isNew: boolean;
+  onComplete: () => void;
+  onTick?: () => void;
+}
+
+/**
+ * Composant de message KADERBOT NOVA avec effet machine à écrire (streaming)
+ * et rendu Markdown riche (listes à puces, gras, blocs de code, citations).
+ */
+const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
+  text,
+  isNew,
+  onComplete,
+  onTick,
+}) => {
+  const [displayedLength, setDisplayedLength] = useState(() => (isNew ? 1 : text.length));
+  const isTyping = isNew && displayedLength < text.length;
+
+  useEffect(() => {
+    if (!isNew) {
+      setDisplayedLength(text.length);
+      return;
+    }
+
+    if (displayedLength >= text.length) {
+      onComplete();
+      return;
+    }
+
+    // Vitesse fluide ~20ms par caractère
+    const interval = setInterval(() => {
+      setDisplayedLength(prev => {
+        const step = text.length > 350 ? 2 : 1;
+        const next = Math.min(text.length, prev + step);
+        if (next >= text.length) {
+          clearInterval(interval);
+          onComplete();
+        }
+        return next;
+      });
+      onTick?.();
+    }, 20);
+
+    return () => clearInterval(interval);
+  }, [isNew, text, onComplete, onTick]);
+
+  const displayedContent = isNew ? text.slice(0, displayedLength) : text;
+
+  return (
+    <div className="relative">
+      <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
+        <ReactMarkdown
+          components={{
+            p: ({ children }) => (
+              <p className="mb-2.5 last:mb-0 leading-relaxed text-gray-100">{children}</p>
+            ),
+            ul: ({ children }) => (
+              <ul className="list-disc list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
+                {children}
+              </ul>
+            ),
+            ol: ({ children }) => (
+              <ol className="list-decimal list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
+                {children}
+              </ol>
+            ),
+            li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+            strong: ({ children }) => (
+              <strong className="font-semibold text-emerald-300">{children}</strong>
+            ),
+            em: ({ children }) => <em className="italic text-cyan-200">{children}</em>,
+            code: ({ className, children }: any) => {
+              const isMultiLine = typeof children === 'string' && children.includes('\n');
+              if (className || isMultiLine) {
+                return (
+                  <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto text-emerald-200 leading-normal">
+                    <code className={className}>{children}</code>
+                  </pre>
+                );
+              }
+              return (
+                <code className="px-1.5 py-0.5 rounded bg-gray-800/90 text-emerald-300 font-mono text-[11px] sm:text-xs border border-gray-700/50">
+                  {children}
+                </code>
+              );
+            },
+            blockquote: ({ children }) => (
+              <blockquote className="border-l-2 border-emerald-500/60 pl-3 italic text-gray-300 my-2">
+                {children}
+              </blockquote>
+            ),
+            h1: ({ children }) => (
+              <h1 className="text-base font-bold text-white mb-2">{children}</h1>
+            ),
+            h2: ({ children }) => (
+              <h2 className="text-sm font-bold text-emerald-400 mb-1.5">{children}</h2>
+            ),
+            h3: ({ children }) => (
+              <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
+            ),
+            hr: () => <hr className="my-3 border-gray-800" />,
+          }}
+        >
+          {displayedContent}
+        </ReactMarkdown>
+      </div>
+      {isTyping && (
+        <span
+          className="inline-block w-1.5 h-3.5 bg-emerald-400 animate-pulse ml-0.5 align-middle rounded-xs"
+          title="Frappe en cours..."
+        />
+      )}
+    </div>
+  );
+};
 
 interface ChatTabProps {
   messages: ChatMessage[];
@@ -76,6 +195,31 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Mémorisation des messages déjà entièrement affichés (historique et fils archivés)
+  const typedMessageIdsRef = useRef<Set<string>>(new Set());
+  const isInitialMountRef = useRef(true);
+
+  // À l'ouverture d'un fil ou au changement de fil, marquer tous ses messages comme déjà affichés
+  useEffect(() => {
+    messages.forEach(m => {
+      typedMessageIdsRef.current.add(m.id);
+    });
+  }, [activeThreadId]);
+
+  // Au premier montage, marquer l'historique initial sans re-taper
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      messages.forEach(m => {
+        typedMessageIdsRef.current.add(m.id);
+      });
+      isInitialMountRef.current = false;
+    }
+  }, [messages]);
+
+  const handleTypingTick = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
 
   // Sync prefilledText when passed from Action menu or chips
   useEffect(() => {
@@ -532,8 +676,19 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                     : 'bg-[#0E131F] text-gray-100 border border-emerald-500/25 rounded-tl-sm shadow-emerald-950/20'
                 }`}
               >
-                {/* Main text */}
-                <div className="whitespace-pre-wrap break-words">{msg.text}</div>
+                {/* Main text with Markdown & Typewriter streaming */}
+                {isUser ? (
+                  <div className="whitespace-pre-wrap break-words">{msg.text}</div>
+                ) : (
+                  <BotTypewriterMessage
+                    text={msg.text}
+                    isNew={!typedMessageIdsRef.current.has(msg.id)}
+                    onComplete={() => {
+                      typedMessageIdsRef.current.add(msg.id);
+                    }}
+                    onTick={handleTypingTick}
+                  />
+                )}
 
                 {/* Deductive chain visual crumb if applicable */}
                 {!isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
