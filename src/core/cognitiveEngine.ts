@@ -1,4 +1,6 @@
+import { pipeline, env } from '@xenova/transformers';
 import {
+  ChatMessage,
   GeneralRule,
   LinksStore,
   MemoryEntry,
@@ -6,6 +8,190 @@ import {
   RulesStore,
   SynonymsStore,
 } from '../types/kaderbot';
+
+// Configuration de transformers.js pour l'environnement navigateur
+// Permet de télécharger le modèle léger depuis le hub HuggingFace et de le mettre en cache local
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+
+// Singleton d'extraction d'embeddings côté client
+let extracteurEmbeddingsPromise: Promise<any> | null = null;
+
+/**
+ * Initialise de manière paresseuse le pipeline d'embeddings Xenova/all-MiniLM-L6-v2.
+ * Ce modèle produit des vecteurs de dimension 384 rapides et optimisés pour la recherche sémantique.
+ */
+export async function obtenirExtracteurEmbeddings() {
+  if (!extracteurEmbeddingsPromise) {
+    extracteurEmbeddingsPromise = pipeline(
+      'feature-extraction',
+      'Xenova/all-MiniLM-L6-v2',
+      { quantized: true }
+    );
+  }
+  return extracteurEmbeddingsPromise;
+}
+
+/**
+ * Calcule le vecteur d'embedding pour une chaîne de texte donnée.
+ * La normalisation L2 et le pooling moyen sont appliqués pour une comparaison directe par produit scalaire.
+ */
+export async function calculerVecteur(texte: string): Promise<number[]> {
+  if (!texte || !texte.trim()) return [];
+  try {
+    const extractor = await obtenirExtracteurEmbeddings();
+    const output = await extractor(texte.trim(), { pooling: 'mean', normalize: true });
+    return Array.from(output.data as Float32Array);
+  } catch (error) {
+    console.warn('Erreur lors du calcul de vecteur d’embedding:', error);
+    return [];
+  }
+}
+
+// Cache mémoire en arrière-plan pour éviter de recalculer les vecteurs déjà générés
+const cacheEmbeddings = new Map<string, number[]>();
+
+/**
+ * Récupère un vecteur déjà en cache ou le calcule si nécessaire.
+ */
+export async function obtenirVecteurCache(texte: string): Promise<number[]> {
+  const cle = texte.trim().toLowerCase();
+  if (cacheEmbeddings.has(cle)) {
+    return cacheEmbeddings.get(cle)!;
+  }
+  const vec = await calculerVecteur(texte);
+  if (vec.length > 0) {
+    cacheEmbeddings.set(cle, vec);
+  }
+  return vec;
+}
+
+/**
+ * Calcule la similarité cosinus entre deux vecteurs numériques.
+ * Résultat compris entre -1.0 et 1.0 (ou 0.0 et 1.0 pour des vecteurs normalisés).
+ */
+export function similariteCosinus(vecA: number[], vecB: number[]): number {
+  if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0 || vecA.length !== vecB.length) {
+    return 0;
+  }
+  let produit = 0;
+  let normeA = 0;
+  let normeB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    produit += vecA[i] * vecB[i];
+    normeA += vecA[i] * vecA[i];
+    normeB += vecB[i] * vecB[i];
+  }
+  if (normeA === 0 || normeB === 0) return 0;
+  return produit / (Math.sqrt(normeA) * Math.sqrt(normeB));
+}
+
+/**
+ * Compare sémantiquement la question de l'utilisateur avec toutes les connaissances stockées.
+ * Seuil par défaut : 0.80 pour garantir une forte pertinence sans faux positifs.
+ */
+export async function trouverSensSimilaire(
+  question: string,
+  memoire: MemoryStore,
+  seuilSimilarite = 0.80
+): Promise<{ sujet: string; entry: MemoryEntry; score: number } | null> {
+  if (!question || !memoire || Object.keys(memoire).length === 0) return null;
+
+  try {
+    const questionVec = await obtenirVecteurCache(question);
+    if (!questionVec || questionVec.length === 0) return null;
+
+    let meilleurMatch: { sujet: string; entry: MemoryEntry; score: number } | null = null;
+    let maxScore = -1;
+
+    for (const [sujet, entries] of Object.entries(memoire)) {
+      for (const entry of entries) {
+        let entryVec = entry.vecteur;
+        if (!entryVec || entryVec.length === 0) {
+          // Si l'entrée n'a pas encore son vecteur, le calculer à partir du contenu ou de la question d'origine
+          const texteRef = entry.question_origine
+            ? `${entry.question_origine} (${sujet})`
+            : `${sujet} : ${entry.def}`;
+          entryVec = await obtenirVecteurCache(texteRef);
+          entry.vecteur = entryVec;
+        }
+
+        const score = similariteCosinus(questionVec, entryVec);
+        if (score > maxScore) {
+          maxScore = score;
+          meilleurMatch = { sujet, entry, score };
+        }
+      }
+    }
+
+    if (meilleurMatch && maxScore >= seuilSimilarite) {
+      return meilleurMatch;
+    }
+    return null;
+  } catch (err) {
+    console.warn('Erreur lors de la recherche sémantique:', err);
+    return null;
+  }
+}
+
+/**
+ * Résout les pronoms anaphoriques ("il", "elle", "ça", "sa taille") à l'aide des 5 derniers messages
+ * pour enrichir la question et préserver la continuité du dialogue.
+ */
+export function resoudrePronomsAvecHistorique(
+  question: string,
+  historiqueMessages: ChatMessage[]
+): string {
+  if (!question) return '';
+  const qClean = sansAccent(question.toLowerCase().trim());
+  const mots = qClean.match(/\w+/g) || [];
+
+  const aPronom = mots.some(w => PRONOMS_CONTEXTE.has(w));
+  if (!aPronom || !historiqueMessages || historiqueMessages.length === 0) {
+    return question;
+  }
+
+  // Explore les 5 derniers messages en partant du plus récent
+  const recents = historiqueMessages.slice(-5).reverse();
+  for (const msg of recents) {
+    if (msg.meta?.sujet) {
+      return `${question} (${msg.meta.sujet})`;
+    }
+    const motsCles = extraireMotsCles(msg.text);
+    if (motsCles.length > 0) {
+      return `${question} (${motsCles[0]})`;
+    }
+  }
+
+  return question;
+}
+
+/**
+ * Évalue localement une expression arithmétique ou mathématique si la question le demande.
+ * Ex: "combien fait 15 * 8", "calcule 120 / 4", "25 + 75"
+ */
+export function evaluerCalculMath(texte: string): string | null {
+  if (!texte) return null;
+  const tClean = sansAccent(texte.toLowerCase().trim())
+    .replace(/^combien\s+(?:fait|font|mesure|vaut)\s*/, '')
+    .replace(/^calcule(?:\s+moi)?\s*/, '')
+    .replace(/^quel\s+est\s+le\s+resultat\s+de\s*/, '')
+    .replace(/[?=]/g, '')
+    .trim();
+
+  // Test si c'est une expression arithmétique licite avec chiffres et opérateurs
+  const sanitized = tClean.replace(/\s+/g, '').replace(/x/g, '*').replace(/÷/g, '/');
+  if (/^[0-9+\-*/().^%]+$/.test(sanitized) && /[0-9]/.test(sanitized) && /[+\-*/^%]/.test(sanitized)) {
+    try {
+      const fn = new Function(`return (${sanitized.replace(/\^/g, '**')});`);
+      const res = fn();
+      if (typeof res === 'number' && !isNaN(res) && isFinite(res)) {
+        return `Le résultat de ce calcul est ${res}.`;
+      }
+    } catch {}
+  }
+  return null;
+}
 
 export const DEFAULT_POIDS = 0.8;
 
@@ -434,7 +620,7 @@ export function extraireX(
   const ctx = resoudreContexte(qs, contexte);
   if (ctx) return ctx;
 
-  // 4. Message court spécifiant un concept direct (1 ou 2 mots max, ex: "moineau", "l'aigle", "trou noir")
+  // 4. Message court spécifiant un concept direct
   const qClean = ql.replace(/[^a-z0-9 ]/g, ' ');
   const mots = qClean.split(/\s+/).filter(w => w.length >= 2 && !MOTS_VIDES.has(w) && !PRONOMS_CONTEXTE.has(w));
   
@@ -451,7 +637,6 @@ export function extraireX(
     }
   }
 
-  // Dans une phrase ordinaire complexe, ne pas extraire un mot isolé par hasard
   return null;
 }
 
@@ -493,7 +678,6 @@ export function deduireChaine(
   const s = (corriger(sujet, memoire, regles, synonymes) || sujet).toLowerCase().trim();
   const pNorm = sansAccent(prop.toLowerCase().trim());
 
-  // Check explicit graph links first
   const chaineLiens = naviguerLiens(s, liens, maxDepth);
   if (!pNorm && chaineLiens.length > 1) {
     return { chemin: chaineLiens, confiance: 0.95 };
@@ -571,7 +755,6 @@ export function deduireChaine(
   }
 
   if (pNorm) {
-    // Check if cur has the property in rules
     if (regles[cur]) {
       for (const r of regles[cur]) {
         if (sansAccent(r.prop.toLowerCase()).includes(pNorm)) {
@@ -654,7 +837,7 @@ export function deduireGeneralisation(
   return null;
 }
 
-export function construirePhraseFluideDefinition(chemin: string[], confiance = 1.0): string | null {
+export function construirePhraseFluideDefinition(chemin: string[], _confiance = 1.0): string | null {
   if (!chemin || chemin.length < 2) return null;
   const first = chemin[0].charAt(0).toUpperCase() + chemin[0].slice(1);
   const second = chemin[1];
@@ -665,11 +848,6 @@ export function construirePhraseFluideDefinition(chemin: string[], confiance = 1
     const conn = connecteurs[Math.floor(Math.random() * connecteurs.length)];
     phrase += `, ${conn} ${nxt}`;
   }
-  if (confiance < 0.5) {
-    phrase += ` (confiance estimée à ${Math.round(confiance * 100)}%)`;
-  } else if (confiance < 0.75) {
-    phrase += ` (confiance ${Math.round(confiance * 100)}%)`;
-  }
   return phrase + '.';
 }
 
@@ -678,7 +856,7 @@ export function construirePhraseFluidePourquoi(
   prop: string,
   propDef: string,
   propSource: string,
-  confiance = 1.0
+  _confiance = 1.0
 ): string {
   const chaineFluide = (construirePhraseFluideDefinition(chemin, 1.0) || '').replace(/\.$/, '');
   const suiteProp = `Or ${propSource} ${propDef}`;
@@ -688,8 +866,7 @@ export function construirePhraseFluidePourquoi(
     `Ce qui explique pourquoi ${chemin[0]} ${prop}.`,
   ];
   const conclusion = conclusions[Math.floor(Math.random() * conclusions.length)];
-  const confTxt = confiance < 0.75 ? ` (indice de confiance : ${Math.round(confiance * 100)}%)` : '';
-  return `${chaineFluide}. ${suiteProp}, ${conclusion.toLowerCase()}${confTxt}`;
+  return `${chaineFluide}. ${suiteProp}, ${conclusion.toLowerCase()}`;
 }
 
 export function construirePhraseGeneralisation(
@@ -697,17 +874,16 @@ export function construirePhraseGeneralisation(
   cat: string,
   quant: 'tous' | 'aucun' | 'certains',
   prop: string,
-  confiance: number,
+  _confiance: number,
   chemin: string[]
 ): string {
   const cheminTxt = chemin.length > 1 ? (construirePhraseFluideDefinition(chemin, 1.0) || '') + ' ' : '';
-  const pct = Math.round(confiance * 100);
   if (quant === 'tous') {
-    return `${cheminTxt}Or tous les ${cat}s ${prop}, donc ${sujet} ${prop} (confiance ${pct}%).`;
+    return `${cheminTxt}Or tous les ${cat}s ${prop}, donc ${sujet} ${prop}.`;
   } else if (quant === 'aucun') {
-    return `${cheminTxt}Or aucun ${cat} ne ${prop}, donc ${sujet} ne ${prop} pas (confiance ${pct}%).`;
+    return `${cheminTxt}Or aucun ${cat} ne ${prop}, donc ${sujet} ne ${prop} pas.`;
   } else {
-    return `${cheminTxt}Certains ${cat}s ${prop}. ${sujet} étant un ${cat}, il est probable que ${sujet} ${prop} (confiance ${pct}%).`;
+    return `${cheminTxt}Certains ${cat}s ${prop}. ${sujet} étant un ${cat}, il est probable que ${sujet} ${prop}.`;
   }
 }
 
@@ -768,7 +944,6 @@ export function phraseDef(
     if (rPourquoi) return rPourquoi;
   }
 
-  // Deductive chain
   const chaine = deduireChaine(xCorr, '', memoire, regles, liens, synonymes);
   if (chaine && chaine.chemin.length > 1) {
     const fluide = construirePhraseFluideDefinition(chaine.chemin, chaine.confiance);
@@ -798,7 +973,7 @@ export function phraseDef(
 
 export function decayMemoire(
   memoire: MemoryStore,
-  regles: RulesStore,
+  _regles: RulesStore,
   joursSeuil = 7,
   taux = 0.98
 ): { modifs: number; supprimes: number } {
@@ -849,7 +1024,6 @@ export function trouverQuestionReponse(
 
   for (const [sujet, entries] of Object.entries(memoire)) {
     for (const entry of entries) {
-      // Entrée candidate si c'est un Q&A ou si une question d'origine est renseignée, ou si le sujet a plusieurs mots
       const origQ = entry.question_origine || (entry.type === 'question_reponse' ? sujet : null);
       if (!origQ && !sujet.includes(' ')) continue;
 
@@ -861,19 +1035,13 @@ export function trouverQuestionReponse(
 
       if (storedKeywords.length === 0) continue;
 
-      // 1. Correspondance exacte ou quasi-identique de la question
       if (qNorm === storedQNorm) {
         return { sujet, entry, score: 1.0 };
       }
 
-      // 2. Score de similarité globale
       const simText = similarite(qNorm, storedQNorm);
-
-      // 3. Recouvrement des mots-clés essentiels
       const intersection = storedKeywords.filter(k => qKeywords.includes(k));
 
-      // Si la question mémorisée a plusieurs mots-clés (ex: "capitale" + "australie"),
-      // TOUS ou la grande majorité des mots-clés doivent concorder. JAMAIS un mot isolé !
       if (storedKeywords.length >= 2) {
         const recallStored = intersection.length / storedKeywords.length;
         const precisionQ = intersection.length / qKeywords.length;
@@ -886,7 +1054,6 @@ export function trouverQuestionReponse(
           }
         }
       } else if (storedKeywords.length === 1 && qKeywords.length === 1) {
-        // Cas d'un seul mot-clé : uniquement si la requête est elle-même exactement ce seul mot
         if (storedKeywords[0] === qKeywords[0] && simText >= 0.85) {
           if (simText > maxScore && simText >= seuilSimilarite) {
             maxScore = simText;
@@ -906,15 +1073,12 @@ export function nettoyerMemoirePolluee(memoire: MemoryStore): number {
   const nowIso = new Date().toISOString();
 
   for (const [sujet, entries] of Object.entries(memoire)) {
-    // Si la clé est un mot isolé simple sans espace (ex: "australie" ou "taille" ou "intelligence")
     if (!sujet.includes(' ') && entries.length > 0) {
       const entry = entries[0];
-      // Vérifier si elle provient d'une question LLM qui avait plusieurs mots
       if (entry.question_origine && entry.question_origine.trim().includes(' ')) {
         const qTrim = entry.question_origine.trim();
         const mots = extraireMotsCles(qTrim);
 
-        // Si la question originale contenait au moins 2 mots clés et n'était pas juste une définition de ce mot
         const defCheck = estRequeteDefinition(qTrim);
         if (mots.length >= 2 && (!defCheck.estDef || defCheck.concept !== sujet)) {
           const newKey = normaliserQuestionCle(qTrim);
@@ -928,7 +1092,6 @@ export function nettoyerMemoirePolluee(memoire: MemoryStore): number {
             last_used: nowIso,
           });
 
-          // Supprimer la clé corrompue d'un mot unique pour ne plus intercepter hors-contexte
           delete memoire[sujet];
           nettoyes++;
         }
@@ -956,7 +1119,6 @@ export function apprendreDeLLM(
       return null;
     }
 
-    // Nettoyer les formules d'introduction superflues dans la réponse
     for (const intro of ['Voici ', 'Bien sûr', 'Bien sur', "D'accord", 'Daccord', 'Avec plaisir', 'Absolument']) {
       if (repTrim.startsWith(intro)) {
         const parts = repTrim.split('. ');
@@ -969,7 +1131,6 @@ export function apprendreDeLLM(
 
     const nowIso = new Date().toISOString();
 
-    // 1. Est-ce une demande de DÉFINITION DE CONCEPT (ex: "c'est quoi un trou noir", "qu'est-ce que l'IA", "définition de X") ?
     const defCheck = estRequeteDefinition(qTrim);
     if (defCheck.estDef && defCheck.concept) {
       const concept = defCheck.concept;
@@ -997,8 +1158,6 @@ export function apprendreDeLLM(
       return { sujet: concept, def: repTrim, type: 'concept' };
     }
 
-    // 2. Sinon : c'est une QUESTION GÉNÉRALE -> Enregistrer QUESTION + RÉPONSE (Q&A)
-    // On conserve la question entière (clé canonique) et ses mots-clés distinctifs
     const motsCles = extraireMotsCles(qTrim);
     if (motsCles.length === 0) return null;
 

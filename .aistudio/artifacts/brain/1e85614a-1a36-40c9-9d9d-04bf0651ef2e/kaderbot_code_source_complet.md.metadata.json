@@ -1,5 +1,6 @@
 {
-  "Summary": "Code source complet de l'application web KaderBot incluant la cl\u00e9 API Gemini configurable en Admin, les boutons de confiance r\u00e9serv\u00e9s \u00e0 l'admin, le d\u00e9filement mobile verrouill\u00e9 avec zone de saisie fixe, et l'archive ZIP pr\u00eate au t\u00e9l\u00e9chargement.",
-  "UserFacing": true,
-  "RequestFeedback": false
+  "summary":  "Code source complet et mis à jour des 3 fichiers majeurs (src/core/cognitiveEngine.ts, src/types/kaderbot.ts, src/App.tsx) pour l'architecture hybride conversationnelle de KADERBOT NOVA avec embeddings Transformers.js côté client, mémoire de contexte sur 5 messages et calcul de similarité sémantique sans affichage technique.",
+  "createdAt":  "2026-10-24T19:59:42.589261904Z",
+  "updatedAt":  "2026-10-24T19:59:39.091670574Z",
+  "userFacing":  true
 }

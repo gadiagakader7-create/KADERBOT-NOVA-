@@ -521,17 +521,6 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       : 'Système'}
                   </span>
                 )}
-                {msg.confidence !== undefined && (
-                  <span
-                    className={`text-[10px] font-mono font-medium px-1.5 py-0.2 rounded ${
-                      msg.confidence >= 0.75
-                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/40'
-                        : 'bg-amber-950/80 text-amber-300 border border-amber-800/40'
-                    }`}
-                  >
-                    {Math.round(msg.confidence * 100)}% certitude
-                  </span>
-                )}
                 <span className="text-gray-600 text-[10px]">{msg.timestamp}</span>
               </div>
 

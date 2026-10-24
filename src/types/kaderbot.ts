@@ -8,6 +8,7 @@ export interface MemoryEntry {
   question_origine?: string;
   type?: 'concept' | 'question_reponse';
   mots_cles?: string[];
+  vecteur?: number[]; // Vecteur d'embedding sémantique (Transformers.js all-MiniLM-L6-v2)
 }
 
 export interface GeneralRule {
@@ -34,7 +35,7 @@ export interface ChatMessage {
     intent?: string;
     sujet?: string;
     chemin?: string[];
-    source?: 'local_memoire' | 'deduction' | 'regle' | 'groq' | 'gemini' | 'systeme';
+    source?: 'local_memoire' | 'deduction' | 'regle' | 'groq' | 'gemini' | 'systeme' | 'semantique';
     ruleApplied?: string;
   };
 }
@@ -87,4 +88,5 @@ export interface AppConfig {
   activeSession: string;
   soundEnabled: boolean;
   autoLearnFromLLM: boolean;
+  contexteRecent?: string[];
 }

@@ -31,7 +31,6 @@ import {
   repondrePourquoi,
   deduireChaine,
   deduireGeneralisation,
-  construirePhraseGeneralisation,
   apprendreDeLLM,
   rechercherFlou,
   naviguerLiens,
@@ -40,6 +39,10 @@ import {
   trouverQuestionReponse,
   estRequeteDefinition,
   nettoyerMemoirePolluee,
+  trouverSensSimilaire,
+  obtenirVecteurCache,
+  resoudrePronomsAvecHistorique,
+  evaluerCalculMath,
 } from './core/cognitiveEngine';
 import { Header } from './components/Header';
 import { ChatTab } from './components/ChatTab';
@@ -52,7 +55,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { apiService } from './services/apiService';
 
 export default function App() {
-  // Admin detection via URL (?admin=true)
+  // Détection du mode administrateur via l'URL (?admin=true)
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
@@ -61,7 +64,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
 
-  // Keep admin status synced on URL changes
+  // Synchronisation dynamique du statut admin sur navigation
   useEffect(() => {
     const checkAdmin = () => {
       const params = new URLSearchParams(window.location.search);
@@ -71,18 +74,18 @@ export default function App() {
     return () => window.removeEventListener('popstate', checkAdmin);
   }, []);
 
-  // When not in admin mode, restrict active tab to 'chat' or 'tools'
+  // En mode public, restreindre les onglets à 'chat' ou 'tools'
   useEffect(() => {
     if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
       setActiveTab('chat');
     }
   }, [isAdmin, activeTab]);
 
-  // Modals state
+  // État des modales
   const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Configuration
+  // Configuration générale de KADERBOT NOVA
   const [config, setConfig] = useState<AppConfig>(() => {
     const saved = localStorage.getItem('kaderbot_config');
     if (saved) {
@@ -101,17 +104,16 @@ export default function App() {
       groqModel: 'openai/gpt-oss-120b',
       geminiModel: 'gemini-3.8-flash',
       systemPrompt:
-        'Tu es KADERBOT, un assistant sympa, concis et curieux. ' +
-        'Tu réponds toujours en français, en 2 à 4 phrases maximum. ' +
-        'Tu ne fais pas de listes à puces sauf si on te le demande. ' +
-        'Tu es chaleureux mais pas excessif.',
+        'Tu es KADERBOT, un assistant conversationnel et chaleureux. ' +
+        'Tu réponds toujours en français, en 2 à 4 phrases fluides et précises. ' +
+        'Tu gardes le fil de la conversation et résous naturellement les pronoms.',
       activeSession: 'defaut',
       soundEnabled: false,
       autoLearnFromLLM: true,
     };
   });
 
-  // Sessions state
+  // Gestion des sessions
   const [sessions, setSessions] = useState<string[]>(() => {
     const saved = localStorage.getItem('kaderbot_sessions');
     if (saved) {
@@ -122,7 +124,7 @@ export default function App() {
     return ['defaut'];
   });
 
-  // Knowledge base state for active session
+  // Base de connaissances cognitive (Mémoire, Règles, Liens, Synonymes)
   const [memoire, setMemoire] = useState<MemoryStore>(() => {
     const saved = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
     if (saved) {
@@ -169,32 +171,32 @@ export default function App() {
     };
   });
 
-  // Pronoun context history
+  // Historique conceptuel pour le fil de pensée
   const [contexte, setContexte] = useState<string[]>([]);
   const [chatPrefill, setChatPrefill] = useState('');
   const [dernieresIdees, setDernieresIdees] = useState<string[]>([]);
   const [groqLog, setGroqLog] = useState<Array<{ q: string; r: string; time: string }>>([]);
 
-  // Helper for fresh welcome message
+  // Message d'accueil propre et accueillant
   const getWelcomeMessage = (): ChatMessage => {
     const hour = new Date().getHours();
-    let welcome = 'Bonjour, prêt pour une nouvelle session inspirante ?';
+    let welcome = 'Bonjour, prêt pour une nouvelle discussion ?';
     if (hour >= 12 && hour < 18) {
-      welcome = "Bon après-midi, je suis là pour t'aider.";
+      welcome = "Bon après-midi ! Que souhaites-tu explorer aujourd’hui ?";
     } else if (hour >= 18 || hour < 6) {
-      welcome = 'Bonsoir, envie de discuter ou d’apprendre ensemble ?';
+      welcome = 'Bonsoir ! Je suis à ton écoute.';
     }
 
     return {
       id: 'welcome',
       author: 'KB',
-      text: `${welcome} Je suis KADERBOT NOVA V14. Pose-moi une question, enseigne-moi un fait avec "retiens: ...", ou explore les déductions logiques.`,
+      text: `${welcome} Je suis KADERBOT NOVA. Je comprends le sens de tes phrases et me souviens de nos échanges. Pose-moi une question ou discute simplement avec moi !`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       meta: { source: 'systeme' },
     };
   };
 
-  // Chat Threads state saved in localStorage (ChatGPT style)
+  // Fils de discussion sauvegardés en localStorage (Style ChatGPT)
   const [threads, setThreads] = useState<ChatThread[]>(() => {
     const saved = localStorage.getItem('kaderbot_chat_threads');
     if (saved) {
@@ -207,28 +209,25 @@ export default function App() {
     return [];
   });
 
-  // Current active thread ID (null = nouvelle discussion vierge)
+  // ID du fil actif (null = nouvelle discussion)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
 
-  // Messages list - starts with fresh welcome message on new discussion
+  // Messages de la discussion courante
   const [messages, setMessages] = useState<ChatMessage[]>(() => [getWelcomeMessage()]);
 
-  // Keep activeThreadIdRef in sync for callbacks
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
 
-  // Persist threads to localStorage
+  // Persistance des threads
   useEffect(() => {
     localStorage.setItem('kaderbot_chat_threads', JSON.stringify(threads));
   }, [threads]);
 
   const [isThinking, setIsThinking] = useState(false);
 
-  // Architecture de Mémoire Hybride :
-  // 1. Priorité au Local : Au démarrage, lit la mémoire dans le localStorage.
-  // Si le localStorage est vide, télécharge les données de base depuis le serveur et les sauvegarde dans le localStorage.
+  // 1. Priorité au Local au démarrage : Si localStorage est vide, chargement initial serveur
   useEffect(() => {
     const localMemo = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
     if (!localMemo) {
@@ -259,13 +258,12 @@ export default function App() {
           }
         })
         .catch(err => {
-          console.warn('Initialisation serveur échouée ou hors-ligne, utilisation des données locales par défaut:', err);
+          console.warn('Initialisation serveur ou hors-ligne, données par défaut actives:', err);
         });
     }
   }, []);
 
-  // 2. Sauvegarde Locale automatique : À chaque modification, la mémoire est sauvegardée
-  // dans le localStorage. Elle n'est plus envoyée automatiquement au serveur.
+  // 2. Sauvegarde Locale automatique dans localStorage sans appel automatique au serveur
   useEffect(() => {
     localStorage.setItem('kaderbot_config', JSON.stringify(config));
   }, [config]);
@@ -281,11 +279,10 @@ export default function App() {
     localStorage.setItem(`kaderbot_synonymes_${config.activeSession}`, JSON.stringify(synonymes));
   }, [memoire, regles, liens, synonymes, config.activeSession]);
 
-  // 3. Boutons de synchronisation manuelle (Admin uniquement)
-  // "Envoyer ma mémoire au serveur"
+  // Synchronisation manuelle réservée à l'administrateur
   const handlePushMemoryToServer = async (): Promise<{ success: boolean; message: string }> => {
     try {
-      const res = await apiService.saveMemoryToServer({
+      await apiService.saveMemoryToServer({
         memoire,
         regles,
         liens,
@@ -294,7 +291,7 @@ export default function App() {
       });
       return {
         success: true,
-        message: `Mémoire locale envoyée au serveur avec succès (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
+        message: `Mémoire locale transmise au serveur avec succès (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
       };
     } catch (err: any) {
       return {
@@ -304,7 +301,6 @@ export default function App() {
     }
   };
 
-  // "Récupérer la mémoire du serveur" (écrase la mémoire locale)
   const handlePullMemoryFromServer = async (): Promise<{ success: boolean; message: string }> => {
     try {
       const remote = await apiService.loadMemoryFromServer();
@@ -331,10 +327,10 @@ export default function App() {
         localStorage.setItem('kaderbot_sessions', JSON.stringify(remote.sessions));
       }
 
-      addBotMessage('Mémoire du serveur récupérée et appliquée en local avec succès.');
+      addBotMessage('Mémoire du serveur récupérée et appliquée localement avec succès.');
       return {
         success: true,
-        message: `Mémoire du serveur récupérée et appliquée en local (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
+        message: `Mémoire synchronisée depuis le serveur (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}).`,
       };
     } catch (err: any) {
       return {
@@ -344,7 +340,6 @@ export default function App() {
     }
   };
 
-  // Adjust hits on specific concept definition
   const handleAdjustHits = (sujet: string, entryIdx: number, delta: number) => {
     setMemoire(prev => {
       const list = prev[sujet];
@@ -356,7 +351,6 @@ export default function App() {
     });
   };
 
-  // Handle switching sessions
   const handleSelectSession = (newSession: string) => {
     if (newSession === config.activeSession) return;
     setConfig(prev => ({ ...prev, activeSession: newSession }));
@@ -379,22 +373,17 @@ export default function App() {
     handleSelectSession(name);
   };
 
-  const addBotMessage = (
-    text: string,
-    meta?: ChatMessage['meta'],
-    confidence?: number
-  ) => {
+  // Ajout d'un message bot sans AUCUN affichage de chiffres, scores ou vecteurs
+  const addBotMessage = (text: string, meta?: ChatMessage['meta']) => {
     const newMsg: ChatMessage = {
       id: `kb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       author: 'KB',
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      confidence,
       meta,
     };
     setMessages(prev => [...prev, newMsg]);
 
-    // Also update current active thread in threads list
     const currentThreadId = activeThreadIdRef.current;
     if (currentThreadId) {
       setThreads(prev =>
@@ -406,7 +395,6 @@ export default function App() {
       );
     }
 
-    // Audio narration if enabled
     if (config.soundEnabled && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
@@ -415,7 +403,6 @@ export default function App() {
     }
   };
 
-  // Switch to an existing thread
   const handleSelectThread = (threadId: string) => {
     const target = threads.find(t => t.id === threadId);
     if (!target) return;
@@ -424,14 +411,12 @@ export default function App() {
     setMessages(target.messages && target.messages.length > 0 ? target.messages : [getWelcomeMessage()]);
   };
 
-  // Start a fresh new thread (blank conversation)
   const handleNewThread = () => {
     activeThreadIdRef.current = null;
     setActiveThreadId(null);
     setMessages([getWelcomeMessage()]);
   };
 
-  // Delete a thread from history
   const handleDeleteThread = (threadId: string) => {
     setThreads(prev => prev.filter(t => t.id !== threadId));
     if (activeThreadIdRef.current === threadId) {
@@ -439,7 +424,6 @@ export default function App() {
     }
   };
 
-  // Rename a thread (Feature 1)
   const handleRenameThread = (threadId: string, newTitle: string) => {
     const trimmed = newTitle.trim();
     if (!trimmed) return;
@@ -450,7 +434,6 @@ export default function App() {
     );
   };
 
-  // Adjust cognitive weight
   const handleAdjustWeight = (sujet: string, delta: number) => {
     setMemoire(prev => {
       const copy = { ...prev };
@@ -474,12 +457,11 @@ export default function App() {
     const isPositive = delta > 0;
     addBotMessage(
       isPositive
-        ? `Parfait ! J'ai renforcé ma certitude sur "${sujet}" (+${delta}).`
-        : `Compris ! J'ai baissé mon indice de confiance sur "${sujet}" (${delta}).`
+        ? `Parfait ! J'ai renforcé cette notion sur "${sujet}".`
+        : `Compris ! J'ai corrigé ma certitude concernant "${sujet}".`
     );
   };
 
-  // Add rule helper
   const handleAddRule = (
     quant: 'tous' | 'aucun' | 'certains',
     sujet: string,
@@ -546,13 +528,20 @@ export default function App() {
     });
   };
 
-  // CORE COGNITIVE NLP DISPATCHER
-  // Faithfully executing every capability from the user's Python code
+  /**
+   * MOTEUR COGNITIF HYBRIDE CONVERSATIONNEL
+   * Architecture en plusieurs étapes :
+   * 1. Contexte conversationnel des 5 derniers messages & résolution des pronoms
+   * 2. Étape 1 : Local Sémantique (Embeddings côté client avec @xenova/transformers)
+   * 3. Étape 2 : Outils / Calculs arithmétiques directs
+   * 4. Étape 3 : Cloud Fallback (Gemini/Groq avec historique complet des 5 derniers messages)
+   * 5. Apprentissage automatique avec calcul du vecteur sémantique pour la prochaine fois
+   */
   const handleProcessUserMessage = async (rawMessage: string) => {
     const text = rawMessage.trim();
     if (!text) return;
 
-    // Add user message
+    // Ajout du message utilisateur
     const userMsg: ChatMessage = {
       id: `user_${Date.now()}`,
       author: 'Toi',
@@ -562,7 +551,6 @@ export default function App() {
 
     let currentThreadId = activeThreadIdRef.current;
     if (!currentThreadId) {
-      // 2. Nouvelle discussion : créée et sauvegardée dès l'envoi du premier message
       const newId = `thread_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       activeThreadIdRef.current = newId;
       setActiveThreadId(newId);
@@ -578,7 +566,6 @@ export default function App() {
 
       setThreads(prev => [newThread, ...prev]);
     } else {
-      // Met à jour la discussion active existante
       setThreads(prev =>
         prev.map(t =>
           t.id === currentThreadId
@@ -593,10 +580,10 @@ export default function App() {
     const msgLower = text.toLowerCase();
     const msgClean = sansAccent(msgLower);
 
-    // 1. Context commands
+    // 1. Commandes de contexte explicites
     if (msgLower === 'reset contexte' || msgLower === 'vider contexte') {
       setContexte([]);
-      addBotMessage('Contexte cognitif réinitialisé.', { source: 'systeme' });
+      addBotMessage('Contexte conversationnel réinitialisé.', { source: 'systeme' });
       return;
     }
 
@@ -604,12 +591,12 @@ export default function App() {
       if (contexte.length === 0) {
         addBotMessage('Aucun échange en contexte actuellement.', { source: 'systeme' });
       } else {
-        addBotMessage(`Contexte actuel (${contexte.length} concepts récents) : ${contexte.join(' → ')}`, { source: 'systeme' });
+        addBotMessage(`Fil conducteur actuel (${contexte.length} concepts récents) : ${contexte.join(' → ')}`, { source: 'systeme' });
       }
       return;
     }
 
-    // 2. Groq toggle & status commands
+    // 2. Commandes de configuration LLM
     if (msgLower === 'groq on') {
       setConfig(prev => ({ ...prev, provider: 'groq' }));
       addBotMessage('Moteur Groq activé.', { source: 'systeme' });
@@ -618,7 +605,7 @@ export default function App() {
 
     if (msgLower === 'groq off') {
       setConfig(prev => ({ ...prev, provider: 'local_only' }));
-      addBotMessage('Mode 100% local activé (Groq désactivé).', { source: 'systeme' });
+      addBotMessage('Mode 100% local activé.', { source: 'systeme' });
       return;
     }
 
@@ -629,7 +616,7 @@ export default function App() {
       return;
     }
 
-    // 3. Direct Groq question
+    // 3. Question explicite vers Groq
     if (msgLower.startsWith('groq:')) {
       const q = text.slice(5).trim();
       if (!q) {
@@ -653,19 +640,26 @@ export default function App() {
         if (config.autoLearnFromLLM) {
           const learned = apprendreDeLLM(q, res.text, memoire, 'groq');
           if (learned) {
+            const texteRef = learned.type === 'concept' ? `${learned.sujet} : ${learned.def}` : `${q} (${learned.sujet})`;
+            obtenirVecteurCache(texteRef).then(vec => {
+              if (vec.length > 0 && memoire[learned.sujet]?.[0]) {
+                memoire[learned.sujet][0].vecteur = vec;
+                setMemoire({ ...memoire });
+              }
+            }).catch(() => {});
             setMemoire({ ...memoire });
             setContexte(prev => [...prev, learned.sujet]);
           }
         }
       } catch (err: any) {
-        addBotMessage(`(Groq) Erreur : ${err.message}`, { source: 'systeme' });
+        addBotMessage(`Erreur Groq : ${err.message}`, { source: 'systeme' });
       } finally {
         setIsThinking(false);
       }
       return;
     }
 
-    // 4. Session commands
+    // 4. Commandes de sessions
     if (msgLower === 'session' || msgLower === 'session active') {
       addBotMessage(
         `Session active : ${config.activeSession}\nSujets en mémoire : ${Object.keys(memoire).length}\nRègles actives : ${Object.values(regles).reduce((acc, l) => acc + l.length, 0)}`
@@ -686,7 +680,7 @@ export default function App() {
       }
     }
 
-    // 5. Taxonomy & Link commands: lie:, delie:, liens:, cousins:
+    // 5. Commandes de liens taxonomiques
     if (msgLower.startsWith('lie:') || msgLower.startsWith('lie ')) {
       const rest = text.includes(':') ? text.split(':')[1].trim() : text.slice(3).trim();
       if (rest.includes('->')) {
@@ -695,7 +689,7 @@ export default function App() {
         addBotMessage(`Lien cognitif établi : ${source} -> ${target}`, { source: 'local_memoire' });
         return;
       }
-      addBotMessage('Format requis : lie: source -> cible (ex: lie: moineau -> oiseau)');
+      addBotMessage('Format : lie: source -> cible (ex: lie: moineau -> oiseau)');
       return;
     }
 
@@ -740,409 +734,7 @@ export default function App() {
       return;
     }
 
-    // 6. Translation commands: "traduis en anglais: ...", "traduis en espagnol: ..."
-    if (msgLower.startsWith('traduis en ') || msgLower.startsWith('traduis ')) {
-      if (!text.includes(':')) {
-        addBotMessage('Format : traduis en anglais: ton texte ici');
-        return;
-      }
-      const [entete, ...corpsParts] = text.split(':');
-      const corps = corpsParts.join(':').trim();
-      if (!corps) {
-        addBotMessage('Il manque le texte à traduire.');
-        return;
-      }
-      const enteteClean = sansAccent(entete.toLowerCase()).replace(/^traduis(?:\s+en)?\s*/, '').trim();
-      const languesMap: Record<string, string> = {
-        anglais: 'English', english: 'English',
-        arabe: 'Arabic', arabic: 'Arabic',
-        espagnol: 'Spanish', spanish: 'Spanish',
-        allemand: 'German', german: 'German',
-        italien: 'Italian', italian: 'Italian',
-        portugais: 'Portuguese', portuguese: 'Portuguese',
-        russe: 'Russian', russian: 'Russian',
-        chinois: 'Chinese', chinese: 'Chinese',
-        japonais: 'Japanese', japanese: 'Japanese',
-        coreen: 'Korean', korean: 'Korean',
-        turc: 'Turkish', turkish: 'Turkish',
-        neerlandais: 'Dutch', dutch: 'Dutch',
-        peul: 'Fula', fula: 'Fula',
-        bambara: 'Bambara', wolof: 'Wolof',
-        swahili: 'Swahili',
-        francais: 'French', french: 'French',
-      };
-
-      const cible = languesMap[enteteClean] || 'English';
-      setIsThinking(true);
-      try {
-        const result = await apiService.traduire({
-          text: corps,
-          targetLang: cible,
-          provider: config.provider,
-        });
-        addBotMessage(result, { source: 'systeme' });
-      } catch (err: any) {
-        addBotMessage(`Erreur traduction : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 7. Text Correction: "corrige: ..."
-    if (msgLower.startsWith('corrige:') || msgLower.startsWith('corrige ')) {
-      const corps = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
-      if (!corps) {
-        addBotMessage('Format : corrige: ton texte');
-        return;
-      }
-      setIsThinking(true);
-      try {
-        const result = await apiService.corriger({
-          text: corps,
-          provider: config.provider,
-        });
-        addBotMessage(result, { source: 'systeme' });
-      } catch (err: any) {
-        addBotMessage(`Erreur correction : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 8. Ideas Generator: "idees 5: theme" or "idees 3 drole: theme"
-    if (msgLower.startsWith('idees ') || msgLower.startsWith('idées ') || msgLower.startsWith('idees:')) {
-      if (!text.includes(':')) {
-        addBotMessage('Format : idees 5: theme  ou  idees 3 drole: theme');
-        return;
-      }
-      const [entete, ...corpsParts] = text.split(':');
-      const theme = corpsParts.join(':').trim();
-      const matchNb = entete.match(/\d+/);
-      const count = matchNb ? Math.max(1, Math.min(15, parseInt(matchNb[0], 10))) : 5;
-      let style = 'creatif';
-      for (const st of ['serieux', 'drole', 'poetique', 'absurde', 'creatif', 'scientifique', 'philosophique']) {
-        if (entete.toLowerCase().includes(st)) {
-          style = st;
-          break;
-        }
-      }
-
-      setIsThinking(true);
-      try {
-        const result = await apiService.genererIdees({
-          theme,
-          count,
-          style,
-          provider: config.provider,
-        });
-
-        const lines = result
-          .split('\n')
-          .map(l => l.replace(/^\s*(\d+[\.\)\-:]\s*|[\-\*]\s*)/, '').trim())
-          .filter(Boolean);
-
-        setDernieresIdees(lines);
-        const formatted = [`Idées sur : ${theme}`, ...lines.map((l, i) => `${i + 1}. ${l}`)].join('\n');
-        addBotMessage(formatted, { source: 'systeme' });
-      } catch (err: any) {
-        addBotMessage(`Erreur idées : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 9. Single Idea Development: "idee 1:", "idee 2:"
-    if (msgLower.startsWith('idee ') || msgLower.startsWith('idée ')) {
-      const matchNb = msgLower.match(/\d+/);
-      if (!matchNb) {
-        addBotMessage('Précise le numéro : idee 3:');
-        return;
-      }
-      const num = parseInt(matchNb[0], 10) - 1;
-      if (num < 0 || num >= dernieresIdees.length) {
-        addBotMessage(`Pas d'idée numéro ${num + 1} en mémoire récente. Génère d'abord une liste avec "idees 5: thème"`);
-        return;
-      }
-      const chosenIdea = dernieresIdees[num];
-      setIsThinking(true);
-      try {
-        const prompt = `Développe cette idée en 3 à 4 phrases claires, concrètes et inspirantes : "${chosenIdea}".`;
-        const res = await apiService.chat({
-          prompt,
-          history: [],
-          provider: config.provider,
-        });
-
-        addBotMessage(`Idée ${num + 1} développée :\n${res.text}`, { source: 'systeme' });
-
-        // Auto-save to memory
-        const sujetIdea = `idee_${num + 1}`;
-        const fact = `${chosenIdea} -> ${res.text.slice(0, 180)}`;
-        setMemoire(prev => ({
-          ...prev,
-          [sujetIdea]: [
-            {
-              def: fact,
-              poids: 0.75,
-              hits: 1,
-              source: 'auto',
-              last_used: new Date().toISOString(),
-              created: new Date().toISOString(),
-            },
-          ],
-        }));
-      } catch (err: any) {
-        addBotMessage(`Erreur développement idée : ${err.message}`, { source: 'systeme' });
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
-
-    // 10. Summarize: "resume: texte" or "resume: concept"
-    if (msgLower.startsWith('resume:')) {
-      const corps = text.split(':')[1]?.trim();
-      if (!corps) {
-        addBotMessage('Format : resume: ton texte ou ton concept');
-        return;
-      }
-
-      // If text is long (> 30 words), call LLM summarizer
-      if (corps.split(/\s+/).length > 25 || corps.length > 150) {
-        setIsThinking(true);
-        try {
-          const res = await apiService.resumer({
-            text: corps,
-            provider: config.provider,
-          });
-          addBotMessage(res, { source: 'systeme' });
-        } catch (err: any) {
-          addBotMessage(`Erreur résumé : ${err.message}`, { source: 'systeme' });
-        } finally {
-          setIsThinking(false);
-        }
-        return;
-      }
-
-      // Short concept summary from memory & rules
-      const xCorr = corriger(corps, memoire, regles, synonymes) || corps;
-      const defs = (memoire[xCorr] || []).map(d => d.def);
-      const rList = (regles[xCorr] || []).map(r => `${r.quant} les ${xCorr}s ${r.prop}`);
-      if (defs.length > 0 || rList.length > 0) {
-        let rep = `${xCorr} : ${defs.join('; ') || 'pas de définition'}`;
-        if (rList.length > 0) rep += `\nRègles associées : ${rList.join('; ')}`;
-        addBotMessage(rep, { source: 'local_memoire', sujet: xCorr });
-        return;
-      }
-      addBotMessage(`Aucune donnée enregistrée pour "${corps}".`);
-      return;
-    }
-
-    // 11. Synonyms management: "synonymes: canon = syn1 | syn2" or "synonymes: mot"
-    if (msgLower.startsWith('synonymes:')) {
-      const rest = text.split(':')[1]?.trim();
-      if (!rest) {
-        addBotMessage('Format : synonymes: canon = syn1 | syn2');
-        return;
-      }
-      if (rest.includes('=')) {
-        const [canonPart, synPart] = rest.split('=').map(s => s.trim().toLowerCase());
-        const synList = synPart.split('|').map(s => s.trim()).filter(Boolean);
-        if (canonPart && synList.length > 0) {
-          setSynonymes(prev => {
-            const copy = { ...prev };
-            const currentList = Array.isArray(copy[canonPart]) ? (copy[canonPart] as string[]) : [];
-            const merged = Array.from(new Set([...currentList, ...synList]));
-            copy[canonPart] = merged;
-            for (const s of synList) {
-              copy[s] = canonPart;
-            }
-            return copy;
-          });
-          addBotMessage(`Synonymes enregistrés pour "${canonPart}" : ${synList.join(', ')}`, { source: 'local_memoire' });
-          return;
-        }
-      } else {
-        const q = rest.toLowerCase();
-        if (synonymes[q]) {
-          const val = synonymes[q];
-          const rep = Array.isArray(val) ? `${q} = ${val.join(' | ')}` : `${q} -> ${val}`;
-          addBotMessage(rep, { source: 'local_memoire' });
-          return;
-        }
-        addBotMessage(`Aucun synonyme trouvé pour "${q}".`);
-        return;
-      }
-    }
-
-    // 12. Fuzzy near search: "proche: mot"
-    if (msgLower.startsWith('proche:') || msgLower.startsWith('proche ')) {
-      const target = (text.includes(':') ? text.split(':')[1] : text.slice(7)).trim().toLowerCase();
-      const keys = Array.from(new Set([...Object.keys(memoire), ...Object.keys(regles)]));
-      const candidates = keys.map(k => {
-        const kNorm = sansAccent(k);
-        const tNorm = sansAccent(target);
-        let score = kNorm === tNorm ? 1.0 : 0.0;
-        if (!score) {
-          const d = Math.max(kNorm.length, tNorm.length) - Math.abs(kNorm.length - tNorm.length);
-          score = (kNorm.includes(tNorm) || tNorm.includes(kNorm)) ? 0.75 : 0.4;
-        }
-        return { key: k, score };
-      });
-      candidates.sort((a, b) => b.score - a.score);
-      const top = candidates.filter(c => c.score >= 0.5).slice(0, 6);
-      if (top.length > 0) {
-        addBotMessage(`Sujets proches de "${target}" :\n${top.map(c => ` - ${c.key}`).join('\n')}`, { source: 'local_memoire' });
-      } else {
-        addBotMessage(`Aucun sujet proche de "${target}".`);
-      }
-      return;
-    }
-
-    // 13. Substring Search: "chercher: mot"
-    if (msgLower.startsWith('chercher:')) {
-      const q = text.split(':')[1]?.trim().toLowerCase();
-      if (!q) {
-        addBotMessage('Format : chercher: mot');
-        return;
-      }
-      const results: string[] = [];
-      for (const [k, list] of Object.entries(memoire)) {
-        if (k.includes(q)) {
-          results.push(`${k} = ${list.map(d => d.def).join(' | ')}`);
-        }
-      }
-      for (const [s, list] of Object.entries(regles)) {
-        if (s.includes(q)) {
-          for (const r of list) results.push(`${r.quant} les ${s}s ${r.prop}`);
-        }
-      }
-      addBotMessage(
-        results.length > 0
-          ? `Résultats pour "${q}" :\n${results.slice(0, 10).join('\n')}`
-          : `Rien trouvé pour "${q}".`,
-        { source: 'local_memoire' }
-      );
-      return;
-    }
-
-    // 14. Bulk forgetting: "oublier masse:" or single "oublier:"
-    if (msgLower.startsWith('oublier masse:') || msgLower.startsWith('oublier en masse:')) {
-      const rest = text.split(':')[1]?.trim() || '';
-      const items = rest.split(/[,\n;.]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
-      const removed: string[] = [];
-      setMemoire(prev => {
-        const copy = { ...prev };
-        for (const item of items) {
-          if (copy[item]) {
-            delete copy[item];
-            removed.push(item);
-          }
-        }
-        return copy;
-      });
-      addBotMessage(
-        removed.length > 0
-          ? `Concepts oubliés en masse (${removed.length}) : ${removed.join(', ')}`
-          : 'Aucun concept trouvé à supprimer.',
-        { source: 'systeme' }
-      );
-      return;
-    }
-
-    if (msgLower.startsWith('oublier:')) {
-      const rest = text.split(':')[1]?.trim().toLowerCase() || '';
-      if (!rest) {
-        addBotMessage('Format : oublier: sujet ou oublier: sujet = def');
-        return;
-      }
-      if (rest.includes('=')) {
-        const [sujet, defText] = rest.split('=').map(s => s.trim());
-        setMemoire(prev => {
-          const copy = { ...prev };
-          if (copy[sujet]) {
-            copy[sujet] = copy[sujet].filter(d => !d.def.toLowerCase().includes(defText.toLowerCase()));
-            if (copy[sujet].length === 0) delete copy[sujet];
-          }
-          return copy;
-        });
-        addBotMessage(`Définition oubliée pour "${sujet}".`, { source: 'systeme' });
-        return;
-      } else {
-        let found = false;
-        if (memoire[rest]) {
-          setMemoire(prev => {
-            const copy = { ...prev };
-            delete copy[rest];
-            return copy;
-          });
-          found = true;
-        }
-        if (regles[rest]) {
-          setRegles(prev => {
-            const copy = { ...prev };
-            delete copy[rest];
-            return copy;
-          });
-          found = true;
-        }
-        addBotMessage(
-          found ? `J'ai complètement oublié "${rest}".` : `Je ne connaissais pas "${rest}".`,
-          { source: 'systeme' }
-        );
-        return;
-      }
-    }
-
-    // 15. Bulk Learning: "retiens masse: part1 . part2"
-    if (msgLower.startsWith('retiens masse:')) {
-      const rest = text.split(':')[1]?.trim() || '';
-      const parts = rest.split(/[.\n;]+/).map(p => p.trim()).filter(Boolean);
-      const ok: string[] = [];
-      const nowIso = new Date().toISOString();
-
-      setMemoire(prevMemo => {
-        const memoCopy = { ...prevMemo };
-        for (const part of parts) {
-          const rq = extraireQuantificateur(part);
-          if (rq) {
-            handleAddRule(rq.quant, rq.sujet, rq.prop, 0.85);
-            ok.push(`${rq.quant} ${rq.sujet} -> ${rq.prop}`);
-            continue;
-          }
-          if (part.includes('=')) {
-            const [sRaw, dRaw] = part.split('=').map(x => x.trim().toLowerCase());
-            if (sRaw && dRaw) {
-              const current = memoCopy[sRaw] ? [...memoCopy[sRaw]] : [];
-              current.unshift({
-                def: dRaw,
-                poids: 0.85,
-                hits: 1,
-                source: 'manuel',
-                last_used: nowIso,
-                created: nowIso,
-              });
-              memoCopy[sRaw] = current;
-              ok.push(sRaw);
-            }
-          }
-        }
-        return memoCopy;
-      });
-
-      addBotMessage(
-        ok.length > 0
-          ? `Notes enregistrées en masse (${ok.length}) :\n${ok.join(', ')}`
-          : 'Aucune note valide trouvée. Sépare tes phrases par des points.',
-        { source: 'local_memoire' }
-      );
-      return;
-    }
-
-    // 16. Single "retiens:"
+    // 6. Commandes d'apprentissage explicites
     if (msgLower.startsWith('retiens:')) {
       const content = text.split(':')[1]?.trim();
       if (!content) {
@@ -1150,15 +742,13 @@ export default function App() {
         return;
       }
 
-      // Check quantifier rule
       const rq = extraireQuantificateur(content);
       if (rq) {
         handleAddRule(rq.quant, rq.sujet, rq.prop, 0.85);
-        addBotMessage(`Règle enregistrée : ${rq.quant} les ${rq.sujet}s ${rq.prop} (certitude 85%)`, { source: 'regle' }, 0.85);
+        addBotMessage(`Règle enregistrée : ${rq.quant} les ${rq.sujet}s ${rq.prop}`, { source: 'regle' });
         return;
       }
 
-      // Subject = Def1 | Def2
       if (content.includes('=')) {
         const [sujetRaw, defsRaw] = content.split('=').map(s => s.trim());
         const s = sujetRaw.toLowerCase();
@@ -1181,107 +771,67 @@ export default function App() {
             copy[s] = current;
             return copy;
           });
+
+          // Calculer l'embedding en arrière-plan
+          obtenirVecteurCache(`${s} : ${defsList[0]}`).then(vec => {
+            if (vec.length > 0 && memoire[s]?.[0]) {
+              memoire[s][0].vecteur = vec;
+            }
+          }).catch(() => {});
+
           setContexte(prev => [...prev, s]);
-          addBotMessage(`Fait retenu pour "${s}" : ${defsList.join(' | ')} (poids 0.85)`, { source: 'local_memoire', sujet: s }, 0.85);
+          addBotMessage(`Fait retenu pour "${s}" : ${defsList.join(' | ')}`, { source: 'local_memoire', sujet: s });
           return;
         }
       }
-      addBotMessage('Format requis : retiens: sujet = définition (ou plusieurs avec: retiens: sujet = def1 | def2)');
+      addBotMessage('Format : retiens: sujet = définition');
       return;
     }
 
-    // 17. Quantifiers direct input: "tous les oiseaux ont des plumes"
-    const directRq = extraireQuantificateur(text);
-    if (directRq && (msgClean.startsWith('tous') || msgClean.startsWith('aucun') || msgClean.startsWith('certains') || msgClean.startsWith('chaque'))) {
-      handleAddRule(directRq.quant, directRq.sujet, directRq.prop, 0.85);
-      addBotMessage(`Règle généralisée enregistrée : ${directRq.quant} les ${directRq.sujet}s ${directRq.prop}`, { source: 'regle' }, 0.85);
+    if (msgLower.startsWith('oublier:')) {
+      const rest = text.split(':')[1]?.trim().toLowerCase() || '';
+      if (!rest) {
+        addBotMessage('Format : oublier: sujet');
+        return;
+      }
+      let found = false;
+      if (memoire[rest]) {
+        setMemoire(prev => {
+          const copy = { ...prev };
+          delete copy[rest];
+          return copy;
+        });
+        found = true;
+      }
+      if (regles[rest]) {
+        setRegles(prev => {
+          const copy = { ...prev };
+          delete copy[rest];
+          return copy;
+        });
+        found = true;
+      }
+      addBotMessage(
+        found ? `J'ai complètement oublié "${rest}".` : `Je ne connaissais pas "${rest}".`,
+        { source: 'systeme' }
+      );
       return;
     }
 
-    // 18. Listing commands
-    if (msgLower.startsWith('lister:')) {
-      const target = msgLower.split(':')[1]?.trim();
-      if (target === 'memoire') {
-        const keys = Object.keys(memoire).sort();
-        addBotMessage(`Mémoire active (${keys.length} sujets) :\n${keys.slice(0, 35).join(', ')}${keys.length > 35 ? '...' : ''}`, { source: 'local_memoire' });
-        return;
-      }
-      if (target === 'regles') {
-        const lines: string[] = [];
-        for (const [s, list] of Object.entries(regles)) {
-          for (const r of list) {
-            lines.push(`${r.quant} les ${s}s ${r.prop}`);
-          }
-        }
-        addBotMessage(`Règles générales (${lines.length}) :\n${lines.join('\n') || 'Aucune règle'}`, { source: 'regle' });
-        return;
-      }
-      if (target === 'poids') {
-        const lines: string[] = [];
-        for (const [k, list] of Object.entries(memoire)) {
-          for (const m of list.slice(0, 2)) {
-            lines.push(`${k} = ${m.def} [poids ${m.poids.toFixed(2)}, hits ${m.hits}]`);
-          }
-        }
-        addBotMessage(`Coefficients de poids :\n${lines.slice(0, 15).join('\n')}`, { source: 'local_memoire' });
-        return;
-      }
-      if (target === 'incertains') {
-        const lines: string[] = [];
-        for (const [k, list] of Object.entries(memoire)) {
-          for (const m of list) {
-            if (m.poids < 0.6) {
-              lines.push(`${k} = ${m.def} [poids ${m.poids.toFixed(2)}]`);
-            }
-          }
-        }
-        addBotMessage(
-          lines.length > 0 ? `Concepts incertains :\n${lines.join('\n')}` : 'Aucun concept incertain (tous >= 60%).',
-          { source: 'local_memoire' }
-        );
-        return;
-      }
-      if (target === 'idees') {
-        addBotMessage(
-          dernieresIdees.length > 0
-            ? `Dernières idées générées :\n${dernieresIdees.map((l, i) => `${i + 1}. ${l}`).join('\n')}`
-            : 'Aucune idée archivée dans cette session.',
-          { source: 'systeme' }
-        );
-        return;
-      }
-      if (target === 'groq') {
-        addBotMessage(
-          groqLog.length > 0
-            ? `Derniers échanges LLM :\n${groqLog.slice(0, 5).map(l => `[${l.time}] Q: ${l.q}\nR: ${l.r.slice(0, 80)}...`).join('\n\n')}`
-            : 'Aucun échange LLM enregistré.',
-          { source: 'systeme' }
-        );
-        return;
-      }
-      if (target === 'stats') {
-        addBotMessage(
-          `Statistiques : ${Object.keys(memoire).length} concepts · ${Object.values(regles).reduce((a, b) => a + b.length, 0)} règles · ${Object.keys(liens).length} liaisons taxonomiques · Contexte: ${contexte.join(', ') || 'vide'}`
-        );
-        return;
-      }
-    }
-
-    // 19. Greetings
+    // 7. Salutations & formules de politesse courantes
     const salutation = estSalutation(text);
     if (salutation) {
       addBotMessage(repondreSalutation(salutation), { source: 'systeme' });
       return;
     }
 
-    // 20. Emotions & states
     const etat = detecterEtat(text);
     if (etat) {
       addBotMessage(repondreEtat(etat), { source: 'systeme' });
       return;
     }
 
-    // 21. Reinforcement confirmations ("oui", "c'est ça", "non ce n'est pas ça")
+    // Renforcements positifs ou négatifs ("oui", "c'est ça", "non pas ça")
     if (['oui', "c'est ca", 'exact', 'parfait', 'merci'].includes(msgClean)) {
       if (contexte.length > 0) {
         const last = contexte[contexte.length - 1];
@@ -1297,74 +847,201 @@ export default function App() {
       }
     }
 
-    // 22. Causal Questions: "pourquoi le moineau vole ?" or "pourquoi l'aigle respire ?"
-    if (msgClean.includes('pourquoi')) {
-      const whyAnswer = repondrePourquoi(text, memoire, regles, liens, synonymes);
-      if (whyAnswer) {
-        const s = extraireX(text, memoire, regles, synonymes, contexte);
-        if (s) setContexte(prev => [...prev, s]);
-        addBotMessage(whyAnswer, { source: 'deduction', sujet: s || undefined });
+    // =========================================================================
+    // ÉTAPE 1 : LOCAL SÉMANTIQUE (Embeddings Transformers.js côté navigateur)
+    // =========================================================================
+    setIsThinking(true);
+    try {
+      // 1. Résolution des pronoms ("il", "elle", "ça") avec les 5 derniers messages
+      const questionResolue = resoudrePronomsAvecHistorique(text, messages.slice(-5));
+
+      // 2. Recherche sémantique par similarité cosinus avec seuil élevé (>= 0.80)
+      const matchSemantique = await trouverSensSimilaire(questionResolue, memoire, 0.80);
+      if (matchSemantique) {
+        matchSemantique.entry.hits += 1;
+        matchSemantique.entry.last_used = new Date().toISOString();
+        setMemoire({ ...memoire });
+        setContexte(prev => [...prev, matchSemantique.sujet]);
+
+        const rep = matchSemantique.entry.def;
+        // Formatage fluide et naturel de la réponse sans aucun chiffre technique
+        const reponseFluide = matchSemantique.entry.type === 'concept' && !rep.includes('\n') && !rep.toLowerCase().startsWith('est ') && !rep.toLowerCase().startsWith('un ') && !rep.toLowerCase().startsWith('une ')
+          ? `${matchSemantique.sujet.charAt(0).toUpperCase() + matchSemantique.sujet.slice(1)} est ${rep}.`
+          : rep;
+
+        addBotMessage(reponseFluide, { source: 'local_memoire', sujet: matchSemantique.sujet });
+        setIsThinking(false);
         return;
       }
-    }
 
-    // 23. Question-Réponse mémorisée (recherche précise par combinaison de mots-clés de la question)
-    const qaMatch = trouverQuestionReponse(text, memoire);
-    if (qaMatch) {
-      qaMatch.entry.hits += 1;
-      qaMatch.entry.last_used = new Date().toISOString();
-      setMemoire({ ...memoire });
-      setContexte(prev => [...prev, qaMatch.sujet]);
-      addBotMessage(
-        qaMatch.entry.def,
-        { source: 'local_memoire', sujet: qaMatch.sujet },
-        qaMatch.entry.poids
-      );
-      return;
-    }
-
-    // 24. Demande de Définition de Concept ("c'est quoi le moineau ?", "parle-moi de python", "moineau")
-    const defCheck = estRequeteDefinition(text);
-    if (defCheck.estDef && defCheck.concept) {
-      const candX = corriger(defCheck.concept, memoire, regles, synonymes) || defCheck.concept;
-      const localDef = phraseDef(candX, text, memoire, regles, liens, synonymes);
-      if (localDef) {
-        setContexte(prev => [...prev, candX]);
-        const bestEntry = memoire[candX]?.[0];
-        addBotMessage(localDef, { source: 'local_memoire', sujet: candX }, bestEntry?.poids || 0.85);
-        return;
-      }
-    }
-
-    // 25. Recherche Floue uniquement sur requêtes courtes (1 à 3 mots max)
-    const wordsCount = text.trim().split(/\s+/).length;
-    if (wordsCount <= 3) {
-      const flouMatch = rechercherFlou(text, memoire, regles, 0.72);
-      if (flouMatch) {
-        const flouDef = phraseDef(flouMatch, text, memoire, regles, liens, synonymes);
-        if (flouDef) {
-          setContexte(prev => [...prev, flouMatch]);
-          addBotMessage(`Tu voulais sans doute parler de "${flouMatch}" : ${flouDef}`, { source: 'local_memoire', sujet: flouMatch });
+      // Déduction causale logique ("pourquoi ...")
+      if (msgClean.includes('pourquoi')) {
+        const whyAnswer = repondrePourquoi(text, memoire, regles, liens, synonymes);
+        if (whyAnswer) {
+          const s = extraireX(text, memoire, regles, synonymes, contexte);
+          if (s) setContexte(prev => [...prev, s]);
+          addBotMessage(whyAnswer, { source: 'deduction', sujet: s || undefined });
+          setIsThinking(false);
           return;
         }
       }
-    }
 
-    // 26. Fallback en mode local_only
-    if (config.provider === 'local_only') {
-      const candX = extraireX(text, memoire, regles, synonymes, contexte);
-      addBotMessage(
-        candX
-          ? `Je n'ai pas encore d'information sur "${candX}" dans ma mémoire locale. Enseigne-le moi avec: retiens: ${candX} = ...`
-          : "Je n'ai pas compris en mode local. Tu peux m'enseigner ce fait avec: retiens: sujet = définition",
-        { source: 'systeme' }
-      );
-      return;
-    }
+      // Correspondance exacte ou par mots-clés Q&A mémorisée
+      const qaMatch = trouverQuestionReponse(text, memoire);
+      if (qaMatch) {
+        qaMatch.entry.hits += 1;
+        qaMatch.entry.last_used = new Date().toISOString();
+        setMemoire({ ...memoire });
+        setContexte(prev => [...prev, qaMatch.sujet]);
+        addBotMessage(qaMatch.entry.def, { source: 'local_memoire', sujet: qaMatch.sujet });
+        setIsThinking(false);
+        return;
+      }
 
-    // Call LLM
-    setIsThinking(true);
-    try {
+      // Demande de définition de concept ("c'est quoi ...", "définition de ...")
+      const defCheck = estRequeteDefinition(text);
+      if (defCheck.estDef && defCheck.concept) {
+        const candX = corriger(defCheck.concept, memoire, regles, synonymes) || defCheck.concept;
+        const localDef = phraseDef(candX, text, memoire, regles, liens, synonymes);
+        if (localDef) {
+          setContexte(prev => [...prev, candX]);
+          addBotMessage(localDef, { source: 'local_memoire', sujet: candX });
+          setIsThinking(false);
+          return;
+        }
+      }
+
+      // Recherche floue sur requêtes très courtes (1 à 2 mots)
+      const wordsCount = text.trim().split(/\s+/).length;
+      if (wordsCount <= 2) {
+        const flouMatch = rechercherFlou(text, memoire, regles, 0.72);
+        if (flouMatch) {
+          const flouDef = phraseDef(flouMatch, text, memoire, regles, liens, synonymes);
+          if (flouDef) {
+            setContexte(prev => [...prev, flouMatch]);
+            addBotMessage(`Tu voulais sans doute parler de "${flouMatch}" : ${flouDef}`, { source: 'local_memoire', sujet: flouMatch });
+            setIsThinking(false);
+            return;
+          }
+        }
+      }
+
+      // =========================================================================
+      // ÉTAPE 2 : OUTILS ET CALCULS ARITHMÉTIQUES DIRECTS
+      // =========================================================================
+      const resultatCalcul = evaluerCalculMath(text);
+      if (resultatCalcul) {
+        addBotMessage(resultatCalcul, { source: 'systeme' });
+        setIsThinking(false);
+        return;
+      }
+
+      // Traduction automatique via les outils
+      if (msgLower.startsWith('traduis en ') || msgLower.startsWith('traduis ')) {
+        if (!text.includes(':')) {
+          addBotMessage('Format : traduis en anglais: ton texte ici');
+          setIsThinking(false);
+          return;
+        }
+        const [entete, ...corpsParts] = text.split(':');
+        const corps = corpsParts.join(':').trim();
+        const enteteClean = sansAccent(entete.toLowerCase()).replace(/^traduis(?:\s+en)?\s*/, '').trim();
+        const languesMap: Record<string, string> = {
+          anglais: 'English', english: 'English',
+          arabe: 'Arabic', arabic: 'Arabic',
+          espagnol: 'Spanish', spanish: 'Spanish',
+          allemand: 'German', german: 'German',
+          italien: 'Italian', italian: 'Italian',
+          portugais: 'Portuguese',
+          russe: 'Russian',
+          chinois: 'Chinese',
+          japonais: 'Japanese',
+          francais: 'French',
+        };
+        const cible = languesMap[enteteClean] || 'English';
+        const result = await apiService.traduire({
+          text: corps,
+          targetLang: cible,
+          provider: config.provider,
+        });
+        addBotMessage(result, { source: 'systeme' });
+        setIsThinking(false);
+        return;
+      }
+
+      // Générateur d'idées
+      if (msgLower.startsWith('idees ') || msgLower.startsWith('idées ') || msgLower.startsWith('idees:')) {
+        if (!text.includes(':')) {
+          addBotMessage('Format : idees 5: theme  ou  idees 3 drole: theme');
+          setIsThinking(false);
+          return;
+        }
+        const [entete, ...corpsParts] = text.split(':');
+        const theme = corpsParts.join(':').trim();
+        const matchNb = entete.match(/\d+/);
+        const count = matchNb ? Math.max(1, Math.min(15, parseInt(matchNb[0], 10))) : 5;
+        let style = 'creatif';
+        for (const st of ['serieux', 'drole', 'poetique', 'absurde', 'creatif', 'scientifique', 'philosophique']) {
+          if (entete.toLowerCase().includes(st)) {
+            style = st;
+            break;
+          }
+        }
+        const result = await apiService.genererIdees({
+          theme,
+          count,
+          style,
+          provider: config.provider,
+        });
+        const lines = result
+          .split('\n')
+          .map(l => l.replace(/^\s*(\d+[\.\)\-:]\s*|[\-\*]\s*)/, '').trim())
+          .filter(Boolean);
+        setDernieresIdees(lines);
+        const formatted = [`Idées sur : ${theme}`, ...lines.map((l, i) => `${i + 1}. ${l}`)].join('\n');
+        addBotMessage(formatted, { source: 'systeme' });
+        setIsThinking(false);
+        return;
+      }
+
+      // Résumé de texte
+      if (msgLower.startsWith('resume:')) {
+        const corps = text.split(':')[1]?.trim();
+        if (corps && corps.length > 80) {
+          const res = await apiService.resumer({ text: corps, provider: config.provider });
+          addBotMessage(res, { source: 'systeme' });
+          setIsThinking(false);
+          return;
+        }
+      }
+
+      // Correction de texte
+      if (msgLower.startsWith('corrige:') || msgLower.startsWith('corrige ')) {
+        const corps = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
+        if (corps) {
+          const result = await apiService.corriger({ text: corps, provider: config.provider });
+          addBotMessage(result, { source: 'systeme' });
+          setIsThinking(false);
+          return;
+        }
+      }
+
+      // Mode 100% local actif sans fallback cloud
+      if (config.provider === 'local_only') {
+        const candX = extraireX(text, memoire, regles, synonymes, contexte);
+        addBotMessage(
+          candX
+            ? `Je n'ai pas encore d'information sur "${candX}" dans ma mémoire locale. Tu peux me l'enseigner avec : retiens: ${candX} = ...`
+            : "Je n'ai pas cette notion en mémoire locale. Tu peux me l'enseigner avec : retiens: sujet = définition",
+          { source: 'systeme' }
+        );
+        setIsThinking(false);
+        return;
+      }
+
+      // =========================================================================
+      // ÉTAPE 3 : CLOUD FALLBACK (Gemini / Groq avec mémoire de contexte sur 5 messages)
+      // =========================================================================
       const historyFormatted = messages.slice(-5).map(m => ({
         role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
         content: m.text,
@@ -1379,19 +1056,29 @@ export default function App() {
       });
 
       const responseText = res.text;
-
-      addBotMessage(
-        responseText,
-        { source: res.provider === 'groq' ? 'groq' : 'gemini' },
-        0.8
-      );
-
+      addBotMessage(responseText, { source: res.provider === 'groq' ? 'groq' : 'gemini' });
       setGroqLog(prev => [{ q: text, r: responseText, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
 
-      // Apprentissage automatique du couple Question + Réponse (Q&A)
+      // =========================================================================
+      // ÉTAPE 4 : APPRENTISSAGE AUTOMATIQUE & CALCUL D'EMBEDDING LOCAL
+      // =========================================================================
       if (config.autoLearnFromLLM) {
         const learned = apprendreDeLLM(text, responseText, memoire, res.provider === 'groq' ? 'groq' : 'gemini');
         if (learned) {
+          const texteRef = learned.type === 'concept'
+            ? `${learned.sujet} : ${learned.def}`
+            : `${text} (${learned.sujet})`;
+
+          // Calcule l'embedding en tâche de fond pour l'enregistrer dans l'entrée
+          obtenirVecteurCache(texteRef)
+            .then(vec => {
+              if (vec && vec.length > 0 && memoire[learned.sujet]?.[0]) {
+                memoire[learned.sujet][0].vecteur = vec;
+                setMemoire({ ...memoire });
+              }
+            })
+            .catch(() => {});
+
           setMemoire({ ...memoire });
           setContexte(prev => [...prev, learned.sujet]);
         }
@@ -1405,7 +1092,7 @@ export default function App() {
 
   return (
     <div className="fixed inset-0 h-full w-full max-h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
-      {/* Top Header - Fixé en haut, toujours visible */}
+      {/* En-tête principal */}
       <Header
         config={config}
         onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
@@ -1422,7 +1109,7 @@ export default function App() {
         isAdmin={isAdmin}
       />
 
-      {/* Main View Workspace - flex-1 min-h-0 overflow-hidden */}
+      {/* Espace de travail principal */}
       <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
         {activeTab === 'chat' && (
           <ChatTab
@@ -1549,7 +1236,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom Navigation Tabs - Public shows only Discussion & Atelier Texte */}
+      {/* Barre de navigation inférieure */}
       <nav className="h-14 sm:h-16 shrink-0 flex-shrink-0 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
         <button
           onClick={() => setActiveTab('chat')}
@@ -1618,7 +1305,7 @@ export default function App() {
         )}
       </nav>
 
-      {/* Action Command Menu Modal (Admin Only) */}
+      {/* Menu d'actions (Admin uniquement) */}
       {isAdmin && (
         <ActionMenuModal
           isOpen={isActionsModalOpen}
@@ -1634,7 +1321,7 @@ export default function App() {
         />
       )}
 
-      {/* Settings Modal (Admin Only) */}
+      {/* Paramètres (Admin uniquement) */}
       {isAdmin && (
         <SettingsModal
           isOpen={isSettingsModalOpen}
