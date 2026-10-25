@@ -26,32 +26,76 @@ import {
 } from 'lucide-react';
 import { ChatMessage, ChatThread } from '../types/kaderbot';
 
+const markdownComponents = {
+  p: ({ children }: any) => (
+    <p className="mb-2.5 last:mb-0 leading-relaxed text-gray-100">{children}</p>
+  ),
+  ul: ({ children }: any) => (
+    <ul className="list-disc list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }: any) => (
+    <ol className="list-decimal list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
+      {children}
+    </ol>
+  ),
+  li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
+  strong: ({ children }: any) => (
+    <strong className="font-semibold text-emerald-300">{children}</strong>
+  ),
+  em: ({ children }: any) => <em className="italic text-cyan-200">{children}</em>,
+  code: ({ className, children }: any) => {
+    const isMultiLine = typeof children === 'string' && children.includes('\n');
+    if (className || isMultiLine) {
+      return (
+        <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto text-emerald-200 leading-normal">
+          <code className={className}>{children}</code>
+        </pre>
+      );
+    }
+    return (
+      <code className="px-1.5 py-0.5 rounded bg-gray-800/90 text-emerald-300 font-mono text-[11px] sm:text-xs border border-gray-700/50">
+        {children}
+      </code>
+    );
+  },
+  blockquote: ({ children }: any) => (
+    <blockquote className="border-l-2 border-emerald-500/60 pl-3 italic text-gray-300 my-2">
+      {children}
+    </blockquote>
+  ),
+  h1: ({ children }: any) => (
+    <h1 className="text-base font-bold text-white mb-2">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="text-sm font-bold text-emerald-400 mb-1.5">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
+  ),
+  hr: () => <hr className="my-3 border-gray-800" />,
+};
+
 interface BotTypewriterMessageProps {
   text: string;
-  isNew: boolean;
   onComplete: () => void;
   onTick?: () => void;
 }
 
 /**
  * Composant de message KADERBOT NOVA avec effet machine à écrire (streaming)
- * et rendu Markdown riche (listes à puces, gras, blocs de code, citations).
+ * Uniquement actif pour les nouveaux messages en temps réel (msg.isNew === true).
  */
 const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
   text,
-  isNew,
   onComplete,
   onTick,
 }) => {
-  const [displayedLength, setDisplayedLength] = useState(() => (isNew ? 1 : text.length));
-  const isTyping = isNew && displayedLength < text.length;
+  const [displayedLength, setDisplayedLength] = useState(1);
+  const isTyping = displayedLength < text.length;
 
   useEffect(() => {
-    if (!isNew) {
-      setDisplayedLength(text.length);
-      return;
-    }
-
     if (displayedLength >= text.length) {
       onComplete();
       return;
@@ -72,65 +116,14 @@ const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
     }, 20);
 
     return () => clearInterval(interval);
-  }, [isNew, text, onComplete, onTick]);
+  }, [text, onComplete, onTick, displayedLength]);
 
-  const displayedContent = isNew ? text.slice(0, displayedLength) : text;
+  const displayedContent = text.slice(0, displayedLength);
 
   return (
     <div className="relative">
       <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-        <ReactMarkdown
-          components={{
-            p: ({ children }) => (
-              <p className="mb-2.5 last:mb-0 leading-relaxed text-gray-100">{children}</p>
-            ),
-            ul: ({ children }) => (
-              <ul className="list-disc list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
-                {children}
-              </ul>
-            ),
-            ol: ({ children }) => (
-              <ol className="list-decimal list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
-                {children}
-              </ol>
-            ),
-            li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-            strong: ({ children }) => (
-              <strong className="font-semibold text-emerald-300">{children}</strong>
-            ),
-            em: ({ children }) => <em className="italic text-cyan-200">{children}</em>,
-            code: ({ className, children }: any) => {
-              const isMultiLine = typeof children === 'string' && children.includes('\n');
-              if (className || isMultiLine) {
-                return (
-                  <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto text-emerald-200 leading-normal">
-                    <code className={className}>{children}</code>
-                  </pre>
-                );
-              }
-              return (
-                <code className="px-1.5 py-0.5 rounded bg-gray-800/90 text-emerald-300 font-mono text-[11px] sm:text-xs border border-gray-700/50">
-                  {children}
-                </code>
-              );
-            },
-            blockquote: ({ children }) => (
-              <blockquote className="border-l-2 border-emerald-500/60 pl-3 italic text-gray-300 my-2">
-                {children}
-              </blockquote>
-            ),
-            h1: ({ children }) => (
-              <h1 className="text-base font-bold text-white mb-2">{children}</h1>
-            ),
-            h2: ({ children }) => (
-              <h2 className="text-sm font-bold text-emerald-400 mb-1.5">{children}</h2>
-            ),
-            h3: ({ children }) => (
-              <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
-            ),
-            hr: () => <hr className="my-3 border-gray-800" />,
-          }}
-        >
+        <ReactMarkdown components={markdownComponents}>
           {displayedContent}
         </ReactMarkdown>
       </div>
@@ -162,6 +155,7 @@ interface ChatTabProps {
   onNewThread?: () => void;
   onDeleteThread?: (threadId: string) => void;
   onRenameThread?: (threadId: string, newTitle: string) => void;
+  onMessageAnimationComplete?: (id: string) => void;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -182,6 +176,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onNewThread,
   onDeleteThread,
   onRenameThread,
+  onMessageAnimationComplete,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -195,27 +190,6 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Mémorisation des messages déjà entièrement affichés (historique et fils archivés)
-  const typedMessageIdsRef = useRef<Set<string>>(new Set());
-  const isInitialMountRef = useRef(true);
-
-  // À l'ouverture d'un fil ou au changement de fil, marquer tous ses messages comme déjà affichés
-  useEffect(() => {
-    messages.forEach(m => {
-      typedMessageIdsRef.current.add(m.id);
-    });
-  }, [activeThreadId]);
-
-  // Au premier montage, marquer l'historique initial sans re-taper
-  useEffect(() => {
-    if (isInitialMountRef.current) {
-      messages.forEach(m => {
-        typedMessageIdsRef.current.add(m.id);
-      });
-      isInitialMountRef.current = false;
-    }
-  }, [messages]);
 
   const handleTypingTick = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -679,15 +653,20 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 {/* Main text with Markdown & Typewriter streaming */}
                 {isUser ? (
                   <div className="whitespace-pre-wrap break-words">{msg.text}</div>
-                ) : (
+                ) : msg.isNew ? (
                   <BotTypewriterMessage
                     text={msg.text}
-                    isNew={!typedMessageIdsRef.current.has(msg.id)}
                     onComplete={() => {
-                      typedMessageIdsRef.current.add(msg.id);
+                      onMessageAnimationComplete?.(msg.id);
                     }}
                     onTick={handleTypingTick}
                   />
+                ) : (
+                  <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
+                    <ReactMarkdown components={markdownComponents}>
+                      {msg.text}
+                    </ReactMarkdown>
+                  </div>
                 )}
 
                 {/* Deductive chain visual crumb if applicable */}

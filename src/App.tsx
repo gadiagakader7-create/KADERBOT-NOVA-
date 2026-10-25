@@ -40,6 +40,9 @@ import {
   estRequeteDefinition,
   nettoyerMemoirePolluee,
   trouverSensSimilaire,
+  rechercheHybride,
+  precalculerTousLesVecteurs,
+  obtenirVecteur,
   obtenirVecteurCache,
   resoudrePronomsAvecHistorique,
   evaluerCalculMath,
@@ -87,12 +90,9 @@ export default function App() {
 
   // Configuration générale de KADERBOT NOVA
   const NOVA_DEFAULT_SYSTEM_PROMPT =
-    'Tu es KADERBOT NOVA, un assistant IA expert, chaleureux et pédagogue. ' +
-    'Tu réponds toujours en français. ' +
-    'Tu dois structurer tes réponses : utilise des sauts de ligne, des listes à puces (avec des tirets) et du texte en gras (avec des astérisques *) pour les mots importants. ' +
-    'Si la question est simple, sois bref. ' +
-    'Si la question demande une explication, développe avec des paragraphes clairs. ' +
-    'Ne fais jamais un bloc de texte compact.';
+    'Tu es KADERBOT NOVA, un assistant IA expert et pédagogue. Tu réponds toujours en français.\n' +
+    'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown (sauts de ligne, listes à puces, gras).\n' +
+    'RÈGLE DE LONGUEUR ABSOLUE : Ta réponse ne doit jamais dépasser 120 mots. Sois direct et synthétique. Si un sujet est vaste (comme l\'histoire d\'une invention), donne uniquement les 2 ou 3 points les plus importants, et termine en proposant à l\'utilisateur de préciser sa question pour plus de détails. Ne fais JAMAIS de réponse de plus de 4 paragraphes.';
 
   const [config, setConfig] = useState<AppConfig>(() => {
     const saved = localStorage.getItem('kaderbot_config');
@@ -102,7 +102,7 @@ export default function App() {
         if (parsed.groqModel === 'llama-3.3-70b-versatile' || !parsed.groqModel) {
           parsed.groqModel = 'openai/gpt-oss-120b';
         }
-        if (!parsed.systemPrompt || parsed.systemPrompt.includes('Tu es KADERBOT, un assistant') || parsed.systemPrompt.includes('2 à 4 phrases')) {
+        if (!parsed.systemPrompt || !parsed.systemPrompt.includes('120 mots')) {
           parsed.systemPrompt = NOVA_DEFAULT_SYSTEM_PROMPT;
         }
         return parsed;
@@ -234,6 +234,54 @@ export default function App() {
   }, [threads]);
 
   const [isThinking, setIsThinking] = useState(false);
+  const [indexingProgress, setIndexingProgress] = useState<number | null>(null);
+
+  // Tâche 1 : Pré-calcul des vecteurs (exécuté une seule fois avec le flag hasPrecalculated)
+  useEffect(() => {
+    const hasPrecalculated = localStorage.getItem('hasPrecalculated');
+    if (hasPrecalculated === 'true') {
+      return;
+    }
+
+    let isMounted = true;
+
+    const lancerPrecalcul = async () => {
+      try {
+        setIndexingProgress(0);
+        await precalculerTousLesVecteurs(memoire, pct => {
+          if (isMounted) {
+            setIndexingProgress(pct);
+          }
+        });
+
+        if (isMounted) {
+          setMemoire({ ...memoire });
+          try {
+            localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(memoire));
+          } catch (e) {
+            console.warn('Quota localStorage atteint lors de la sauvegarde:', e);
+          }
+          localStorage.setItem('hasPrecalculated', 'true');
+          setTimeout(() => {
+            if (isMounted) setIndexingProgress(null);
+          }, 1500);
+        }
+      } catch (err) {
+        console.error('Erreur lors du pré-calcul des vecteurs:', err);
+        if (isMounted) setIndexingProgress(null);
+      }
+    };
+
+    // Petit délai de 200ms après montage initial pour fluidifier le premier rendu de la page
+    const timer = setTimeout(() => {
+      lancerPrecalcul();
+    }, 200);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, []);
 
   // 1. Priorité au Local au démarrage : Si localStorage est vide, chargement initial serveur
   useEffect(() => {
@@ -389,6 +437,7 @@ export default function App() {
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       meta,
+      isNew: true,
     };
     setMessages(prev => [...prev, newMsg]);
 
@@ -397,7 +446,7 @@ export default function App() {
       setThreads(prev =>
         prev.map(t =>
           t.id === currentThreadId
-            ? { ...t, updatedAt: new Date().toISOString(), messages: [...t.messages, newMsg] }
+            ? { ...t, updatedAt: new Date().toISOString(), messages: [...t.messages, { ...newMsg, isNew: false }] }
             : t
         )
       );
@@ -411,12 +460,20 @@ export default function App() {
     }
   };
 
+  const handleMessageAnimationComplete = (id: string) => {
+    setMessages(prev => prev.map(m => (m.id === id ? { ...m, isNew: false } : m)));
+  };
+
   const handleSelectThread = (threadId: string) => {
     const target = threads.find(t => t.id === threadId);
     if (!target) return;
     activeThreadIdRef.current = target.id;
     setActiveThreadId(target.id);
-    setMessages(target.messages && target.messages.length > 0 ? target.messages : [getWelcomeMessage()]);
+    setMessages(
+      target.messages && target.messages.length > 0
+        ? target.messages.map(m => ({ ...m, isNew: false }))
+        : [getWelcomeMessage()]
+    );
   };
 
   const handleNewThread = () => {
@@ -648,14 +705,16 @@ export default function App() {
         if (config.autoLearnFromLLM) {
           const learned = apprendreDeLLM(q, res.text, memoire, 'groq');
           if (learned) {
-            const texteRef = learned.type === 'concept' ? `${learned.sujet} : ${learned.def}` : `${q} (${learned.sujet})`;
-            obtenirVecteurCache(texteRef).then(vec => {
-              if (vec.length > 0 && memoire[learned.sujet]?.[0]) {
-                memoire[learned.sujet][0].vecteur = vec;
-                setMemoire({ ...memoire });
-              }
-            }).catch(() => {});
-            setMemoire({ ...memoire });
+            // Calcule et stocke le vecteur du sujet dans l'entrée avant de sauvegarder
+            const vec = await obtenirVecteur(learned.sujet);
+            if (vec && vec.length > 0 && memoire[learned.sujet]?.[0]) {
+              memoire[learned.sujet][0].vecteur = vec;
+            }
+            const updatedMemoire = { ...memoire };
+            setMemoire(updatedMemoire);
+            try {
+              localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(updatedMemoire));
+            } catch {}
             setContexte(prev => [...prev, learned.sujet]);
           }
         }
@@ -863,21 +922,21 @@ export default function App() {
       // 1. Résolution des pronoms ("il", "elle", "ça") avec les 5 derniers messages
       const questionResolue = resoudrePronomsAvecHistorique(text, messages.slice(-5));
 
-      // 2. Recherche sémantique par similarité cosinus avec seuil élevé (>= 0.80)
-      const matchSemantique = await trouverSensSimilaire(questionResolue, memoire, 0.80);
-      if (matchSemantique) {
-        matchSemantique.entry.hits += 1;
-        matchSemantique.entry.last_used = new Date().toISOString();
+      // 2. Recherche Hybride (Filtrage rapide par mots-clés + Comparaison vectorielle cosinus > 0.82)
+      const matchHybride = await rechercheHybride(questionResolue, memoire);
+      if (matchHybride) {
+        matchHybride.entry.hits += 1;
+        matchHybride.entry.last_used = new Date().toISOString();
         setMemoire({ ...memoire });
-        setContexte(prev => [...prev, matchSemantique.sujet]);
+        setContexte(prev => [...prev, matchHybride.sujet]);
 
-        const rep = matchSemantique.entry.def;
+        const rep = matchHybride.entry.def;
         // Formatage fluide et naturel de la réponse sans aucun chiffre technique
-        const reponseFluide = matchSemantique.entry.type === 'concept' && !rep.includes('\n') && !rep.toLowerCase().startsWith('est ') && !rep.toLowerCase().startsWith('un ') && !rep.toLowerCase().startsWith('une ')
-          ? `${matchSemantique.sujet.charAt(0).toUpperCase() + matchSemantique.sujet.slice(1)} est ${rep}.`
+        const reponseFluide = matchHybride.entry.type === 'concept' && !rep.includes('\n') && !rep.toLowerCase().startsWith('est ') && !rep.toLowerCase().startsWith('un ') && !rep.toLowerCase().startsWith('une ')
+          ? `${matchHybride.sujet.charAt(0).toUpperCase() + matchHybride.sujet.slice(1)} est ${rep}.`
           : rep;
 
-        addBotMessage(reponseFluide, { source: 'local_memoire', sujet: matchSemantique.sujet });
+        addBotMessage(reponseFluide, { source: 'local_memoire', sujet: matchHybride.sujet });
         setIsThinking(false);
         return;
       }
@@ -1073,21 +1132,17 @@ export default function App() {
       if (config.autoLearnFromLLM) {
         const learned = apprendreDeLLM(text, responseText, memoire, res.provider === 'groq' ? 'groq' : 'gemini');
         if (learned) {
-          const texteRef = learned.type === 'concept'
-            ? `${learned.sujet} : ${learned.def}`
-            : `${text} (${learned.sujet})`;
+          // Calcule et stocke son vecteur dans l'entrée avant de sauvegarder
+          const vec = await obtenirVecteur(learned.sujet);
+          if (vec && vec.length > 0 && memoire[learned.sujet]?.[0]) {
+            memoire[learned.sujet][0].vecteur = vec;
+          }
 
-          // Calcule l'embedding en tâche de fond pour l'enregistrer dans l'entrée
-          obtenirVecteurCache(texteRef)
-            .then(vec => {
-              if (vec && vec.length > 0 && memoire[learned.sujet]?.[0]) {
-                memoire[learned.sujet][0].vecteur = vec;
-                setMemoire({ ...memoire });
-              }
-            })
-            .catch(() => {});
-
-          setMemoire({ ...memoire });
+          const updatedMemoire = { ...memoire };
+          setMemoire(updatedMemoire);
+          try {
+            localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(updatedMemoire));
+          } catch {}
           setContexte(prev => [...prev, learned.sujet]);
         }
       }
@@ -1117,6 +1172,24 @@ export default function App() {
         isAdmin={isAdmin}
       />
 
+      {/* Notification de progression de l'indexation sémantique (Tâche 1) */}
+      {indexingProgress !== null && (
+        <div className="fixed top-16 right-4 z-50 flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-gray-900/95 border border-emerald-500/40 text-emerald-300 text-xs font-medium shadow-2xl backdrop-blur-md">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          <span>
+            {indexingProgress >= 100
+              ? 'Indexation de la mémoire : 100% (Terminé)'
+              : `Indexation de la mémoire : ${indexingProgress}%`}
+          </span>
+          <div className="w-16 h-1.5 bg-gray-800 rounded-full overflow-hidden ml-1">
+            <div
+              className="h-full bg-emerald-400 transition-all duration-150"
+              style={{ width: `${indexingProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Espace de travail principal */}
       <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
         {activeTab === 'chat' && (
@@ -1140,6 +1213,7 @@ export default function App() {
             onNewThread={handleNewThread}
             onDeleteThread={handleDeleteThread}
             onRenameThread={handleRenameThread}
+            onMessageAnimationComplete={handleMessageAnimationComplete}
           />
         )}
 

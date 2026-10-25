@@ -1,146 +1,157 @@
-# KADERBOT NOVA — Code Source & Modifications Récentes
+# KADERBOT NOVA — Optimisation Sémantique Hybride (12 000+ entrées)
 
-Ce document présente les améliorations majeures apportées à **KADERBOT NOVA** :
-1. **Formatage Markdown & Structure des réponses** :
-   - Mise à jour du **System Prompt** dans `src/App.tsx` et `server.ts` pour exiger des réponses structurées (listes à puces avec tirets, mise en gras avec astérisques, sauts de lignes et paragraphes aérés).
-   - Intégration de la bibliothèque `react-markdown` pour rendre le Markdown de manière fluide, élégante et lisible.
-2. **Effet Machine à Écrire / Streaming (Typewriter)** :
-   - Affichage progressif caractère par caractère (~20ms par caractère).
-   - Disparition instantanée de l'indicateur « KADERBOT réfléchit... » dès l'apparition du premier caractère.
-   - Les messages de l'historique ou lors d'un changement de discussion s'affichent instantanément sans être re-tapés.
-   - Auto-scroll fluide vers le bas qui accompagne la frappe en temps réel.
+Ce document décrit l'architecture d'optimisation de la mémoire sémantique de **KADERBOT NOVA** conçue pour supporter plus de 12 000 entrées avec une fluidité maximale sur tous supports (desktop et mobile).
 
 ---
 
-## 1. Nouveau System Prompt (App.tsx & server.ts)
+## 1. Tâche 1 : Pré-calcul Asynchrone des Vecteurs (`precalculerTousLesVecteurs`)
 
-```text
-Tu es KADERBOT NOVA, un assistant IA expert, chaleureux et pédagogue. Tu réponds toujours en français. Tu dois structurer tes réponses : utilise des sauts de ligne, des listes à puces (avec des tirets) et du texte en gras (avec des astérisques *) pour les mots importants. Si la question est simple, sois bref. Si la question demande une explication, développe avec des paragraphes clairs. Ne fais jamais un bloc de texte compact.
-```
+Au lieu de calculer les vecteurs à la volée sur des milliers d'entrées, les vecteurs sont pré-calculés une seule fois au chargement de l'application.
 
----
+### Fonctionnement :
+- **Condition d'exécution :** Vérification du drapeau `localStorage.getItem('hasPrecalculated')`. S'il vaut `'true'`, aucun recalcul n'est effectué.
+- **Calcul par lots de 50 :** Traitement séquentiel avec `await new Promise(r => setTimeout(r, 10))` toutes les 50 entrées pour laisser respirer le thread principal JavaScript (UI 60 FPS sans lag).
+- **Vecteur de la clé :** Le vecteur de la clé (`sujet`) est extrait via `obtenirVecteur(sujet)` (Transformers.js `all-MiniLM-L6-v2`) et stocké dans `entry.vecteur`.
+- **Indicateur de progression en temps réel :** Une notification élégante informe l'utilisateur de l'état d'indexation (`Indexation de la mémoire : X%`). Une fois à 100%, elle disparaît automatiquement.
 
-## 2. Code du Composant Typewriter & Markdown (`src/components/ChatTab.tsx`)
+```typescript
+export async function precalculerTousLesVecteurs(
+  memoire: MemoryStore,
+  onProgress?: (pourcentage: number) => void
+): Promise<MemoryStore> {
+  if (!memoire) return memoire;
+  const sujets = Object.keys(memoire);
+  const total = sujets.length;
+  if (total === 0) {
+    onProgress?.(100);
+    return memoire;
+  }
 
-```tsx
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
+  const BATCH_SIZE = 50;
 
-interface BotTypewriterMessageProps {
-  text: string;
-  isNew: boolean;
-  onComplete: () => void;
-  onTick?: () => void;
-}
+  for (let i = 0; i < total; i++) {
+    const sujet = sujets[i];
+    const entries = memoire[sujet] || [];
 
-/**
- * Composant de message KADERBOT NOVA avec effet machine à écrire (streaming)
- * et rendu Markdown riche (listes à puces, gras, blocs de code, citations).
- */
-const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
-  text,
-  isNew,
-  onComplete,
-  onTick,
-}) => {
-  const [displayedLength, setDisplayedLength] = useState(() => (isNew ? 1 : text.length));
-  const isTyping = isNew && displayedLength < text.length;
-
-  useEffect(() => {
-    if (!isNew) {
-      setDisplayedLength(text.length);
-      return;
-    }
-
-    if (displayedLength >= text.length) {
-      onComplete();
-      return;
-    }
-
-    // Vitesse fluide ~20ms par caractère
-    const interval = setInterval(() => {
-      setDisplayedLength(prev => {
-        const step = text.length > 350 ? 2 : 1;
-        const next = Math.min(text.length, prev + step);
-        if (next >= text.length) {
-          clearInterval(interval);
-          onComplete();
+    const needVec = entries.some(e => !e.vecteur || e.vecteur.length === 0);
+    if (needVec) {
+      const vec = await obtenirVecteur(sujet);
+      if (vec && vec.length > 0) {
+        for (const entry of entries) {
+          if (!entry.vecteur || entry.vecteur.length === 0) {
+            entry.vecteur = vec;
+          }
         }
-        return next;
-      });
-      onTick?.();
-    }, 20);
+      }
+    }
 
-    return () => clearInterval(interval);
-  }, [isNew, text, onComplete, onTick]);
+    if ((i + 1) % BATCH_SIZE === 0 || i === total - 1) {
+      const pct = Math.round(((i + 1) / total) * 100);
+      onProgress?.(pct);
+      await new Promise(r => setTimeout(r, 10));
+    }
+  }
 
-  const displayedContent = isNew ? text.slice(0, displayedLength) : text;
-
-  return (
-    <div className="relative">
-      <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-        <ReactMarkdown
-          components={{
-            p: ({ children }) => (
-              <p className="mb-2.5 last:mb-0 leading-relaxed text-gray-100">{children}</p>
-            ),
-            ul: ({ children }) => (
-              <ul className="list-disc list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
-                {children}
-              </ul>
-            ),
-            ol: ({ children }) => (
-              <ol className="list-decimal list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
-                {children}
-              </ol>
-            ),
-            li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-            strong: ({ children }) => (
-              <strong className="font-semibold text-emerald-300">{children}</strong>
-            ),
-            em: ({ children }) => <em className="italic text-cyan-200">{children}</em>,
-            code: ({ className, children }: any) => {
-              const isMultiLine = typeof children === 'string' && children.includes('\n');
-              if (className || isMultiLine) {
-                return (
-                  <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto text-emerald-200 leading-normal">
-                    <code className={className}>{children}</code>
-                  </pre>
-                );
-              }
-              return (
-                <code className="px-1.5 py-0.5 rounded bg-gray-800/90 text-emerald-300 font-mono text-[11px] sm:text-xs border border-gray-700/50">
-                  {children}
-                </code>
-              );
-            },
-            blockquote: ({ children }) => (
-              <blockquote className="border-l-2 border-emerald-500/60 pl-3 italic text-gray-300 my-2">
-                {children}
-              </blockquote>
-            ),
-            h1: ({ children }) => (
-              <h1 className="text-base font-bold text-white mb-2">{children}</h1>
-            ),
-            h2: ({ children }) => (
-              <h2 className="text-sm font-bold text-emerald-400 mb-1.5">{children}</h2>
-            ),
-            h3: ({ children }) => (
-              <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
-            ),
-            hr: () => <hr className="my-3 border-gray-800" />,
-          }}
-        >
-          {displayedContent}
-        </ReactMarkdown>
-      </div>
-      {isTyping && (
-        <span
-          className="inline-block w-1.5 h-3.5 bg-emerald-400 animate-pulse ml-0.5 align-middle rounded-xs"
-          title="Frappe en cours..."
-        />
-      )}
-    </div>
-  );
-};
+  return memoire;
+}
 ```
+
+---
+
+## 2. Tâche 2 : Recherche Hybride (`rechercheHybride`)
+
+Située dans `src/core/cognitiveEngine.ts`, elle combine filtrage lexical ultrarapide et similarité vectorielle :
+
+1. **Filtrage rapide (Mots-clés) :**
+   - Extraction des mots-clés de la question (minuscules, sans accents via `sansAccent`, exclusion des mots vides via `MOTS_INTERROGATIFS_ET_VIDES`).
+   - Sélection uniquement des entrées de la mémoire dont la clé contient au moins un des mots-clés (`includes`).
+   - Si aucun candidat n'est trouvé, retour immédiat de `null` (évite tout calcul vectoriel inutile).
+
+2. **Comparaison vectorielle sur le sous-ensemble filtré :**
+   - Calcul du vecteur de la question (`obtenirVecteur(question)`).
+   - Calcul de la similarité cosinus (`similariteCosinus`) uniquement sur les entrées filtrées qui possèdent déjà leur vecteur pré-calculé.
+
+3. **Seuil de confiance strict :**
+   - Retourne le meilleur résultat uniquement si le score dépasse **0.82**. Sinon, retourne `null`.
+
+```typescript
+export async function rechercheHybride(
+  question: string,
+  memoire: MemoryStore
+): Promise<{ sujet: string; entry: MemoryEntry; score: number } | null> {
+  if (!question || !memoire || Object.keys(memoire).length === 0) return null;
+
+  const qClean = sansAccent(question.toLowerCase());
+  let motsCles = extraireMotsCles(qClean);
+
+  if (motsCles.length === 0) {
+    const tokens = qClean
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !MOTS_INTERROGATIFS_ET_VIDES.has(w) && !PRONOMS_CONTEXTE.has(w));
+    if (tokens.length > 0) motsCles = tokens;
+    else return null;
+  }
+
+  const candidats: Array<{ sujet: string; entry: MemoryEntry }> = [];
+  const motsClesSansAccents = motsCles.map(m => sansAccent(m.toLowerCase()));
+
+  for (const [sujet, entries] of Object.entries(memoire)) {
+    const sNorm = sansAccent(sujet.toLowerCase());
+    if (motsClesSansAccents.some(mot => sNorm.includes(mot))) {
+      for (const entry of entries) {
+        candidats.push({ sujet, entry });
+      }
+    }
+  }
+
+  if (candidats.length === 0) return null;
+
+  const questionVec = await obtenirVecteur(question);
+  if (!questionVec || questionVec.length === 0) return null;
+
+  let meilleurResultat: { sujet: string; entry: MemoryEntry; score: number } | null = null;
+  let maxScore = -1;
+
+  for (const item of candidats) {
+    let entryVec = item.entry.vecteur;
+    if (!entryVec || entryVec.length === 0) {
+      entryVec = await obtenirVecteur(item.sujet);
+      item.entry.vecteur = entryVec;
+    }
+
+    if (entryVec && entryVec.length > 0) {
+      const score = similariteCosinus(questionVec, entryVec);
+      if (score > maxScore) {
+        maxScore = score;
+        meilleurResultat = { sujet: item.sujet, entry: item.entry, score };
+      }
+    }
+  }
+
+  if (meilleurResultat && maxScore > 0.82) {
+    return meilleurResultat;
+  }
+  return null;
+}
+```
+
+---
+
+## 3. Tâche 3 : Routeur Cognitif & Apprentissage Vectoriel Immédiat (`App.tsx`)
+
+1. **Remplacement dans le routeur local :**
+   - L'Étape 1 utilise maintenant `rechercheHybride(questionResolue, memoire)`.
+   - Si un match est trouvé, la réponse locale est formulée immédiatement et les statistiques (`hits`, `last_used`) sont mises à jour.
+
+2. **Calcul et stockage du vecteur lors de l'apprentissage LLM :**
+   - Lorsqu'une nouvelle réponse est apprise via `apprendreDeLLM` (fallback Gemini ou Groq), son vecteur sémantique est calculé via `await obtenirVecteur(learned.sujet)` et directement rattaché à l'entrée (`entry.vecteur = vec`) **avant** la sauvegarde dans le state et `localStorage`.
+   - La prochaine question sur ce sujet sera donc reconnue instantanément par `rechercheHybride`.
+
+---
+
+## 4. Tests et Validation
+
+- `tsc --noEmit` : 0 erreur de typage.
+- `npm run build` : Compilation réussie.
+- Respect strict de la non-exposition des scores et vecteurs dans l'UI utilisateur.

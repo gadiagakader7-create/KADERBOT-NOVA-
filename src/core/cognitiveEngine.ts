@@ -67,6 +67,13 @@ export async function obtenirVecteurCache(texte: string): Promise<number[]> {
 }
 
 /**
+ * Calcule ou récupère en cache le vecteur d'un texte ou d'un sujet (384 dimensions).
+ */
+export async function obtenirVecteur(texte: string): Promise<number[]> {
+  return obtenirVecteurCache(texte);
+}
+
+/**
  * Calcule la similarité cosinus entre deux vecteurs numériques.
  * Résultat compris entre -1.0 et 1.0 (ou 0.0 et 1.0 pour des vecteurs normalisés).
  */
@@ -84,6 +91,142 @@ export function similariteCosinus(vecA: number[], vecB: number[]): number {
   }
   if (normeA === 0 || normeB === 0) return 0;
   return produit / (Math.sqrt(normeA) * Math.sqrt(normeB));
+}
+
+/**
+ * Tâche 2 : Recherche Hybride optimisée pour les grandes bases de mémoire (12 000+ entrées).
+ * 1. Filtrage rapide (Mots-clés) : Extrait les mots-clés de la question (sans accents, sans mots vides).
+ *    Ne garde que les entrées de la mémoire dont la clé contient au moins un de ces mots (recherche includes).
+ *    Si le sous-ensemble filtré est vide, retourne null.
+ * 2. Comparaison vectorielle : Calcule le vecteur de la question.
+ *    Pour chaque entrée filtrée (qui a déjà son vecteur pré-calculé), calcule la similarité cosinus.
+ * 3. Retourne l'entrée avec le meilleur score si score > 0.82.
+ */
+export async function rechercheHybride(
+  question: string,
+  memoire: MemoryStore
+): Promise<{ sujet: string; entry: MemoryEntry; score: number } | null> {
+  if (!question || !memoire || Object.keys(memoire).length === 0) return null;
+
+  // 1. Filtrage rapide (Mots-clés)
+  const qClean = sansAccent(question.toLowerCase());
+  let motsCles = extraireMotsCles(qClean);
+
+  if (motsCles.length === 0) {
+    // Si la question est très courte (1 à 2 mots), extraire les tokens signifiants sans accents
+    const tokens = qClean
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !MOTS_INTERROGATIFS_ET_VIDES.has(w) && !PRONOMS_CONTEXTE.has(w));
+    if (tokens.length > 0) {
+      motsCles = tokens;
+    } else {
+      return null;
+    }
+  }
+
+  // Ne garde que les entrées de la mémoire dont la clé contient au moins un de ces mots
+  const candidats: Array<{ sujet: string; entry: MemoryEntry }> = [];
+  const motsClesSansAccents = motsCles.map(m => sansAccent(m.toLowerCase()));
+
+  for (const [sujet, entries] of Object.entries(memoire)) {
+    const sNorm = sansAccent(sujet.toLowerCase());
+    const match = motsClesSansAccents.some(mot => sNorm.includes(mot));
+    if (match) {
+      for (const entry of entries) {
+        candidats.push({ sujet, entry });
+      }
+    }
+  }
+
+  // Si le résultat filtré est vide, retourne null
+  if (candidats.length === 0) {
+    return null;
+  }
+
+  // 2. Comparaison vectorielle (sur le sous-ensemble filtré)
+  const questionVec = await obtenirVecteur(question);
+  if (!questionVec || questionVec.length === 0) {
+    return null;
+  }
+
+  let meilleurResultat: { sujet: string; entry: MemoryEntry; score: number } | null = null;
+  let maxScore = -1;
+
+  for (const item of candidats) {
+    let entryVec = item.entry.vecteur;
+    if (!entryVec || entryVec.length === 0) {
+      // Secours si le vecteur n'était pas encore pré-calculé
+      entryVec = await obtenirVecteur(item.sujet);
+      item.entry.vecteur = entryVec;
+    }
+
+    if (entryVec && entryVec.length > 0) {
+      const score = similariteCosinus(questionVec, entryVec);
+      if (score > maxScore) {
+        maxScore = score;
+        meilleurResultat = {
+          sujet: item.sujet,
+          entry: item.entry,
+          score,
+        };
+      }
+    }
+  }
+
+  // 3. Retourne l'entrée avec le meilleur score si score > 0.82
+  if (meilleurResultat && maxScore > 0.82) {
+    return meilleurResultat;
+  }
+
+  return null;
+}
+
+/**
+ * Tâche 1 : Pré-calcul des vecteurs pour toute la mémoire (jusqu'à 12 000+ entrées).
+ * Parcourt toutes les entrées de mémoire, calcule le vecteur de la clé (le sujet) via obtenirVecteur(sujet),
+ * le stocke dans entry.vecteur, et traite par lots de 50 avec pause asynchrone (10ms).
+ */
+export async function precalculerTousLesVecteurs(
+  memoire: MemoryStore,
+  onProgress?: (pourcentage: number) => void
+): Promise<MemoryStore> {
+  if (!memoire) return memoire;
+  const sujets = Object.keys(memoire);
+  const total = sujets.length;
+  if (total === 0) {
+    onProgress?.(100);
+    return memoire;
+  }
+
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < total; i++) {
+    const sujet = sujets[i];
+    const entries = memoire[sujet] || [];
+
+    // Vérifie si au moins une entrée nécessite le calcul de son vecteur
+    const needVec = entries.some(e => !e.vecteur || e.vecteur.length === 0);
+    if (needVec) {
+      const vec = await obtenirVecteur(sujet);
+      if (vec && vec.length > 0) {
+        for (const entry of entries) {
+          if (!entry.vecteur || entry.vecteur.length === 0) {
+            entry.vecteur = vec;
+          }
+        }
+      }
+    }
+
+    // Traite par lots de 50 avec pause pour libérer le thread principal
+    if ((i + 1) % BATCH_SIZE === 0 || i === total - 1) {
+      const pct = Math.round(((i + 1) / total) * 100);
+      onProgress?.(pct);
+      await new Promise(r => setTimeout(r, 10));
+    }
+  }
+
+  return memoire;
 }
 
 /**

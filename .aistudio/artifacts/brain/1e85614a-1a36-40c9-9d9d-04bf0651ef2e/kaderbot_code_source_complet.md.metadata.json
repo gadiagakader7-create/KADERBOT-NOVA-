@@ -1,6 +1,6 @@
 {
-  "summary":  "Documentation et code source complet de KADERBOT NOVA intégrant le formatage Markdown riche (react-markdown), le nouvel effet de frappe / streaming fluide (~20ms), le nouveau System Prompt pédagogique et structuré, et l'architecture cognitive hybride (Embeddings Transformers.js locaux + Cloud).",
+  "summary":  "Documentation complète des optimisations de la mémoire sémantique pour KADERBOT NOVA (12 000+ entrées) : Pré-calcul asynchrone des vecteurs par lots de 50 avec indicateur de progression, Recherche Hybride par filtrage mots-clés puis similarité cosinus (> 0.82), et mise à jour du routeur avec stockage vectoriel immédiat dans entry.vecteur.",
   "createdAt":  "2026-10-24T19:59:42.589261904Z",
-  "updatedAt":  "2026-10-24T21:20:59.702600184Z",
+  "updatedAt":  "2026-10-25T07:28:38.007886478Z",
   "userFacing":  true
 }

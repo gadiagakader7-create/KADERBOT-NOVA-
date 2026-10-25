@@ -20,20 +20,18 @@
   }
 }
 
-/* Custom dark scrollbar for sleek cyber look */
+/* Barre de défilement complètement invisible tout en préservant le défilement fluide */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar,
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: rgba(10, 10, 15, 0.6);
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(16, 163, 127, 0.35);
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(16, 163, 127, 0.7);
+  display: none;
+  width: 0px;
+  height: 0px;
+  background: transparent;
 }
 
 /* Subtle cyber matrix background */

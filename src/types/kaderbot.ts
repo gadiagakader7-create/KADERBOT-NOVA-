@@ -31,6 +31,7 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   confidence?: number;
+  isNew?: boolean;
   meta?: {
     intent?: string;
     sujet?: string;
