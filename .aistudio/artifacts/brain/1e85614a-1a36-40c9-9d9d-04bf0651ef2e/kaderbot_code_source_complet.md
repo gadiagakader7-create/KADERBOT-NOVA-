@@ -1,65 +1,43 @@
-# KADERBOT NOVA V14 — Architecture & Intégration OpenRouter
+# KADERBOT NOVA — Architecture Agentique & Outils (`/api/agent`)
 
-KADERBOT NOVA intègre désormais trois fournisseurs d'intelligence artificielle majeurs en plus de son moteur cognitif local (Transformers.js Embeddings & Inférence logique) :
-1. **Google Gemini (3.8 Flash)** : Provider par défaut, ultra-rapide et gratuit via SDK officiel ou fallback REST.
-2. **Groq Cloud** : Spécialisé ultra-basse latence avec `openai/gpt-oss-120b` et `llama-3.1-8b-instant`.
-3. **OpenRouter** : Nouvelle intégration multi-fournisseurs axée sur les modèles gratuits (`:free`), avec **Meta Llama 3.3 70B Instruct** en modèle prioritaire.
+Ce document décrit l'implémentation de la boucle agentique et de la suite d'outils intégrée dans le serveur `server.ts` de KADERBOT NOVA.
 
 ---
 
-## 1. Architecture Backend (`server.ts`)
+## 1. Constantes & Sécurité
 
-### 1.1 Sécurité des clés API
-- La clé API OpenRouter est lue exclusivement via `process.env.OPENROUTER_API_KEY`.
-- Si le frontend envoie une clé personnalisée saisie dans le modal Paramètres, elle est transmise de manière éphémère sans jamais être loggée ni exposée.
-- La clé serveur n'est jamais exposée aux requêtes clientes.
-
-### 1.2 Résolution stricte des modèles (`resolveOpenRouterModel`)
-- **Interdiction formelle de GPT-OSS 120B** : `openai/gpt-oss-120b` est réservé à Groq. Toute demande vers ce modèle sur OpenRouter est redirigée vers `meta-llama/llama-3.3-70b-instruct:free`.
-- **Suffixe obligatoire `:free`** : Tout modèle OpenRouter non terminé par `:free` se voit automatiquement suffixé par `:free`.
-- **Modèle par défaut** : `meta-llama/llama-3.3-70b-instruct:free`.
-
-### 1.3 Gestionnaire d'appels avec Fallback (`callOpenRouterWithFallback`)
-- **Endpoint** : `https://openrouter.ai/api/v1/chat/completions`
-- **Headers requis** :
-  - `Authorization: Bearer <API_KEY>`
-  - `Content-Type: application/json`
-  - `HTTP-Referer: https://kaderbot-nova.local`
-  - `X-Title: KADERBOT NOVA`
-- **Chaîne de fallback ordonnée** :
-  1. Modèle demandé (ex: `meta-llama/llama-3.3-70b-instruct:free`)
-  2. Modèle de secours 1 : `qwen/qwen3-coder:free`
-  3. Modèle de secours 2 : `deepseek/deepseek-r1:free`
-- **Gestion des erreurs HTTP 429 et 401** :
-  - Sur 429 (quota/rate limit) ou 401 (clé invalide), aucun autre modèle OpenRouter n'est testé inutilement ; une erreur immédiate est levée pour déclencher le fallback vers Gemini.
-- **Support des endpoints applicatifs** :
-  - `POST /api/openrouter/test`
-  - `POST /api/chat`
-  - `POST /api/idees`
-  - `POST /api/traduis`
-  - `POST /api/corrige`
-  - `POST /api/resume`
+- **Clé Brave Search** : `BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || ''`
+- **Limite d'itérations de l'agent** : `MAX_AGENT_ITERATIONS = 8`
+- **Quota journalier Brave Search** : `MAX_BRAVE_CALLS_PER_DAY = 100`
+- **Persistance du quota** : `data/brave_usage.json` (structure `{ date: "YYYY-MM-DD", count: number, updatedAt: string }`). Si le quota est atteint, l'outil renvoie `"Quota de recherche atteint pour aujourd'hui."` sans lever d'erreur bloquante.
+- **Sécurité `open_url`** : Filtrage strict des domaines interdits (`localhost`, `127.0.0.1`, adresses IP directes, `*.internal`, `*.render.com`).
 
 ---
 
-## 2. Architecture Frontend
+## 2. Définition des Outils (Format Groq / OpenAI Tool Calling)
 
-### 2.1 Types (`src/types/kaderbot.ts`)
-- Ajout de `'openrouter'` dans le type `LLMProvider`.
-- Ajout de `'openrouter'` dans `ChatMessage['meta']['source']`.
-- Ajout de `openrouterModel: string` et `openrouterApiKey?: string` dans `AppConfig`.
+1. **`search_web(query)`** : Recherche générale sur le web via l'API Brave Search (5 résultats avec titre, URL et extrait).
+2. **`open_url(url)`** : Exploration d'une page web avec timeout de 10s, suppression des balises `<script>`, `<style>`, `<nav>`, `<footer>`, `<header>`, et troncature stricte à 6 000 caractères.
+3. **`search_news(query)`** : Recherche d'actualités récentes via Brave News API.
+4. **`memo_lookup(sujet)`** : Consultation de la mémoire cognitive locale (`data/kaderbot_storage.json`) avant de solliciter le web.
+5. **`memo_store(sujet, definition)`** : Mémorisation d'un fait validé par l'utilisateur avec métadonnées (`source: 'agent'`, `type: 'concept'`, `created`, `last_used`).
+6. **`link_concepts(source, cible)`** : Création d'une relation d'héritage conceptuelle (`source` est-un `cible`).
+7. **`ask_user(question)`** : Demande d'éclaircissement à l'utilisateur lorsqu'une requête est ambiguë (interrompt la boucle et renvoie `{ awaitingUser: true, question }`).
 
-### 2.2 Service API (`src/services/apiService.ts`)
-- Méthode `testOpenRouterConnection(apiKey?: string, model?: string)`.
-- Transmission systématique de `openrouterModel` dans les payloads `/api/chat`, `/api/idees`, `/api/traduis`, etc.
+---
 
-### 2.3 En-tête (`src/components/Header.tsx`)
-- Sélecteur rapide de modèle avec option OpenRouter (`🦙 Llama 3.3 (OpenRouter)`).
-- Badge violet distinctif `#A855F7` / `border-purple-500/50`.
+## 3. Boucle Agentique (`runAgentLoop`)
 
-### 2.4 Modal Paramètres (`src/components/SettingsModal.tsx`)
-- Carte de sélection "OpenRouter" dans la grille des moteurs IA (4 colonnes).
-- Section de configuration dédiée avec champ de clé API sécurisé, sélecteur de modèle gratuit (`llama-3.3-70b-instruct:free`, `qwen3-coder:free`, `deepseek-r1:free`) et bouton de test de latence en temps réel.
+- Modèle : `openai/gpt-oss-120b` sur Groq (`temperature: 0.5`).
+- Gestion multi-tours automatique jusqu'à 8 itérations.
+- Tronquage systématique des résultats d'outils à 6 000 caractères pour préserver la fenêtre de contexte.
+- Tolérance aux pannes : en cas d'erreur d'un outil, le message d'erreur est fourni au modèle pour lui permettre d'adapter sa stratégie sans planter la boucle.
+- Fallback automatique vers Gemini en cas d'absence de `GROQ_API_KEY` ou d'indisponibilité de Groq.
 
-### 2.5 Onglet de Discussion (`src/components/ChatTab.tsx`)
-- Badge d'identification de source : `🦙 Llama (OpenRouter)`.
+---
+
+## 4. Endpoints d'API
+
+- **`POST /api/agent`** : Démarre la boucle agentique avec `{ prompt, history, systemPrompt? }`.
+- **`GET /api/memory/refresh`** : Recharge les données fraîches de `data/kaderbot_storage.json` depuis le disque.
+- **`GET /api/health`** : Endpoint de healthcheck retournant `{ ok: true }` pour les pings de maintien d'activité (Render cron).

@@ -1,6 +1,6 @@
 {
-  "summary":  "Documentation et guide complet du code source KADERBOT NOVA V14 avec l'intégration du 3e provider OpenRouter (Llama 3.3 70B :free, fallback automatique, filtrage strict anti-gpt-oss-120b, interface utilisateur et tests de connexion).",
+  "summary":  "Documentation complète de l'architecture agentique avec boucle d'outils (Brave Search/News, open_url sécurisé, hub cognitif memo_lookup/memo_store/link_concepts, ask_user, fallback Gemini et endpoints /api/agent, /api/memory/refresh, /api/health).",
   "createdAt":  "2026-10-24T19:59:42.589261904Z",
-  "updatedAt":  "2026-10-26T14:25:51.127189308Z",
+  "updatedAt":  "2026-10-26T17:16:14.659910964Z",
   "userFacing":  true
 }

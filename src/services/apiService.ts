@@ -240,4 +240,41 @@ export const apiService = {
     if (!res.ok) throw new Error('Erreur téléchargement script Pydroid 3');
     return await res.blob();
   },
+
+  async callAgent(params: {
+    prompt: string;
+    history?: Array<{ role: string; content: string }>;
+    systemPrompt?: string;
+  }): Promise<{
+    text?: string;
+    provider: string;
+    toolTrace: Array<{ tool: string; args?: any }>;
+    awaitingUser?: boolean;
+    question?: string;
+    isFallback?: boolean;
+    fallbackReason?: string;
+  }> {
+    const res = await fetch('/api/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+      throw new Error(err.error || `Erreur serveur (${res.status})`);
+    }
+    return await res.json();
+  },
+
+  async refreshMemory(): Promise<{ ok: boolean; data: any; refreshedAt: string }> {
+    const res = await fetch('/api/memory/refresh');
+    if (!res.ok) throw new Error('Impossible de rafraîchir la mémoire');
+    return await res.json();
+  },
+
+  async checkHealth(): Promise<{ ok: boolean }> {
+    const res = await fetch('/api/health');
+    if (!res.ok) return { ok: false };
+    return await res.json();
+  },
 };
