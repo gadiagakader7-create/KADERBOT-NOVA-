@@ -41,11 +41,8 @@ export const Header: React.FC<HeaderProps> = ({
   // Short label helper for current model
   const getGroqShortName = () => {
     const m = (config.groqModel || '').toLowerCase();
-    if (m.includes('gpt')) return 'GPT-120B';
-    if (m.includes('70b')) return 'Llama 70B';
-    if (m.includes('8b')) return 'Llama 8B';
-    if (m.includes('qwen')) return 'Qwen 27B';
-    return 'Groq';
+    if (m.includes('20b')) return 'GPT-20B';
+    return 'GPT-120B';
   };
 
   const getOpenRouterShortName = () => {

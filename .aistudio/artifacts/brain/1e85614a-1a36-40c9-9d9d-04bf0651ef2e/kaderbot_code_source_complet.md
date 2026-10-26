@@ -1,43 +1,51 @@
-# KADERBOT NOVA — Architecture Agentique & Outils (`/api/agent`)
+# KADERBOT NOVA V14 — Catalogue des Modèles & Cascade Agentique (Octobre 2026)
 
-Ce document décrit l'implémentation de la boucle agentique et de la suite d'outils intégrée dans le serveur `server.ts` de KADERBOT NOVA.
-
----
-
-## 1. Constantes & Sécurité
-
-- **Clé Brave Search** : `BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || ''`
-- **Limite d'itérations de l'agent** : `MAX_AGENT_ITERATIONS = 8`
-- **Quota journalier Brave Search** : `MAX_BRAVE_CALLS_PER_DAY = 100`
-- **Persistance du quota** : `data/brave_usage.json` (structure `{ date: "YYYY-MM-DD", count: number, updatedAt: string }`). Si le quota est atteint, l'outil renvoie `"Quota de recherche atteint pour aujourd'hui."` sans lever d'erreur bloquante.
-- **Sécurité `open_url`** : Filtrage strict des domaines interdits (`localhost`, `127.0.0.1`, adresses IP directes, `*.internal`, `*.render.com`).
+Ce document résume la mise à jour des catalogues de modèles d'IA et de la chaîne de secours dans `server.ts`.
 
 ---
 
-## 2. Définition des Outils (Format Groq / OpenAI Tool Calling)
+## 1. Modèles Groq (Catalogue Octobre 2026)
 
-1. **`search_web(query)`** : Recherche générale sur le web via l'API Brave Search (5 résultats avec titre, URL et extrait).
-2. **`open_url(url)`** : Exploration d'une page web avec timeout de 10s, suppression des balises `<script>`, `<style>`, `<nav>`, `<footer>`, `<header>`, et troncature stricte à 6 000 caractères.
-3. **`search_news(query)`** : Recherche d'actualités récentes via Brave News API.
-4. **`memo_lookup(sujet)`** : Consultation de la mémoire cognitive locale (`data/kaderbot_storage.json`) avant de solliciter le web.
-5. **`memo_store(sujet, definition)`** : Mémorisation d'un fait validé par l'utilisateur avec métadonnées (`source: 'agent'`, `type: 'concept'`, `created`, `last_used`).
-6. **`link_concepts(source, cible)`** : Création d'une relation d'héritage conceptuelle (`source` est-un `cible`).
-7. **`ask_user(question)`** : Demande d'éclaircissement à l'utilisateur lorsqu'une requête est ambiguë (interrompt la boucle et renvoie `{ awaitingUser: true, question }`).
-
----
-
-## 3. Boucle Agentique (`runAgentLoop`)
-
-- Modèle : `openai/gpt-oss-120b` sur Groq (`temperature: 0.5`).
-- Gestion multi-tours automatique jusqu'à 8 itérations.
-- Tronquage systématique des résultats d'outils à 6 000 caractères pour préserver la fenêtre de contexte.
-- Tolérance aux pannes : en cas d'erreur d'un outil, le message d'erreur est fourni au modèle pour lui permettre d'adapter sa stratégie sans planter la boucle.
-- Fallback automatique vers Gemini en cas d'absence de `GROQ_API_KEY` ou d'indisponibilité de Groq.
+- **Modèles officiellement supportés et maintenus** :
+  - `openai/gpt-oss-120b` (Grand modèle, raisonnement approfondi & boucle agentique principale)
+  - `openai/gpt-oss-20b` (Modèle ultra-rapide, équilibré)
+- **Modèles dépréciés / retirés définitivement supprimés** :
+  - `llama-3.1-8b-instant`
+  - `llama-3.3-70b-specdec`
+  - `mixtral-8x7b-32768`
+  - `qwen/qwen3.8-27b`
+- **Résolution (`resolveGroqModel`)** :
+  - Si demande spécifique de 120b → `openai/gpt-oss-120b`
+  - Si demande spécifique de 20b → `openai/gpt-oss-20b`
+  - Toute demande de modèle inconnu ou déprécié → bascule automatique vers `openai/gpt-oss-20b`.
+- **Liste `candidateModels`** : uniquement `['openai/gpt-oss-120b', 'openai/gpt-oss-20b']`.
 
 ---
 
-## 4. Endpoints d'API
+## 2. Modèles Google Gemini (`callGeminiWithFallback`)
 
-- **`POST /api/agent`** : Démarre la boucle agentique avec `{ prompt, history, systemPrompt? }`.
-- **`GET /api/memory/refresh`** : Recharge les données fraîches de `data/kaderbot_storage.json` depuis le disque.
-- **`GET /api/health`** : Endpoint de healthcheck retournant `{ ok: true }` pour les pings de maintien d'activité (Render cron).
+- **Liste des modèles de secours** :
+  1. `gemini-3.8-flash` (GA, ultra-rapide)
+  2. `gemini-3.5-flash` (remplace l'ancien `gemini-3.1-flash-lite`)
+  3. `gemini-flash-latest`
+- **Logs explicites de bascule** : chaque transition est tracée dans la console serveur indiquant le modèle ayant échoué, la cause de l'échec et le modèle vers lequel s'effectue la bascule (`[BASCULE GEMINI SDK]` ou `[BASCULE GEMINI REST]`).
+
+---
+
+## 3. Cascade Complète de la Boucle Agentique (`runAgentLoop` / `/api/agent`)
+
+La boucle agentique exécute une cascade tolérante aux pannes sans jamais renvoyer d'erreur HTTP 500 tant qu'un des maillons répond :
+
+1. **Maillon 1** : Groq `openai/gpt-oss-120b` (avec exécution complète des outils : `search_web`, `search_news`, `open_url`, `memo_lookup`, `memo_store`, `link_concepts`, `ask_user`).
+2. **Maillon 2** : Groq `openai/gpt-oss-20b` (avec exécution complète des outils).
+3. **Maillon 3** : Gemini via `callGeminiWithFallback` (synthèse textuelle sans outils).
+4. **Maillon 4** : OpenRouter `nvidia/nemotron-3.5-lightning:free` (avec exécution complète des outils si `OPENROUTER_API_KEY` est configuré).
+
+---
+
+## 4. Traçabilité & Logs
+
+À chaque bascule entre maillons ou modèles, un avertissement explicite est émis avec :
+- Le modèle et le fournisseur ayant échoué.
+- La cause technique exacte (code HTTP, message d'erreur ou timeout).
+- Le modèle et le maillon cible de la bascule.

@@ -428,19 +428,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     openai/gpt-oss-120b (OpenAI GPT-OSS 120B - Très puissant & Grand modèle)
                   </option>
                   <option value="openai/gpt-oss-20b">
-                    openai/gpt-oss-20b (OpenAI GPT-OSS 20B - Équilibré)
-                  </option>
-                  <option value="llama-3.1-8b-instant">
-                    llama-3.1-8b-instant (Meta Llama 3.1 8B - Gratuit & Ultra-rapide)
-                  </option>
-                  <option value="llama-3.3-70b-specdec">
-                    llama-3.3-70b-specdec (Meta Llama 3.3 70B SpecDec)
-                  </option>
-                  <option value="qwen/qwen3.8-27b">
-                    qwen/qwen3.8-27b (Qwen 3.8 27B)
-                  </option>
-                  <option value="mixtral-8x7b-32768">
-                    mixtral-8x7b-32768 (Mistral 8x7B)
+                    openai/gpt-oss-20b (OpenAI GPT-OSS 20B - Équilibré & Rapide)
                   </option>
                 </select>
               </div>
