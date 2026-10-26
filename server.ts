@@ -149,6 +149,117 @@ async function callGroqWithFallback(
   throw new Error(`Groq: ${lastError}`);
 }
 
+// Helper to normalize and resolve OpenRouter model IDs accurately
+export function resolveOpenRouterModel(requestedModel?: string): string {
+  const defaultModel = 'meta-llama/llama-3.3-70b-instruct:free';
+  if (!requestedModel) return defaultModel;
+  let clean = requestedModel.trim();
+  const lower = clean.toLowerCase();
+
+  // Ne JAMAIS utiliser openai/gpt-oss-120b sur OpenRouter (réservé à Groq)
+  if (lower.includes('gpt-oss') || lower.includes('gpt') || lower.includes('oss')) {
+    return defaultModel;
+  }
+
+  // Normalisation des modèles
+  if (lower.includes('llama-3.3-70b') || lower.includes('llama') || lower.includes('70b')) {
+    return defaultModel;
+  }
+  if (lower.includes('qwen')) {
+    return 'qwen/qwen3-coder:free';
+  }
+  if (lower.includes('deepseek') || lower.includes('r1')) {
+    return 'deepseek/deepseek-r1:free';
+  }
+
+  // Le suffixe :free est obligatoire pour utiliser le quota gratuit
+  if (!clean.endsWith(':free')) {
+    clean = `${clean}:free`;
+  }
+
+  return clean;
+}
+
+// Helper to call OpenRouter with candidate fallback and clean quota management
+async function callOpenRouterWithFallback(
+  prompt: string,
+  systemPrompt: string,
+  apiKey: string,
+  requestedModel = 'meta-llama/llama-3.3-70b-instruct:free',
+  history: Array<{ role: string; content: string }> = []
+): Promise<{ text: string; actualModel: string }> {
+  const primaryModel = resolveOpenRouterModel(requestedModel);
+
+  // Modèles candidats dans l'ordre strict demandé (sans jamais gpt-oss-120b)
+  const candidateModels = Array.from(
+    new Set([
+      primaryModel,
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'qwen/qwen3-coder:free',
+      'deepseek/deepseek-r1:free',
+    ])
+  );
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: prompt },
+  ];
+
+  let lastError = '';
+
+  for (const modelToTry of candidateModels) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://kaderbot.app',
+          'X-Title': 'KADERBOT NOVA',
+        },
+        body: JSON.stringify({
+          model: modelToTry,
+          messages,
+          temperature: 0.7,
+          max_tokens: 800,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content?.trim() || '';
+        return { text: content, actualModel: modelToTry };
+      }
+
+      const errData = await response.json().catch(() => null);
+      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+      lastError = errMsg;
+
+      // Si HTTP 429 (quota épuisé) ou 401 (clé invalide), NE PAS retenter avec un autre modèle :
+      // lancer immédiatement l'erreur pour déclencher le fallback vers Gemini/Groq
+      if (response.status === 429 || response.status === 401) {
+        throw new Error('OpenRouter: quota épuisé ou clé invalide');
+      }
+
+      // Si HTTP 404 (modèle introuvable), passer au modèle suivant
+      if (response.status === 404) {
+        console.warn(`Modèle OpenRouter "${modelToTry}" non accessible (404), tentative avec modèle suivant...`);
+        continue;
+      }
+
+      console.warn(`Erreur OpenRouter sur "${modelToTry}" (${response.status}: ${errMsg}), tentative avec modèle suivant...`);
+    } catch (e: any) {
+      if (e.message === 'OpenRouter: quota épuisé ou clé invalide') {
+        throw e;
+      }
+      lastError = e.message;
+    }
+  }
+
+  throw new Error(`OpenRouter: ${lastError || 'indisponible'}`);
+}
+
 // Helper to call Gemini with explicit API Key and direct REST fallback (Never uses Application Default Credentials)
 async function callGeminiWithFallback(
   fullPrompt: string,
@@ -305,7 +416,64 @@ app.post('/api/groq/test', async (req, res) => {
   }
 });
 
-// 1. Chat endpoint (Exclusively uses process.env.GEMINI_API_KEY and process.env.GROQ_API_KEY)
+// 0.2 OpenRouter Connection & Model Tester Endpoint (Uses process.env.OPENROUTER_API_KEY exclusively)
+app.post('/api/openrouter/test', async (req, res) => {
+  try {
+    const keyToUse = process.env.OPENROUTER_API_KEY || req.body?.apiKey;
+    const model = req.body?.model || 'meta-llama/llama-3.3-70b-instruct:free';
+
+    if (!keyToUse) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Aucune variable OPENROUTER_API_KEY configurée sur le serveur.',
+      });
+    }
+
+    const resolvedModel = resolveOpenRouterModel(model);
+    const start = Date.now();
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${keyToUse.trim()}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://kaderbot.app',
+        'X-Title': 'KADERBOT NOVA',
+      },
+      body: JSON.stringify({
+        model: resolvedModel,
+        messages: [{ role: 'user', content: 'Réponds en un seul mot: "Connecté".' }],
+        max_tokens: 20,
+      }),
+    });
+
+    const latencyMs = Date.now() - start;
+
+    if (response.ok) {
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content?.trim() || 'Connecté';
+      return res.json({
+        ok: true,
+        model: resolvedModel,
+        latencyMs,
+        reply,
+      });
+    }
+
+    const errData = await response.json().catch(() => null);
+    const errMsg = errData?.error?.message || `Erreur HTTP ${response.status}`;
+    return res.status(response.status).json({
+      ok: false,
+      status: response.status,
+      error: errMsg,
+      model: resolvedModel,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 1. Chat endpoint (Exclusively uses process.env.GEMINI_API_KEY, process.env.GROQ_API_KEY, process.env.OPENROUTER_API_KEY)
 app.post('/api/chat', async (req, res) => {
   try {
     const {
@@ -313,6 +481,7 @@ app.post('/api/chat', async (req, res) => {
       history = [],
       provider = 'gemini',
       groqModel = 'openai/gpt-oss-120b',
+      openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free',
       systemPrompt = DEFAULT_SYSTEM_PROMPT,
     } = req.body;
 
@@ -325,7 +494,45 @@ app.post('/api/chat', async (req, res) => {
       .join('\n');
     const fullPrompt = `${systemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
 
-    // A. Groq Provider (Exclusively using process.env.GROQ_API_KEY)
+    // A. OpenRouter Provider (Exclusively using process.env.OPENROUTER_API_KEY)
+    if (provider === 'openrouter') {
+      const serverOpenRouterKey = process.env.OPENROUTER_API_KEY;
+
+      if (!serverOpenRouterKey) {
+        console.warn('Pas de OPENROUTER_API_KEY sur le serveur, bascule transparente sur Gemini (GEMINI_API_KEY)');
+        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        return res.json({
+          text: geminiRes.text,
+          provider: 'gemini',
+          model: geminiRes.model,
+          isFallback: true,
+          fallbackReason: 'Aucune variable OPENROUTER_API_KEY configurée sur le serveur',
+        });
+      }
+
+      try {
+        const { text, actualModel } = await callOpenRouterWithFallback(
+          prompt,
+          systemPrompt,
+          serverOpenRouterKey,
+          openrouterModel,
+          history
+        );
+        return res.json({ text, provider: 'openrouter', model: actualModel });
+      } catch (openRouterErr: any) {
+        console.warn(`OpenRouter indisponible (${openRouterErr.message}), bascule de secours sur Gemini...`);
+        const geminiRes = await callGeminiWithFallback(fullPrompt);
+        return res.json({
+          text: geminiRes.text,
+          provider: 'gemini',
+          model: geminiRes.model,
+          isFallback: true,
+          fallbackReason: openRouterErr.message,
+        });
+      }
+    }
+
+    // B. Groq Provider (Exclusively using process.env.GROQ_API_KEY)
     if (provider === 'groq') {
       const serverGroqKey = process.env.GROQ_API_KEY;
 
@@ -357,7 +564,7 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // B. Default: Gemini 3.8 Flash (Exclusively using process.env.GEMINI_API_KEY via ai client)
+    // C. Default: Gemini 3.8 Flash (Exclusively using process.env.GEMINI_API_KEY via ai client)
     const geminiRes = await callGeminiWithFallback(fullPrompt);
     return res.json({ text: geminiRes.text, provider: 'gemini', model: geminiRes.model });
   } catch (error: any) {
@@ -376,9 +583,24 @@ app.post('/api/idees', async (req, res) => {
       styleDesc = '',
       provider = 'gemini',
       groqModel = 'openai/gpt-oss-120b',
+      openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free',
     } = req.body;
 
     const prompt = `Génère exactement ${count} idées courtes sur le thème : "${theme}". Style demandé: ${styleDesc || style}. Format obligatoire : une idée par ligne, numérotée de 1 à ${count}. Pas d'introduction ni de conclusion.`;
+
+    if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+      try {
+        const { text } = await callOpenRouterWithFallback(
+          prompt,
+          "Tu es un générateur d'idées créatif et concis.",
+          process.env.OPENROUTER_API_KEY,
+          openrouterModel
+        );
+        return res.json({ text });
+      } catch (err) {
+        console.warn('OpenRouter idees failed, falling back to Gemini');
+      }
+    }
 
     if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
@@ -400,8 +622,28 @@ app.post('/api/idees', async (req, res) => {
 // 3. Translation endpoint (Exclusively server env keys)
 app.post('/api/traduis', async (req, res) => {
   try {
-    const { text, targetLang, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const {
+      text,
+      targetLang,
+      provider = 'gemini',
+      groqModel = 'openai/gpt-oss-120b',
+      openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free',
+    } = req.body;
     const prompt = `Traduis le texte suivant en ${targetLang}. Réponds UNIQUEMENT par la traduction exacte, sans commentaire, guillemets ni introduction:\n\n${text}`;
+
+    if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+      try {
+        const { text: result } = await callOpenRouterWithFallback(
+          prompt,
+          'Tu es un traducteur professionnel expert.',
+          process.env.OPENROUTER_API_KEY,
+          openrouterModel
+        );
+        return res.json({ text: result });
+      } catch (err) {
+        console.warn('OpenRouter traduis failed, falling back to Gemini');
+      }
+    }
 
     if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
@@ -423,8 +665,27 @@ app.post('/api/traduis', async (req, res) => {
 // 4. Corrector endpoint (Exclusively server env keys)
 app.post('/api/corrige', async (req, res) => {
   try {
-    const { text, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const {
+      text,
+      provider = 'gemini',
+      groqModel = 'openai/gpt-oss-120b',
+      openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free',
+    } = req.body;
     const prompt = `Corrige les fautes d'orthographe, de grammaire et de ponctuation du texte suivant en gardant le sens et le ton. Réponds uniquement par le texte corrigé:\n\n${text}`;
+
+    if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+      try {
+        const { text: result } = await callOpenRouterWithFallback(
+          prompt,
+          'Tu es un correcteur professionnel.',
+          process.env.OPENROUTER_API_KEY,
+          openrouterModel
+        );
+        return res.json({ text: result });
+      } catch (err) {
+        console.warn('OpenRouter corrige failed, falling back to Gemini');
+      }
+    }
 
     if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {
@@ -446,8 +707,27 @@ app.post('/api/corrige', async (req, res) => {
 // 5. Summarizer endpoint (Exclusively server env keys)
 app.post('/api/resume', async (req, res) => {
   try {
-    const { text, provider = 'gemini', groqModel = 'openai/gpt-oss-120b' } = req.body;
+    const {
+      text,
+      provider = 'gemini',
+      groqModel = 'openai/gpt-oss-120b',
+      openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free',
+    } = req.body;
     const prompt = `Résume le texte suivant en 2 à 3 phrases claires, précises et directes. Réponds uniquement par le résumé:\n\n${text}`;
+
+    if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+      try {
+        const { text: result } = await callOpenRouterWithFallback(
+          prompt,
+          'Tu es un expert en synthèse documentaire.',
+          process.env.OPENROUTER_API_KEY,
+          openrouterModel
+        );
+        return res.json({ text: result });
+      } catch (err) {
+        console.warn('OpenRouter resume failed, falling back to Gemini');
+      }
+    }
 
     if (provider === 'groq' && process.env.GROQ_API_KEY) {
       try {

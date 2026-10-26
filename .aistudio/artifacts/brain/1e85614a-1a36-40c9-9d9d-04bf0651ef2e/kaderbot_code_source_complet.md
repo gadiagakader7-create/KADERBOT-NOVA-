@@ -1,157 +1,65 @@
-# KADERBOT NOVA — Optimisation Sémantique Hybride (12 000+ entrées)
+# KADERBOT NOVA V14 — Architecture & Intégration OpenRouter
 
-Ce document décrit l'architecture d'optimisation de la mémoire sémantique de **KADERBOT NOVA** conçue pour supporter plus de 12 000 entrées avec une fluidité maximale sur tous supports (desktop et mobile).
-
----
-
-## 1. Tâche 1 : Pré-calcul Asynchrone des Vecteurs (`precalculerTousLesVecteurs`)
-
-Au lieu de calculer les vecteurs à la volée sur des milliers d'entrées, les vecteurs sont pré-calculés une seule fois au chargement de l'application.
-
-### Fonctionnement :
-- **Condition d'exécution :** Vérification du drapeau `localStorage.getItem('hasPrecalculated')`. S'il vaut `'true'`, aucun recalcul n'est effectué.
-- **Calcul par lots de 50 :** Traitement séquentiel avec `await new Promise(r => setTimeout(r, 10))` toutes les 50 entrées pour laisser respirer le thread principal JavaScript (UI 60 FPS sans lag).
-- **Vecteur de la clé :** Le vecteur de la clé (`sujet`) est extrait via `obtenirVecteur(sujet)` (Transformers.js `all-MiniLM-L6-v2`) et stocké dans `entry.vecteur`.
-- **Indicateur de progression en temps réel :** Une notification élégante informe l'utilisateur de l'état d'indexation (`Indexation de la mémoire : X%`). Une fois à 100%, elle disparaît automatiquement.
-
-```typescript
-export async function precalculerTousLesVecteurs(
-  memoire: MemoryStore,
-  onProgress?: (pourcentage: number) => void
-): Promise<MemoryStore> {
-  if (!memoire) return memoire;
-  const sujets = Object.keys(memoire);
-  const total = sujets.length;
-  if (total === 0) {
-    onProgress?.(100);
-    return memoire;
-  }
-
-  const BATCH_SIZE = 50;
-
-  for (let i = 0; i < total; i++) {
-    const sujet = sujets[i];
-    const entries = memoire[sujet] || [];
-
-    const needVec = entries.some(e => !e.vecteur || e.vecteur.length === 0);
-    if (needVec) {
-      const vec = await obtenirVecteur(sujet);
-      if (vec && vec.length > 0) {
-        for (const entry of entries) {
-          if (!entry.vecteur || entry.vecteur.length === 0) {
-            entry.vecteur = vec;
-          }
-        }
-      }
-    }
-
-    if ((i + 1) % BATCH_SIZE === 0 || i === total - 1) {
-      const pct = Math.round(((i + 1) / total) * 100);
-      onProgress?.(pct);
-      await new Promise(r => setTimeout(r, 10));
-    }
-  }
-
-  return memoire;
-}
-```
+KADERBOT NOVA intègre désormais trois fournisseurs d'intelligence artificielle majeurs en plus de son moteur cognitif local (Transformers.js Embeddings & Inférence logique) :
+1. **Google Gemini (3.8 Flash)** : Provider par défaut, ultra-rapide et gratuit via SDK officiel ou fallback REST.
+2. **Groq Cloud** : Spécialisé ultra-basse latence avec `openai/gpt-oss-120b` et `llama-3.1-8b-instant`.
+3. **OpenRouter** : Nouvelle intégration multi-fournisseurs axée sur les modèles gratuits (`:free`), avec **Meta Llama 3.3 70B Instruct** en modèle prioritaire.
 
 ---
 
-## 2. Tâche 2 : Recherche Hybride (`rechercheHybride`)
+## 1. Architecture Backend (`server.ts`)
 
-Située dans `src/core/cognitiveEngine.ts`, elle combine filtrage lexical ultrarapide et similarité vectorielle :
+### 1.1 Sécurité des clés API
+- La clé API OpenRouter est lue exclusivement via `process.env.OPENROUTER_API_KEY`.
+- Si le frontend envoie une clé personnalisée saisie dans le modal Paramètres, elle est transmise de manière éphémère sans jamais être loggée ni exposée.
+- La clé serveur n'est jamais exposée aux requêtes clientes.
 
-1. **Filtrage rapide (Mots-clés) :**
-   - Extraction des mots-clés de la question (minuscules, sans accents via `sansAccent`, exclusion des mots vides via `MOTS_INTERROGATIFS_ET_VIDES`).
-   - Sélection uniquement des entrées de la mémoire dont la clé contient au moins un des mots-clés (`includes`).
-   - Si aucun candidat n'est trouvé, retour immédiat de `null` (évite tout calcul vectoriel inutile).
+### 1.2 Résolution stricte des modèles (`resolveOpenRouterModel`)
+- **Interdiction formelle de GPT-OSS 120B** : `openai/gpt-oss-120b` est réservé à Groq. Toute demande vers ce modèle sur OpenRouter est redirigée vers `meta-llama/llama-3.3-70b-instruct:free`.
+- **Suffixe obligatoire `:free`** : Tout modèle OpenRouter non terminé par `:free` se voit automatiquement suffixé par `:free`.
+- **Modèle par défaut** : `meta-llama/llama-3.3-70b-instruct:free`.
 
-2. **Comparaison vectorielle sur le sous-ensemble filtré :**
-   - Calcul du vecteur de la question (`obtenirVecteur(question)`).
-   - Calcul de la similarité cosinus (`similariteCosinus`) uniquement sur les entrées filtrées qui possèdent déjà leur vecteur pré-calculé.
-
-3. **Seuil de confiance strict :**
-   - Retourne le meilleur résultat uniquement si le score dépasse **0.82**. Sinon, retourne `null`.
-
-```typescript
-export async function rechercheHybride(
-  question: string,
-  memoire: MemoryStore
-): Promise<{ sujet: string; entry: MemoryEntry; score: number } | null> {
-  if (!question || !memoire || Object.keys(memoire).length === 0) return null;
-
-  const qClean = sansAccent(question.toLowerCase());
-  let motsCles = extraireMotsCles(qClean);
-
-  if (motsCles.length === 0) {
-    const tokens = qClean
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length >= 2 && !MOTS_INTERROGATIFS_ET_VIDES.has(w) && !PRONOMS_CONTEXTE.has(w));
-    if (tokens.length > 0) motsCles = tokens;
-    else return null;
-  }
-
-  const candidats: Array<{ sujet: string; entry: MemoryEntry }> = [];
-  const motsClesSansAccents = motsCles.map(m => sansAccent(m.toLowerCase()));
-
-  for (const [sujet, entries] of Object.entries(memoire)) {
-    const sNorm = sansAccent(sujet.toLowerCase());
-    if (motsClesSansAccents.some(mot => sNorm.includes(mot))) {
-      for (const entry of entries) {
-        candidats.push({ sujet, entry });
-      }
-    }
-  }
-
-  if (candidats.length === 0) return null;
-
-  const questionVec = await obtenirVecteur(question);
-  if (!questionVec || questionVec.length === 0) return null;
-
-  let meilleurResultat: { sujet: string; entry: MemoryEntry; score: number } | null = null;
-  let maxScore = -1;
-
-  for (const item of candidats) {
-    let entryVec = item.entry.vecteur;
-    if (!entryVec || entryVec.length === 0) {
-      entryVec = await obtenirVecteur(item.sujet);
-      item.entry.vecteur = entryVec;
-    }
-
-    if (entryVec && entryVec.length > 0) {
-      const score = similariteCosinus(questionVec, entryVec);
-      if (score > maxScore) {
-        maxScore = score;
-        meilleurResultat = { sujet: item.sujet, entry: item.entry, score };
-      }
-    }
-  }
-
-  if (meilleurResultat && maxScore > 0.82) {
-    return meilleurResultat;
-  }
-  return null;
-}
-```
+### 1.3 Gestionnaire d'appels avec Fallback (`callOpenRouterWithFallback`)
+- **Endpoint** : `https://openrouter.ai/api/v1/chat/completions`
+- **Headers requis** :
+  - `Authorization: Bearer <API_KEY>`
+  - `Content-Type: application/json`
+  - `HTTP-Referer: https://kaderbot-nova.local`
+  - `X-Title: KADERBOT NOVA`
+- **Chaîne de fallback ordonnée** :
+  1. Modèle demandé (ex: `meta-llama/llama-3.3-70b-instruct:free`)
+  2. Modèle de secours 1 : `qwen/qwen3-coder:free`
+  3. Modèle de secours 2 : `deepseek/deepseek-r1:free`
+- **Gestion des erreurs HTTP 429 et 401** :
+  - Sur 429 (quota/rate limit) ou 401 (clé invalide), aucun autre modèle OpenRouter n'est testé inutilement ; une erreur immédiate est levée pour déclencher le fallback vers Gemini.
+- **Support des endpoints applicatifs** :
+  - `POST /api/openrouter/test`
+  - `POST /api/chat`
+  - `POST /api/idees`
+  - `POST /api/traduis`
+  - `POST /api/corrige`
+  - `POST /api/resume`
 
 ---
 
-## 3. Tâche 3 : Routeur Cognitif & Apprentissage Vectoriel Immédiat (`App.tsx`)
+## 2. Architecture Frontend
 
-1. **Remplacement dans le routeur local :**
-   - L'Étape 1 utilise maintenant `rechercheHybride(questionResolue, memoire)`.
-   - Si un match est trouvé, la réponse locale est formulée immédiatement et les statistiques (`hits`, `last_used`) sont mises à jour.
+### 2.1 Types (`src/types/kaderbot.ts`)
+- Ajout de `'openrouter'` dans le type `LLMProvider`.
+- Ajout de `'openrouter'` dans `ChatMessage['meta']['source']`.
+- Ajout de `openrouterModel: string` et `openrouterApiKey?: string` dans `AppConfig`.
 
-2. **Calcul et stockage du vecteur lors de l'apprentissage LLM :**
-   - Lorsqu'une nouvelle réponse est apprise via `apprendreDeLLM` (fallback Gemini ou Groq), son vecteur sémantique est calculé via `await obtenirVecteur(learned.sujet)` et directement rattaché à l'entrée (`entry.vecteur = vec`) **avant** la sauvegarde dans le state et `localStorage`.
-   - La prochaine question sur ce sujet sera donc reconnue instantanément par `rechercheHybride`.
+### 2.2 Service API (`src/services/apiService.ts`)
+- Méthode `testOpenRouterConnection(apiKey?: string, model?: string)`.
+- Transmission systématique de `openrouterModel` dans les payloads `/api/chat`, `/api/idees`, `/api/traduis`, etc.
 
----
+### 2.3 En-tête (`src/components/Header.tsx`)
+- Sélecteur rapide de modèle avec option OpenRouter (`🦙 Llama 3.3 (OpenRouter)`).
+- Badge violet distinctif `#A855F7` / `border-purple-500/50`.
 
-## 4. Tests et Validation
+### 2.4 Modal Paramètres (`src/components/SettingsModal.tsx`)
+- Carte de sélection "OpenRouter" dans la grille des moteurs IA (4 colonnes).
+- Section de configuration dédiée avec champ de clé API sécurisé, sélecteur de modèle gratuit (`llama-3.3-70b-instruct:free`, `qwen3-coder:free`, `deepseek-r1:free`) et bouton de test de latence en temps réel.
 
-- `tsc --noEmit` : 0 erreur de typage.
-- `npm run build` : Compilation réussie.
-- Respect strict de la non-exposition des scores et vecteurs dans l'UI utilisateur.
+### 2.5 Onglet de Discussion (`src/components/ChatTab.tsx`)
+- Badge d'identification de source : `🦙 Llama (OpenRouter)`.

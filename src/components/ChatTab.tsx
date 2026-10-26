@@ -636,6 +636,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       ? '✨ Gemini 3.8'
                       : msg.meta.source === 'groq'
                       ? '⚡ Groq'
+                      : msg.meta.source === 'openrouter'
+                      ? '🦙 Llama (OpenRouter)'
                       : 'Système'}
                   </span>
                 )}

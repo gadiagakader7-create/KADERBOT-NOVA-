@@ -3,8 +3,9 @@ import { MemoryStore, RulesStore, LinksStore, SynonymsStore } from '../types/kad
 export interface ChatApiParams {
   prompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
-  provider: 'gemini' | 'groq' | 'local_only';
+  provider: 'gemini' | 'groq' | 'openrouter' | 'local_only';
   groqModel?: string;
+  openrouterModel?: string;
   systemPrompt?: string;
 }
 
@@ -19,7 +20,7 @@ export interface ChatApiResponse {
 export const apiService = {
   async chat(params: ChatApiParams): Promise<ChatApiResponse> {
     // Strip any sensitive keys - Server exclusively uses process.env keys
-    const { prompt, history, provider, groqModel, systemPrompt } = params as any;
+    const { prompt, history, provider, groqModel, openrouterModel, systemPrompt } = params as any;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -28,6 +29,7 @@ export const apiService = {
         history,
         provider,
         groqModel,
+        openrouterModel,
         systemPrompt,
       }),
     });
@@ -36,6 +38,19 @@ export const apiService = {
       const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
       throw new Error(err.error || `Erreur serveur (${res.status})`);
     }
+
+    return await res.json();
+  },
+
+  async testOpenRouterConnection(
+    apiKey?: string,
+    model = 'meta-llama/llama-3.3-70b-instruct:free'
+  ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
+    const res = await fetch('/api/openrouter/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: apiKey?.trim() || undefined, model }),
+    });
 
     return await res.json();
   },
@@ -72,8 +87,9 @@ export const apiService = {
     styleDesc?: string;
     provider: string;
     groqModel?: string;
+    openrouterModel?: string;
   }): Promise<string> {
-    const { theme, count, style, styleDesc, provider, groqModel } = params as any;
+    const { theme, count, style, styleDesc, provider, groqModel, openrouterModel } = params as any;
     const res = await fetch('/api/idees', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -84,6 +100,7 @@ export const apiService = {
         styleDesc,
         provider,
         groqModel,
+        openrouterModel,
       }),
     });
 
@@ -101,8 +118,9 @@ export const apiService = {
     targetLang: string;
     provider: string;
     groqModel?: string;
+    openrouterModel?: string;
   }): Promise<string> {
-    const { text, targetLang, provider, groqModel } = params as any;
+    const { text, targetLang, provider, groqModel, openrouterModel } = params as any;
     const res = await fetch('/api/traduis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,6 +129,7 @@ export const apiService = {
         targetLang,
         provider,
         groqModel,
+        openrouterModel,
       }),
     });
 
@@ -127,8 +146,9 @@ export const apiService = {
     text: string;
     provider: string;
     groqModel?: string;
+    openrouterModel?: string;
   }): Promise<string> {
-    const { text, provider, groqModel } = params as any;
+    const { text, provider, groqModel, openrouterModel } = params as any;
     const res = await fetch('/api/corrige', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -136,6 +156,7 @@ export const apiService = {
         text,
         provider,
         groqModel,
+        openrouterModel,
       }),
     });
 
@@ -152,8 +173,9 @@ export const apiService = {
     text: string;
     provider: string;
     groqModel?: string;
+    openrouterModel?: string;
   }): Promise<string> {
-    const { text, provider, groqModel } = params as any;
+    const { text, provider, groqModel, openrouterModel } = params as any;
     const res = await fetch('/api/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -161,6 +183,7 @@ export const apiService = {
         text,
         provider,
         groqModel,
+        openrouterModel,
       }),
     });
 

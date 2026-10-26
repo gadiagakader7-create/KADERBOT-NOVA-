@@ -42,6 +42,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       ? 'openai/gpt-oss-120b'
       : config.groqModel || 'openai/gpt-oss-120b'
   );
+  const [openrouterKey, setOpenrouterKey] = useState(config.openrouterApiKey || '');
+  const [openrouterModel, setOpenrouterModel] = useState(
+    config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free'
+  );
   const [systemPrompt, setSystemPrompt] = useState(config.systemPrompt);
   const [soundEnabled, setSoundEnabled] = useState(config.soundEnabled);
   const [autoLearn, setAutoLearn] = useState(config.autoLearnFromLLM);
@@ -58,6 +62,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [isTestingGemini, setIsTestingGemini] = useState(false);
   const [geminiTestResult, setGeminiTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    model?: string;
+    latencyMs?: number;
+  } | null>(null);
+
+  const [isTestingOpenRouter, setIsTestingOpenRouter] = useState(false);
+  const [openrouterTestResult, setOpenrouterTestResult] = useState<{
     ok: boolean;
     message: string;
     model?: string;
@@ -83,11 +95,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           ? 'openai/gpt-oss-120b'
           : config.groqModel || 'openai/gpt-oss-120b'
       );
+      setOpenrouterKey(config.openrouterApiKey || '');
+      setOpenrouterModel(
+        config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free'
+      );
       setSystemPrompt(config.systemPrompt);
       setSoundEnabled(config.soundEnabled);
       setAutoLearn(config.autoLearnFromLLM);
       setTestResult(null);
       setGeminiTestResult(null);
+      setOpenrouterTestResult(null);
     }
   }, [isOpen, config]);
 
@@ -151,12 +168,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleTestOpenRouter = async () => {
+    setIsTestingOpenRouter(true);
+    setOpenrouterTestResult(null);
+
+    try {
+      const res = await apiService.testOpenRouterConnection(openrouterKey.trim(), openrouterModel);
+      if (res.ok) {
+        setOpenrouterTestResult({
+          ok: true,
+          message: `Connecté à OpenRouter (${res.model}) avec succès ! Latence : ${res.latencyMs}ms.`,
+          model: res.model,
+          latencyMs: res.latencyMs,
+        });
+      } else {
+        setOpenrouterTestResult({
+          ok: false,
+          message: `Échec OpenRouter : ${res.error || 'Erreur de connexion'}`,
+          model: res.model,
+        });
+      }
+    } catch (e: any) {
+      setOpenrouterTestResult({
+        ok: false,
+        message: `Erreur OpenRouter : ${e.message || 'Impossible de joindre le serveur'}`,
+      });
+    } finally {
+      setIsTestingOpenRouter(false);
+    }
+  };
+
   const handleSave = () => {
     onSaveConfig({
       provider,
       geminiApiKey: geminiKey.trim(),
       groqApiKey: groqKey.trim(),
+      openrouterApiKey: openrouterKey.trim(),
       groqModel,
+      openrouterModel,
       systemPrompt,
       soundEnabled,
       autoLearnFromLLM: autoLearn,
@@ -197,7 +246,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <label className="block text-xs font-semibold text-white mb-2">
               Moteur d'Intelligence Artificielle Actif
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => setProvider('gemini')}
@@ -231,6 +280,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
                 <p className="text-[10px] text-gray-400">
                   Supporte GPT-OSS 120B & Llama. Requiert une clé API Groq gratuite.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProvider('openrouter')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                  provider === 'openrouter'
+                    ? 'bg-purple-950/40 border-purple-500/60 text-white shadow-sm shadow-purple-500/10'
+                    : 'bg-gray-900/60 border-gray-800 text-gray-400 hover:bg-gray-800/50'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-purple-400 text-xs">OpenRouter</span>
+                  {provider === 'openrouter' && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  Llama 3.3 70B & modèles gratuits (:free) multi-fournisseurs.
                 </p>
               </button>
 
@@ -407,6 +474,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div>
                       <p className="font-semibold">{testResult.ok ? 'Succès' : 'Échec du test'}</p>
                       <p className="opacity-90">{testResult.message}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* OpenRouter Configuration Section */}
+          {provider === 'openrouter' && (
+            <div className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-purple-300 font-semibold text-xs">
+                  <Key className="w-4 h-4" />
+                  <span>Configuration OpenRouter</span>
+                </div>
+                <a
+                  href="https://openrouter.ai/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-purple-400/80 hover:text-purple-300 underline flex items-center gap-1"
+                >
+                  <span>Obtenir une clé</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-gray-300 mb-1">Clé API OpenRouter (Optionnelle) :</label>
+                <input
+                  type="password"
+                  placeholder="sk-or-v1-... (laisser vide pour utiliser la clé serveur)"
+                  value={openrouterKey}
+                  onChange={e => setOpenrouterKey(e.target.value)}
+                  className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 font-mono"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Si non renseignée, le serveur utilise automatiquement sa variable d'environnement <code className="text-purple-400 font-mono">OPENROUTER_API_KEY</code>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-gray-300 mb-1">Modèle OpenRouter (:free obligatoire) :</label>
+                <select
+                  value={openrouterModel}
+                  onChange={e => setOpenrouterModel(e.target.value)}
+                  className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-purple-500"
+                >
+                  <option value="meta-llama/llama-3.3-70b-instruct:free">
+                    meta-llama/llama-3.3-70b-instruct:free (Recommandé - Llama 3.3 70B Instruct)
+                  </option>
+                  <option value="qwen/qwen3-coder:free">
+                    qwen/qwen3-coder:free (Qwen 3 Coder - Code & Raisonnement)
+                  </option>
+                  <option value="deepseek/deepseek-r1:free">
+                    deepseek/deepseek-r1:free (DeepSeek R1 - Raisonnement avancé)
+                  </option>
+                </select>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Note : le modèle GPT-OSS 120B est réservé au provider Groq et n'est pas disponible ici.
+                </p>
+              </div>
+
+              {/* Test OpenRouter Connection Button */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleTestOpenRouter}
+                  disabled={isTestingOpenRouter}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-xs font-semibold transition active:scale-95 disabled:opacity-50"
+                >
+                  <Activity className={`w-3.5 h-3.5 ${isTestingOpenRouter ? 'animate-spin' : ''}`} />
+                  <span>{isTestingOpenRouter ? 'Test en cours...' : 'Tester la connexion OpenRouter'}</span>
+                </button>
+
+                {/* Test feedback */}
+                {openrouterTestResult && (
+                  <div
+                    className={`mt-2 p-2.5 rounded-lg border text-[11px] leading-relaxed flex items-start gap-2 ${
+                      openrouterTestResult.ok
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {openrouterTestResult.ok ? (
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <p className="font-semibold">{openrouterTestResult.ok ? 'Succès' : 'Échec du test'}</p>
+                      <p className="opacity-90">{openrouterTestResult.message}</p>
                     </div>
                   </div>
                 )}

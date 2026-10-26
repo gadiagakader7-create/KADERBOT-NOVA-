@@ -1,6 +1,6 @@
 {
-  "summary":  "Documentation complète des optimisations de la mémoire sémantique pour KADERBOT NOVA (12 000+ entrées) : Pré-calcul asynchrone des vecteurs par lots de 50 avec indicateur de progression, Recherche Hybride par filtrage mots-clés puis similarité cosinus (> 0.82), et mise à jour du routeur avec stockage vectoriel immédiat dans entry.vecteur.",
+  "summary":  "Documentation et guide complet du code source KADERBOT NOVA V14 avec l'intégration du 3e provider OpenRouter (Llama 3.3 70B :free, fallback automatique, filtrage strict anti-gpt-oss-120b, interface utilisateur et tests de connexion).",
   "createdAt":  "2026-10-24T19:59:42.589261904Z",
-  "updatedAt":  "2026-10-25T07:28:38.007886478Z",
+  "updatedAt":  "2026-10-26T14:25:51.127189308Z",
   "userFacing":  true
 }

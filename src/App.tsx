@@ -102,6 +102,9 @@ export default function App() {
         if (parsed.groqModel === 'llama-3.3-70b-versatile' || !parsed.groqModel) {
           parsed.groqModel = 'openai/gpt-oss-120b';
         }
+        if (!parsed.openrouterModel) {
+          parsed.openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free';
+        }
         if (!parsed.systemPrompt || !parsed.systemPrompt.includes('120 mots')) {
           parsed.systemPrompt = NOVA_DEFAULT_SYSTEM_PROMPT;
         }
@@ -112,7 +115,9 @@ export default function App() {
       provider: 'gemini',
       geminiApiKey: '',
       groqApiKey: '',
+      openrouterApiKey: '',
       groqModel: 'openai/gpt-oss-120b',
+      openrouterModel: 'meta-llama/llama-3.3-70b-instruct:free',
       geminiModel: 'gemini-3.8-flash',
       systemPrompt: NOVA_DEFAULT_SYSTEM_PROMPT,
       activeSession: 'defaut',
@@ -1030,6 +1035,8 @@ export default function App() {
           text: corps,
           targetLang: cible,
           provider: config.provider,
+          groqModel: config.groqModel,
+          openrouterModel: config.openrouterModel,
         });
         addBotMessage(result, { source: 'systeme' });
         setIsThinking(false);
@@ -1059,6 +1066,8 @@ export default function App() {
           count,
           style,
           provider: config.provider,
+          groqModel: config.groqModel,
+          openrouterModel: config.openrouterModel,
         });
         const lines = result
           .split('\n')
@@ -1075,7 +1084,12 @@ export default function App() {
       if (msgLower.startsWith('resume:')) {
         const corps = text.split(':')[1]?.trim();
         if (corps && corps.length > 80) {
-          const res = await apiService.resumer({ text: corps, provider: config.provider });
+          const res = await apiService.resumer({
+            text: corps,
+            provider: config.provider,
+            groqModel: config.groqModel,
+            openrouterModel: config.openrouterModel,
+          });
           addBotMessage(res, { source: 'systeme' });
           setIsThinking(false);
           return;
@@ -1086,7 +1100,12 @@ export default function App() {
       if (msgLower.startsWith('corrige:') || msgLower.startsWith('corrige ')) {
         const corps = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
         if (corps) {
-          const result = await apiService.corriger({ text: corps, provider: config.provider });
+          const result = await apiService.corriger({
+            text: corps,
+            provider: config.provider,
+            groqModel: config.groqModel,
+            openrouterModel: config.openrouterModel,
+          });
           addBotMessage(result, { source: 'systeme' });
           setIsThinking(false);
           return;
@@ -1107,7 +1126,7 @@ export default function App() {
       }
 
       // =========================================================================
-      // ÉTAPE 3 : CLOUD FALLBACK (Gemini / Groq avec mémoire de contexte sur 5 messages)
+      // ÉTAPE 3 : CLOUD FALLBACK (Gemini / Groq / OpenRouter avec mémoire de contexte sur 5 messages)
       // =========================================================================
       const historyFormatted = messages.slice(-5).map(m => ({
         role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
@@ -1119,11 +1138,13 @@ export default function App() {
         history: historyFormatted,
         provider: config.provider,
         groqModel: config.groqModel || 'openai/gpt-oss-120b',
+        openrouterModel: config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free',
         systemPrompt: config.systemPrompt,
       });
 
       const responseText = res.text;
-      addBotMessage(responseText, { source: res.provider === 'groq' ? 'groq' : 'gemini' });
+      const botSource = res.provider === 'openrouter' ? 'openrouter' : (res.provider === 'groq' ? 'groq' : 'gemini');
+      addBotMessage(responseText, { source: botSource });
       setGroqLog(prev => [{ q: text, r: responseText, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
 
       // =========================================================================

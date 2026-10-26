@@ -48,6 +48,14 @@ export const Header: React.FC<HeaderProps> = ({
     return 'Groq';
   };
 
+  const getOpenRouterShortName = () => {
+    const m = (config.openrouterModel || '').toLowerCase();
+    if (m.includes('llama') || m.includes('70b')) return 'Llama 70B';
+    if (m.includes('qwen')) return 'Qwen Coder';
+    if (m.includes('deepseek') || m.includes('r1')) return 'DeepSeek R1';
+    return 'Llama 70B';
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full shrink-0 flex-shrink-0 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-3 py-2 sm:px-6 sm:py-2.5 transition-all">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-2.5 md:gap-4">
@@ -172,10 +180,18 @@ export const Header: React.FC<HeaderProps> = ({
               ? 'border-emerald-500/40 text-emerald-300'
               : config.provider === 'groq'
               ? 'border-amber-500/40 text-amber-300'
+              : config.provider === 'openrouter'
+              ? 'border-purple-500/40 text-purple-300'
               : 'border-blue-500/40 text-blue-300'
           }`}>
             <Sparkles className={`w-3.5 h-3.5 shrink-0 ${
-              config.provider === 'gemini' ? 'text-emerald-400' : config.provider === 'groq' ? 'text-amber-400' : 'text-blue-400'
+              config.provider === 'gemini'
+                ? 'text-emerald-400'
+                : config.provider === 'groq'
+                ? 'text-amber-400'
+                : config.provider === 'openrouter'
+                ? 'text-purple-400'
+                : 'text-blue-400'
             }`} />
             <select
               value={config.provider}
@@ -188,6 +204,9 @@ export const Header: React.FC<HeaderProps> = ({
               </option>
               <option value="groq" className="bg-gray-900 text-amber-300">
                 ⚡ Groq ({getGroqShortName()})
+              </option>
+              <option value="openrouter" className="bg-gray-900 text-purple-300">
+                🦙 OpenRouter ({getOpenRouterShortName()})
               </option>
               <option value="local_only" className="bg-gray-900 text-blue-300">
                 🧠 100% Local (Hors-ligne)

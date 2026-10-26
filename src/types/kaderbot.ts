@@ -36,7 +36,7 @@ export interface ChatMessage {
     intent?: string;
     sujet?: string;
     chemin?: string[];
-    source?: 'local_memoire' | 'deduction' | 'regle' | 'groq' | 'gemini' | 'systeme' | 'semantique';
+    source?: 'local_memoire' | 'deduction' | 'regle' | 'groq' | 'gemini' | 'systeme' | 'semantique' | 'openrouter';
     ruleApplied?: string;
   };
 }
@@ -77,13 +77,15 @@ export interface KnowledgeGraphEdge {
   type: 'is_a' | 'custom_link' | 'rule';
 }
 
-export type LLMProvider = 'gemini' | 'groq' | 'local_only';
+export type LLMProvider = 'gemini' | 'groq' | 'openrouter' | 'local_only';
 
 export interface AppConfig {
   provider: LLMProvider;
   geminiApiKey?: string;
   groqApiKey?: string;
+  openrouterApiKey?: string;
   groqModel: string;
+  openrouterModel: string;
   geminiModel: string;
   systemPrompt: string;
   activeSession: string;
