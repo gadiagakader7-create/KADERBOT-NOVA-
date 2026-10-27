@@ -1554,6 +1554,55 @@ async function runAgentLoop(
   throw new Error('Tous les maillons de l’agent ont échoué (Groq gpt-oss-120b, Groq gpt-oss-20b, Gemini, OpenRouter Nemotron).');
 }
 
+// === ROUTER INTENTION (CHAT vs AGENT) ===
+async function classifyIntentWithRouter(userPrompt: string): Promise<'CHAT' | 'AGENT'> {
+  const groqKey = process.env.GROQ_API_KEY?.trim();
+  if (!groqKey) {
+    // Si pas de clé Groq, basculer par défaut sur AGENT pour préserver la cascade
+    return 'AGENT';
+  }
+
+  try {
+    const classificationPrompt = `Réponds uniquement CHAT ou AGENT. AGENT si le message demande une recherche web, une info actuelle ou factuelle hors mémoire, ou apprendre/mémoriser un fait. CHAT sinon (salutations, conversation, opinions, création).
+
+Message: "${userPrompt.replace(/"/g, '\\"')}"
+Classification:`;
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${groqKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-20b',
+        messages: [{ role: 'user', content: classificationPrompt }],
+        max_tokens: 150,
+        temperature: 0,
+        reasoning_format: 'parsed',
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`[ROUTER AGENT] Classification HTTP ${response.status}, défaut = AGENT`);
+      return 'AGENT';
+    }
+
+    const data: any = await response.json();
+    const msgObj = data.choices?.[0]?.message;
+    const content = (msgObj?.content || '').trim().toUpperCase();
+    const reasoning = (msgObj?.reasoning || '').trim().toUpperCase();
+
+    if (content.includes('CHAT') || (!content && reasoning.slice(-80).includes('CHAT'))) {
+      return 'CHAT';
+    }
+    return 'AGENT';
+  } catch (err: any) {
+    console.warn(`[ROUTER AGENT] Erreur classification (${err.message}), défaut = AGENT`);
+    return 'AGENT';
+  }
+}
+
 // === 5. ENDPOINT /api/agent ===
 app.post('/api/agent', async (req, res) => {
   try {
@@ -1562,9 +1611,60 @@ app.post('/api/agent', async (req, res) => {
       return res.status(400).json({ error: 'Prompt requis' });
     }
 
-    // Exécute la cascade complète sans renvoyer 500 tant qu'un maillon répond
+    // 1. Classification d'intention (CHAT vs AGENT)
+    const intent = await classifyIntentWithRouter(prompt);
+
+    if (intent === 'CHAT') {
+      const serverGroqKey = process.env.GROQ_API_KEY?.trim();
+      if (serverGroqKey) {
+        try {
+          const chatRes = await callGroqWithFallback(
+            prompt,
+            systemPrompt || AGENT_SYSTEM_PROMPT,
+            serverGroqKey,
+            'openai/gpt-oss-120b',
+            history
+          );
+          return res.json({
+            text: chatRes.text,
+            provider: 'groq-chat',
+            model: chatRes.actualModel,
+            routedTo: 'chat',
+            toolTrace: [],
+            isFallback: false,
+          });
+        } catch (chatErr: any) {
+          console.warn(`[ROUTER AGENT] Groq chat direct a échoué (${chatErr.message}), bascule sur Gemini...`);
+        }
+      }
+
+      // Fallback Gemini direct si Groq chat a échoué ou pas de clé
+      try {
+        const formattedHistory = history
+          .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
+          .join('\n');
+        const fullPrompt = `${systemPrompt || AGENT_SYSTEM_PROMPT}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
+        const geminiRes = await callGeminiWithFallback(fullPrompt, systemPrompt || AGENT_SYSTEM_PROMPT);
+        return res.json({
+          text: geminiRes.text,
+          provider: 'gemini',
+          model: geminiRes.model,
+          routedTo: 'chat',
+          toolTrace: [],
+          isFallback: true,
+          fallbackReason: 'Groq indisponible pour le mode chat direct',
+        });
+      } catch (geminiErr: any) {
+        console.warn(`[ROUTER AGENT] Gemini chat direct a échoué (${geminiErr.message}), exécution de la boucle agent complète...`);
+      }
+    }
+
+    // 2. Si intention AGENT (ou échec de CHAT) : Exécute la cascade agentique complète
     const agentResult = await runAgentLoop(prompt, history, systemPrompt);
-    return res.json(agentResult);
+    return res.json({
+      ...agentResult,
+      routedTo: 'agent',
+    });
   } catch (err: any) {
     console.error('Erreur critique /api/agent (tous les maillons ont échoué):', err);
     return res.status(500).json({ error: err.message || 'Erreur interne de l’agent' });

@@ -55,7 +55,7 @@ import { ToolsTab } from './components/ToolsTab';
 import { SessionsTab } from './components/SessionsTab';
 import { ActionMenuModal } from './components/ActionMenuModal';
 import { SettingsModal } from './components/SettingsModal';
-import { apiService } from './services/apiService';
+import { apiService, sendAgentMessage } from './services/apiService';
 
 export default function App() {
   // Détection du mode administrateur via l'URL (?admin=true)
@@ -239,6 +239,7 @@ export default function App() {
   }, [threads]);
 
   const [isThinking, setIsThinking] = useState(false);
+  const [isAgentActive, setIsAgentActive] = useState(false);
   const [indexingProgress, setIndexingProgress] = useState<number | null>(null);
 
   // Tâche 1 : Pré-calcul des vecteurs (exécuté une seule fois avec le flag hasPrecalculated)
@@ -1126,32 +1127,87 @@ export default function App() {
       }
 
       // =========================================================================
-      // ÉTAPE 3 : CLOUD FALLBACK (Gemini / Groq / OpenRouter avec mémoire de contexte sur 5 messages)
+      // ÉTAPE 3 : AGENT AVEC OUTILS & ROUTEUR COGNITIF (AVEC FALLBACK /api/chat)
       // =========================================================================
-      const historyFormatted = messages.slice(-5).map(m => ({
+      const historyFormatted = messages.slice(-10).map(m => ({
         role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
         content: m.text,
       }));
 
-      const res = await apiService.chat({
-        prompt: text,
-        history: historyFormatted,
-        provider: config.provider,
-        groqModel: config.groqModel || 'openai/gpt-oss-120b',
-        openrouterModel: config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free',
-        systemPrompt: config.systemPrompt,
-      });
+      let responseText = '';
+      let botSource: NonNullable<ChatMessage['meta']>['source'] = 'groq';
+      let metaPayload: ChatMessage['meta'] = {};
 
-      const responseText = res.text;
-      const botSource = res.provider === 'openrouter' ? 'openrouter' : (res.provider === 'groq' ? 'groq' : 'gemini');
-      addBotMessage(responseText, { source: botSource });
+      try {
+        // 1. Appel prioritaire de l'Agent intelligent (/api/agent avec les 10 derniers messages)
+        const agentRes = await sendAgentMessage(text, historyFormatted);
+        responseText = agentRes.text || agentRes.question || '';
+
+        botSource =
+          agentRes.provider === 'groq-agent'
+            ? 'groq-agent'
+            : agentRes.provider === 'openrouter-agent'
+            ? 'openrouter-agent'
+            : agentRes.provider === 'groq-chat'
+            ? 'groq-chat'
+            : agentRes.provider === 'openrouter'
+            ? 'openrouter'
+            : agentRes.provider === 'gemini'
+            ? 'gemini'
+            : 'groq';
+
+        metaPayload = {
+          source: botSource,
+          model: agentRes.model,
+          toolTrace: agentRes.toolTrace,
+          isFallback: agentRes.isFallback,
+          fallbackReason: agentRes.fallbackReason,
+          routedTo: agentRes.routedTo,
+        };
+
+        if (
+          agentRes.provider === 'groq-agent' ||
+          agentRes.provider === 'openrouter-agent' ||
+          agentRes.routedTo === 'agent'
+        ) {
+          setIsAgentActive(true);
+        }
+      } catch (agentErr: any) {
+        console.warn('Endpoint /api/agent indisponible ou erreur, bascule vers /api/chat:', agentErr.message);
+        // Fallback transparent vers /api/chat si /api/agent renvoie 404, 500 ou échoue
+        const chatRes = await apiService.chat({
+          prompt: text,
+          history: historyFormatted,
+          provider: config.provider,
+          groqModel: config.groqModel || 'openai/gpt-oss-120b',
+          openrouterModel: config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free',
+          systemPrompt: config.systemPrompt,
+        });
+
+        responseText = chatRes.text;
+        botSource =
+          chatRes.provider === 'openrouter'
+            ? 'openrouter'
+            : chatRes.provider === 'groq'
+            ? 'groq'
+            : 'gemini';
+
+        metaPayload = {
+          source: botSource,
+          model: chatRes.model,
+          isFallback: true,
+          fallbackReason: `Mode dégradé /api/chat (${agentErr.message})`,
+        };
+      }
+
+      addBotMessage(responseText, metaPayload);
       setGroqLog(prev => [{ q: text, r: responseText, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
 
       // =========================================================================
       // ÉTAPE 4 : APPRENTISSAGE AUTOMATIQUE & CALCUL D'EMBEDDING LOCAL
       // =========================================================================
       if (config.autoLearnFromLLM) {
-        const learned = apprendreDeLLM(text, responseText, memoire, res.provider === 'groq' ? 'groq' : 'gemini');
+        const learned = apprendreDeLLM(text, responseText, memoire, botSource === 'groq' || botSource === 'groq-chat' ? 'groq' : 'gemini');
         if (learned) {
           // Calcule et stocke son vecteur dans l'entrée avant de sauvegarder
           const vec = await obtenirVecteur(learned.sujet);
@@ -1191,6 +1247,7 @@ export default function App() {
         conceptsCount={Object.keys(memoire).length}
         rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
         isAdmin={isAdmin}
+        isAgentActive={isAgentActive}
       />
 
       {/* Notification de progression de l'indexation sémantique (Tâche 1) */}

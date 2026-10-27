@@ -626,7 +626,13 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 <span>{isUser ? 'TOI' : 'KADERBOT NOVA'}</span>
                 {!isUser && msg.meta?.source && (
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 border border-gray-700/60">
-                    {msg.meta.source === 'deduction'
+                    {msg.meta.source === 'groq-agent'
+                      ? '🤖 Agent Groq'
+                      : msg.meta.source === 'openrouter-agent'
+                      ? '🤖 Agent OpenRouter'
+                      : msg.meta.source === 'groq-chat'
+                      ? '⚡ Groq Chat'
+                      : msg.meta.source === 'deduction'
                       ? '⛓️ Déduction logique'
                       : msg.meta.source === 'local_memoire'
                       ? '🧠 Mémoire interne'
@@ -639,6 +645,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       : msg.meta.source === 'openrouter'
                       ? '🦙 Llama (OpenRouter)'
                       : 'Système'}
+                  </span>
+                )}
+                {!isUser && msg.meta?.isFallback && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-500/40 cursor-help"
+                    title={msg.meta.fallbackReason || 'Mode dégradé sans recherche'}
+                  >
+                    ⚠️ Mode dégradé (sans recherche)
                   </span>
                 )}
                 <span className="text-gray-600 text-[10px]">{msg.timestamp}</span>
@@ -668,6 +682,63 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                     <ReactMarkdown components={markdownComponents}>
                       {msg.text}
                     </ReactMarkdown>
+                  </div>
+                )}
+
+                {/* Tool Trace compact pills (🔎 search_news → 📄 open_url) */}
+                {!isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
+                  <div className="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center gap-1.5 flex-wrap text-[11px] text-gray-300">
+                    <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Outils :</span>
+                    {msg.meta.toolTrace.map((trace, idx) => {
+                      const toolName = trace.tool;
+                      const icon =
+                        toolName === 'search_web' || toolName === 'search_news'
+                          ? '🔎'
+                          : toolName === 'open_url'
+                          ? '📄'
+                          : toolName === 'memo_lookup'
+                          ? '🧠'
+                          : toolName === 'memo_store'
+                          ? '💾'
+                          : toolName === 'link_concepts'
+                          ? '🔗'
+                          : toolName === 'ask_user'
+                          ? '❓'
+                          : '⚙️';
+
+                      const isUrl = toolName === 'open_url' && trace.args?.url;
+                      let hostname = '';
+                      if (isUrl) {
+                        try {
+                          hostname = new URL(trace.args.url).hostname.replace(/^www\./, '');
+                        } catch {
+                          hostname = trace.args.url;
+                        }
+                      }
+
+                      return (
+                        <React.Fragment key={idx}>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#161B26] border border-gray-700/60 text-[11px] text-gray-200">
+                            <span>{icon}</span>
+                            <span className="font-mono text-emerald-300">{toolName}</span>
+                            {isUrl && (
+                              <a
+                                href={trace.args.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-cyan-400 hover:text-cyan-300 underline ml-0.5 max-w-[140px] truncate"
+                                title={trace.args.url}
+                              >
+                                {hostname}
+                              </a>
+                            )}
+                          </span>
+                          {idx < msg.meta!.toolTrace!.length - 1 && (
+                            <span className="text-gray-600 font-bold">→</span>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </div>
                 )}
 

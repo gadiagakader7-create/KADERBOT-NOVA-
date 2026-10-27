@@ -241,19 +241,18 @@ export const apiService = {
     return await res.blob();
   },
 
+  async sendAgentMessage(
+    prompt: string,
+    history: Array<{ role: string; content: string }> = []
+  ): Promise<AgentApiResponse> {
+    return sendAgentMessage(prompt, history);
+  },
+
   async callAgent(params: {
     prompt: string;
     history?: Array<{ role: string; content: string }>;
     systemPrompt?: string;
-  }): Promise<{
-    text?: string;
-    provider: string;
-    toolTrace: Array<{ tool: string; args?: any }>;
-    awaitingUser?: boolean;
-    question?: string;
-    isFallback?: boolean;
-    fallbackReason?: string;
-  }> {
+  }): Promise<AgentApiResponse> {
     const res = await fetch('/api/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -278,3 +277,34 @@ export const apiService = {
     return await res.json();
   },
 };
+
+export interface AgentApiResponse {
+  text?: string;
+  provider: string;
+  model?: string;
+  toolTrace: Array<{ tool: string; args?: any }>;
+  awaitingUser?: boolean;
+  question?: string;
+  isFallback?: boolean;
+  fallbackReason?: string;
+  routedTo?: 'chat' | 'agent';
+}
+
+export async function sendAgentMessage(
+  prompt: string,
+  history: Array<{ role: string; content: string }> = []
+): Promise<AgentApiResponse> {
+  const res = await fetch('/api/agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, history }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+    throw new Error(err.error || `Erreur serveur (${res.status})`);
+  }
+
+  return await res.json();
+}
+

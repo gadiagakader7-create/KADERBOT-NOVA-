@@ -23,6 +23,7 @@ interface HeaderProps {
   conceptsCount: number;
   rulesCount: number;
   isAdmin?: boolean;
+  isAgentActive?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,6 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
   conceptsCount,
   rulesCount,
   isAdmin = false,
+  isAgentActive = false,
 }) => {
   const { isInstallable, install } = usePWAInstall();
 
@@ -77,6 +79,12 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-[#10A37F] font-mono text-[10px] sm:text-xs px-1.5 py-0.2 rounded bg-[#10A37F]/15 border border-[#10A37F]/30 font-semibold shrink-0">
                   NOVA V14
                 </span>
+                {isAgentActive && (
+                  <span className="text-emerald-300 font-mono text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/50 font-bold shrink-0 flex items-center gap-1.5 shadow-sm animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span>Agent actif</span>
+                  </span>
+                )}
                 {isAdmin ? (
                   <span className="text-amber-300 font-mono text-[10px] px-2 py-0.5 rounded bg-amber-950/80 border border-amber-600/50 font-bold shrink-0 flex items-center gap-1 shadow-sm">
                     <ShieldCheck className="w-3 h-3 text-amber-400" />

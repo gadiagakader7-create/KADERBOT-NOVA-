@@ -36,8 +36,24 @@ export interface ChatMessage {
     intent?: string;
     sujet?: string;
     chemin?: string[];
-    source?: 'local_memoire' | 'deduction' | 'regle' | 'groq' | 'gemini' | 'systeme' | 'semantique' | 'openrouter';
+    source?:
+      | 'local_memoire'
+      | 'deduction'
+      | 'regle'
+      | 'groq'
+      | 'gemini'
+      | 'systeme'
+      | 'semantique'
+      | 'openrouter'
+      | 'groq-agent'
+      | 'openrouter-agent'
+      | 'groq-chat';
     ruleApplied?: string;
+    model?: string;
+    toolTrace?: Array<{ tool: string; args?: any }>;
+    isFallback?: boolean;
+    fallbackReason?: string;
+    routedTo?: 'chat' | 'agent';
   };
 }
 

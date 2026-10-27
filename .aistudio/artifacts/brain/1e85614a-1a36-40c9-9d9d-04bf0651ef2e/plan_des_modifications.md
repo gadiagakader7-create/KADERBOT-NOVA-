@@ -136,3 +136,36 @@ Dans l'onglet **Export & API**, la fonction de téléchargement génère un scri
 - **Prêt pour le Web** : L'application compile sans aucune erreur (`npm run build` validé).
 - **Multi-utilisateurs et confidentialité** : Le stockage `localStorage` est automatiquement cloisonné par navigateur/utilisateur ; chaque visiteur dispose de son propre environnement d'apprentissage autonome.
 - **Hébergement supporté** : Déployable directement sur Vercel, Render, Railway, ou sur serveur privé (Docker / Node.js).
+
+---
+
+## 8. Moteur Agentique Autonome & Routeur d'Intention (V14)
+
+### 🌟 Fonctionnalités ajoutées :
+1. **Cascade Multi-Modèles à 4 Niveaux dans `server.ts`** :
+   - **Maillon 1** : Groq `openai/gpt-oss-120b` (avec outillage complet `tools`).
+   - **Maillon 2** : Groq `openai/gpt-oss-20b` (avec outillage complet `tools`).
+   - **Maillon 3** : Gemini 3.8 Flash (sans tools, secours textuel).
+   - **Maillon 4** : OpenRouter `nvidia/nemotron-3.5-lightning:free` (avec tools).
+   - Bascule automatique et transparente sans erreur 500 tant qu'un maillon répond.
+
+2. **Routeur d'Intention Ultra-Rapide (`classifyIntentWithRouter`)** :
+   - Intercepte la requête avant la boucle d'outils.
+   - Utilise `openai/gpt-oss-20b` avec `reasoning_format: 'parsed'` pour classer instantanément entre :
+     - `CHAT` : Salutations, politesse, discussions générales → Traitement direct via `callGroqWithFallback` (~150-300ms).
+     - `AGENT` : Requêtes d'actualité, de recherche web, de faits hors mémoire → Déclenchement de la boucle récursive avec exécution d'outils (Brave Search, scraping d'URL, mémoire cognitive).
+   - En cas d'erreur de classification, repli par défaut sur `AGENT`.
+
+3. **Outillage Agentique (`tools`)** :
+   - `search_web` & `search_news` : Recherche d'actualités et du web mondial via Brave Search API avec compteur journalier et protection de quota.
+   - `open_url` : Lecture et extraction du contenu texte d'une page web avec liste blanche de sécurité.
+   - `memo_lookup` & `memo_store` : Consultation et mémorisation directe dans la mémoire cognitive locale.
+   - `link_concepts` : Création de liens conceptuels ontologiques.
+   - `ask_user` : Demande de clarification directe à l'utilisateur.
+
+4. **Connexion Frontend Complète & Restitution Visuelle (`ChatTab.tsx`, `Header.tsx`, `apiService.ts`)** :
+   - `sendAgentMessage(prompt, history)` : Branchement de la zone de saisie principale sur `/api/agent` avec conservation de l'historique des 10 derniers messages.
+   - Repli transparent sur `/api/chat` en cas d'indisponibilité du serveur.
+   - **Badge Mode Dégradé** : Affichage discret d'un badge *"Mode dégradé (sans recherche)"* avec le motif en infobulle si un fallback est survenu.
+   - **Pastilles d'Outils Compactes** : Affichage chronologique des outils sous le message (ex: `🔎 search_news → 📄 open_url`) avec les URLs des pages cliquables.
+   - **Indicateur d'État En-Tête** : Badge animé *"Agent actif"* dans la barre de titre supérieure lorsque l'agent est opérationnel.
