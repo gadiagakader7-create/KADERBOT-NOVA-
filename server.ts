@@ -2005,6 +2005,34 @@ def apprendre_de_groq(question, reponse, memoire_dict):
     return None
 
 # ==============================================================================
+# INJECTION DE MEMOIRE CHIRURGICALE POUR LLM LOCAL (NOVA)
+# ==============================================================================
+def construire_prompt_contextuel_nova(question):
+    """
+    Construit le prompt chirurgical spécifiquement adapté pour le modèle local Nova.
+    """
+    qa_match = trouver_question_reponse(question, memoire)
+    fait_connu = ""
+    sujet_ref = ""
+
+    if qa_match:
+        fait_connu = qa_match["entry"].get("def", "")
+        sujet_ref = qa_match["sujet"]
+    else:
+        x = extraire_x(question, memoire, regles, synonymes, contexte)
+        if x and x in memoire:
+            defs = [item["def"] for item in memoire[x]]
+            fait_connu = " ; ".join(defs)
+            sujet_ref = x
+
+    if fait_connu:
+        bloc_ctx = f"[FAIT VÉRIFIÉ EN MÉMOIRE LOCALE SUR '{sujet_ref.upper()}']\\n- {fait_connu}"
+    else:
+        bloc_ctx = "[MÉMOIRE LOCALE]\\nAucun fait spécifique stocké. Réponds avec fluidité et concision."
+
+    return f"{SYSTEM_PROMPT}\\n\\n{bloc_ctx}\\n\\nUtilisateur: {question}\\nKADERBOT Nova:"
+
+# ==============================================================================
 # APPEL API GROQ
 # ==============================================================================
 def appeler_groq_sync(prompt, history_list):

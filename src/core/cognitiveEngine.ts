@@ -1369,3 +1369,59 @@ export const SEED_LINKS: LinksStore = {
   moineau: ['oiseau'],
   oiseau: ['animal'],
 };
+
+/**
+ * Construit un prompt chirurgical spécifiquement adapté pour le futur modèle local Nova (SmolLM2-1.7B).
+ * Utilisé UNIQUEMENT pour le moteur local / Nova hors-ligne, jamais injecté dans les requêtes Cloud standard.
+ */
+export function construirePromptContextuelNova(
+  question: string,
+  memoire: MemoryStore,
+  regles: RulesStore,
+  liens: LinksStore,
+  synonymes: SynonymsStore,
+  contexte: string[],
+  systemPromptDefaut?: string
+): { promptComplet: string; faitTrouve: string | null; source: string } {
+  // Recherche chirurgicale du fait le plus pertinent dans la mémoire locale JSON
+  const qaMatch = trouverQuestionReponse(question, memoire);
+  let faitTrouve: string | null = null;
+  let source = 'systeme';
+  let sujetDeclencheur = '';
+
+  if (qaMatch) {
+    faitTrouve = qaMatch.entry.def;
+    source = 'local_memoire';
+    sujetDeclencheur = qaMatch.sujet;
+  } else {
+    const defCheck = estRequeteDefinition(question);
+    const candX = defCheck.estDef && defCheck.concept
+      ? defCheck.concept
+      : extraireX(question, memoire, regles, synonymes, contexte);
+
+    if (candX) {
+      const defLocal = phraseDef(candX, question, memoire, regles, liens, synonymes);
+      if (defLocal) {
+        faitTrouve = defLocal;
+        source = 'local_memoire';
+        sujetDeclencheur = candX;
+      }
+    }
+  }
+
+  // Formatage du bloc de mémoire chirurgicale pour Nova
+  const blocMemoire = faitTrouve
+    ? `[FAIT VÉRIFIÉ EN MÉMOIRE LOCALE SUR "${sujetDeclencheur.toUpperCase()}"]\n- ${faitTrouve}`
+    : `[MÉMOIRE LOCALE]\nAucun fait spécifique pré-enregistré sur ce sujet exact. Réponds avec fluidité, politesse et précision.`;
+
+  const instructionsSysteme =
+    systemPromptDefaut ||
+    "Tu es KADERBOT Nova, une assistante virtuelle bilingue (FR/EN), polie, chaleureuse et concise. " +
+    "Tu réponds toujours en français, en 2 à 4 phrases maximum. " +
+    "Ne parle jamais à la place de l'utilisateur et n'invente pas d'informations fausses.";
+
+  const promptComplet = `${instructionsSysteme}\n\n${blocMemoire}\n\nUtilisateur: ${question}\nKADERBOT Nova:`;
+
+  return { promptComplet, faitTrouve, source };
+}
+

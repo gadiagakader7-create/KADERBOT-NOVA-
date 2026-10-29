@@ -1,6 +1,6 @@
 {
-  "summary":  "Documentation complète de l'architecture KADERBOT NOVA V14 avec le catalogue des modèles mis à jour (octobre 2026) : Groq limité à openai/gpt-oss-120b et openai/gpt-oss-20b, Gemini mis à jour vers gemini-3.8-flash, gemini-3.5-flash et gemini-flash-latest, et cascade agentique à 4 maillons avec fallback automatique et logs explicites.",
-  "createdAt":  "2026-10-24T19:59:42.589261904Z",
-  "updatedAt":  "2026-10-26T19:11:02.520727549Z",
-  "userFacing":  true
+  "summary": "Code source complet et intégral de KADERBOT NOVA V14 : structures TypeScript, moteur cognitif hybride, service API, serveur Express avec boucle agentique à 4 maillons et routeur d'intention, infrastructure de mémoire contextuelle pour Nova (SmolLM2-1.7B), et composants d'interface React (ChatTab, Header, App).",
+  "createdAt": "2026-10-24T19:59:42.589261904Z",
+  "updatedAt": "2026-10-27T14:32:00.000000000Z",
+  "userFacing": true
 }

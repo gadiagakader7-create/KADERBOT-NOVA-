@@ -1,5 +1,5 @@
 {
-  "summary": "Plan exhaustif et structuré détaillant l'ensemble des modifications architecturales, algorithmiques et graphiques apportées à KaderBot pour cette nouvelle version.",
-  "updatedAt": "2026-10-17T10:46:54.077307473Z",
-  "userFacing": true
+  "summary":  "Plan détaillé et exhaustif des modifications et de l'architecture complète de KADERBOT NOVA V14 : IA symbolique, boucle agentique avec outils Brave Search et scraping, routeur d'intention ultra-rapide, infrastructure de mémoire chirurgicale pour le futur LLM local Nova, et restitution frontend enrichie.",
+  "updatedAt":  "2026-10-27T21:32:13.872734040Z",
+  "userFacing":  true
 }

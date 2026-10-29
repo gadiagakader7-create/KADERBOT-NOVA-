@@ -46,6 +46,7 @@ import {
   obtenirVecteurCache,
   resoudrePronomsAvecHistorique,
   evaluerCalculMath,
+  construirePromptContextuelNova,
 } from './core/cognitiveEngine';
 import { Header } from './components/Header';
 import { ChatTab } from './components/ChatTab';
@@ -1113,15 +1114,28 @@ export default function App() {
         }
       }
 
-      // Mode 100% local actif sans fallback cloud
+      // Mode 100% local actif / Moteur Nova (SmolLM2-1.7B) sans fallback cloud
       if (config.provider === 'local_only') {
-        const candX = extraireX(text, memoire, regles, synonymes, contexte);
-        addBotMessage(
-          candX
-            ? `Je n'ai pas encore d'information sur "${candX}" dans ma mémoire locale. Tu peux me l'enseigner avec : retiens: ${candX} = ...`
-            : "Je n'ai pas cette notion en mémoire locale. Tu peux me l'enseigner avec : retiens: sujet = définition",
-          { source: 'systeme' }
+        const { faitTrouve } = construirePromptContextuelNova(
+          text,
+          memoire,
+          regles,
+          liens,
+          synonymes,
+          contexte,
+          config.systemPrompt
         );
+        if (faitTrouve) {
+          addBotMessage(faitTrouve, { source: 'local_memoire' });
+        } else {
+          const candX = extraireX(text, memoire, regles, synonymes, contexte);
+          addBotMessage(
+            candX
+              ? `Je n'ai pas encore d'information sur "${candX}" dans ma mémoire locale. Tu peux me l'enseigner avec : retiens: ${candX} = ...`
+              : "Je n'ai pas cette notion en mémoire locale. Tu peux me l'enseigner avec : retiens: sujet = définition",
+            { source: 'systeme' }
+          );
+        }
         setIsThinking(false);
         return;
       }

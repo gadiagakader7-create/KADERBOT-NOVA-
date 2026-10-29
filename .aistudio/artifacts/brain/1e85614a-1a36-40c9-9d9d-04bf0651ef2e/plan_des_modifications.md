@@ -1,171 +1,142 @@
-# Plan Détaillé des Modifications — Nouvelle Version de KADERBOT
+# Plan Détaillé des Modifications & Architecture Complète — KADERBOT NOVA V14
 
-Ce document récapitule l'ensemble des transformations, corrections et innovations intégrées dans le projet pour aboutir à cette nouvelle version majeure de **KADERBOT** (Moteur Cognitif Hybride Symbolique & LLM).
+Ce document constitue la référence exhaustive de l'architecture, des composants et des transformations successives de **KADERBOT NOVA V14**, agent cognitif hybride combinant IA symbolique locale, mémoire sémantique vectorielle, boucle agentique avec outillage web, routeur d'intention, et infrastructure d'injection contextuelle chirurgicale pour futur modèle local (Nova).
 
 ---
 
 ## Sommaire
-1. [Vue d'ensemble & Objectifs](#1-vue-densemble--objectifs)
-2. [Refonte de la Mémoire Cognitive & Résolution du Bug de Mot-Clé](#2-refonte-de-la-mémoire-cognitive--résolution-du-bug-de-mot-clé)
-3. [Correction & Unification des Intégrations LLM (Groq & Gemini)](#3-correction--unification-des-intégrations-llm-groq--gemini)
-4. [Améliorations de l'Interface Graphique & Ergonomie Responsive](#4-améliorations-de-linterface-graphique--ergonomie-responsive)
-5. [Enrichissement du Moteur de Raisonnement Symbolique](#5-enrichissement-du-moteur-de-raisonnement-symbolique)
-6. [Générateur de Script Python Autonome (`kaderbot.py`)](#6-générateur-de-script-python-autonome-kaderbotpy)
-7. [Architecture Technique, Fichiers Modifiés & Déploiement](#7-architecture-technique-fichiers-modifiés--déploiement)
+1. [Vue d'Ensemble & Vision Architecturale](#1-vue-densemble--vision-architecturale)
+2. [Moteur Cognitif Symbolique & Appariement Sémantique Local](#2-moteur-cognitif-symbolique--appariement-sémantique-local)
+3. [Intégration Cloud Multi-Fournisseurs & Résilience (Groq, Gemini, OpenRouter)](#3-intégration-cloud-multi-fournisseurs--résilience)
+4. [Boucle Agentique Autonome avec Outillage Web & Mémoire (`/api/agent`)](#4-boucle-agentique-autonome-avec-outillage-web--mémoire)
+5. [Routeur d'Intention Ultra-Rapide (`CHAT` vs `AGENT`)](#5-routeur-dintention-ultra-rapide)
+6. [Infrastructure de Mémoire Chirurgicale pour LLM Local Nova (`SmolLM2-1.7B`)](#6-infrastructure-de-mémoire-chirurgicale-pour-llm-local-nova)
+7. [Interface Utilisateur, Pastilles d'Outils & Statuts Visuels](#7-interface-utilisateur-pastilles-doutils--statuts-visuels)
+8. [Script Embarqué Autonome Python Pydroid 3 & Export Multi-Mode](#8-script-embarqué-autonome-python-pydroid-3--export-multi-mode)
+9. [Tableau de Synthèse des Fichiers & Déploiement](#9-tableau-de-synthèse-des-fichiers--déploiement)
 
 ---
 
-## 1. Vue d'ensemble & Objectifs
+## 1. Vue d'Ensemble & Vision Architecturale
 
-Le projet initial reposait sur un script Python avec un automate de règles et une extraction basique par mots-clés. La nouvelle version transforme ce concept en une **application web complète, modulaire et prête pour la production**, combinant :
-- **L'IA Symbolique déterministe** : Déduction logique, transitivité ontologique, règles de causalité, zéro hallucination.
-- **L'IA Générative moderne (LLM)** : Groq (Llama 3) et Gemini (Google AI) comme cerveaux externes en cas d'inconnu.
-- **Un apprentissage continu local** : Chaque échange pertinent est mémorisé sans nécessiter de serveur de base de données externe.
-
----
-
-## 2. Refonte de la Mémoire Cognitive & Résolution du Bug de Mot-Clé
-
-### 🛑 Le problème identifié
-Auparavant, lorsqu'un modèle externe (Groq ou Gemini) fournissait une réponse :
-- L'algorithme isolait un seul mot de la question (souvent le mot le plus long).
-- Il stockait l'intégralité de la réponse sous cette clé unique (`memoire[mot] = reponse`).
-- **Conséquence néfaste** : Dès que ce mot apparaissait dans n'importe quelle autre phrase anodine (même hors contexte), KaderBot détournait la conversation et ressortait toute la réponse stockée.
-
-### ✅ Les solutions implémentées
-1. **Distinction stricte entre Concept et Question-Réponse (Q&R)** :
-   - **Type `concept`** : Réservé exclusivement aux demandes explicites de définitions (*"c'est quoi un drone ?"*, *"définition de l'aigle"*).
-   - **Type `question_reponse`** : Appliqué à toutes les questions informatives ou ouvertes (*"quelle est la capitale de l'Australie ?"*, *"pourquoi le ciel est bleu ?"*).
-2. **Stockage de la question canonique entière** :
-   - Sauvegarde de `question_origine` et d'une clé normalisée complète (sans ponctuation excessive).
-   - Extraction des mots-clés significatifs via `extraireMotsCles()` en filtrant une liste élargie de stop-words français (`MOTS_INTERROGATIFS_ET_VIDES`).
-3. **Moteur d'appariement sémantique (`trouverQuestionReponse`)** :
-   - Calcule un indice de similarité combinant la formule de Jaccard sur les mots-clés et la proximité de la chaîne normalisée.
-   - Seuil de confiance strict ($\ge 0.72$) : un mot isolé ne déclenche plus jamais une réponse mémorisée.
-4. **Correction de l'extracteur de sujet (`extraireX`)** :
-   - N'interprète plus un mot au hasard d'une phrase longue comme un sujet de définition.
-   - Ne s'active que si la structure de la phrase est explicitement interrogative/définitionnelle ou s'il s'agit d'un mot unique.
-5. **Nettoyage automatique du cache (`nettoyerMemoirePolluee`)** :
-   - Au chargement du navigateur, détection automatique des anciennes entrées corrompues (mots uniques avec paragraphes de plus de 140 caractères) et reclassement propre en Q&R.
+KADERBOT NOVA est conçu selon le principe de **l'autonomie cognitive échelonnée** :
+* **Priorité 1 (Local Sémantique & Symbolique)** : Détection immédiate des questions déjà apprises, déduction logique causale (*pourquoi*), transitivité ontologique (*Is-A*), et recherche vectorielle par embeddings sans jamais faire appel au cloud pour les faits connus.
+* **Priorité 2 (Outils Directs & Arithmétique)** : Calculs mathématiques déterministes, commandes taxonomiques (`lie:`, `delie:`, `retiens:`).
+* **Priorité 3 (Routeur & Boucle Agentique)** : Si la réponse nécessite des informations d'actualité, une recherche web ou une navigation, l'agent utilise ses outils (Brave Search, scraping d'URL, hub mémoire). S'il s'agit d'une interaction purement conversationnelle, le routeur court-circuite la boucle d'outils pour répondre en ~200ms.
+* **Priorité 4 (Futur LLM Local Nova)** : Préparation d'une injection de prompt chirurgical pour modèles locaux légers (`SmolLM2-1.7B` GGUF) garantissant zéro dérive en mode hors-ligne.
 
 ---
 
-## 3. Correction & Unification des Intégrations LLM (Groq & Gemini)
+## 2. Moteur Cognitif Symbolique & Appariement Sémantique Local
 
-### 🛑 Les problèmes identifiés
-- Les requêtes Groq échouaient avec des erreurs de format ou de modèle indisponible.
-- Lors des réponses de Gemini, un message d'erreur résiduel de Groq apparaissait sous la bulle de discussion déjà complétée.
+### 2.1 Distinction stricte Concept vs Question-Réponse (Q&R)
+* **Type `concept`** : Définition d'un terme précis (*"c'est quoi un drone ?"*).
+* **Type `question_reponse`** : Réponses contextuelles ou questions ouvertes (*"quelles sont les applications de l'IA ?"*). Évite toute pollution de la mémoire par un mot-clé unique trop générique.
 
-### ✅ Les solutions implémentées
-1. **Gestion robuste du modèle Groq côté serveur (`server.ts`)** :
-   - Passage au modèle Groq actuel et ultra-rapide `llama-3.3-70b-versatile` (avec fallback sur `llama-3.1-8b-instant`).
-   - Normalisation stricte de la structure du payload OpenAI-compatible (`messages: [{ role: 'system', content: ... }, { role: 'user', content: ... }]`).
-2. **Isolation des canaux LLM (`App.tsx`)** :
-   - Séparation stricte des états d'erreur entre Groq et Gemini : une erreur Groq n'apparaît plus jamais dans le flux d'une réponse Gemini réussie.
-   - Indicateurs visuels clairs de la source dans chaque bulle :
-     - ⚡ **Local** (Raisonnement symbolique instantané en ~2ms)
-     - 🟣 **Groq Llama 3** (Interrogation ultra-rapide)
-     - 🔵 **Google Gemini** (Raisonnement approfondi)
-3. **Support multi-niveaux des clés API** :
-   - Prise en charge des variables d'environnement serveur (`.env` ou variables de déploiement cloud).
-   - Prise en charge des clés personnalisées saisies par l'utilisateur dans l'onglet **Paramètres**, stockées de manière chiffrée/isolée dans son navigateur.
+### 2.2 Algorithme d'Appariement Sémantique Hybride (`rechercheHybride`)
+* Combinaison d'un pré-filtrage lexical (mots-clés significatifs sans stop-words) et d'un calcul de similarité cosinus sur vecteurs d'embeddings (générés côté navigateur via `@xenova/transformers` avec le modèle `all-MiniLM-L6-v2`).
+* Pré-calcul des vecteurs par lots (`precalculerTousLesVecteurs`) au premier lancement avec indicateur de progression dans l'en-tête et persistance dans `localStorage`.
+
+### 2.3 Raisonnement Déductif Causal
+* Navigation dans le graphe d'héritage ontologique (`deduireChaine`) sur les relations `Is-A`.
+* Résolution causale (`repondrePourquoi`) : articulation logique d'une propriété universelle d'un ancêtre taxonomique (*"Parce que le moineau est un oiseau, et que tous les oiseaux respirent"*).
 
 ---
 
-## 4. Améliorations de l'Interface Graphique & Ergonomie Responsive
+## 3. Intégration Cloud Multi-Fournisseurs & Résilience
 
-### 🛑 Les problèmes identifiés
-- Les boutons d'onglets et de filtres en haut de page se chevauchaient sur les écrans moyens et mobiles.
+### 3.1 Sécurité Stricte des Clés d'API
+* Aucune clé API (Groq, Gemini, OpenRouter, Brave Search) n'est jamais exposée au frontend.
+* L'ensemble des appels transite par le serveur Express (`server.ts`) via `process.env`.
 
-### ✅ Les solutions implémentées
-1. **Refonte de la barre de navigation supérieure** :
-   - Mise en place d'un conteneur flexible `flex-wrap` avec espacement calculé (`gap-2`), barres de défilement masquées et safe-zones tactiles.
-   - Aucun chevauchement entre le sélecteur de session, l'état de la mémoire et les onglets principaux.
-2. **Amélioration de l'onglet Graphe & Mémoire (`KnowledgeGraphTab.tsx`)** :
-   - Affichage immédiat d'un badge distinctif :
-     - 🟣 **[Q&R]** pour les questions-réponses apprises.
-     - 🟢 **[Concept]** pour les entités du graphe ontologique.
-   - Carte de détail affichant la question originale exacte et les mots-clés déclencheurs.
-   - Recherche en direct dans les concepts et les définitions.
-   - Possibilité d'ajouter manuellement des liens d'héritage Is-A et de nouvelles définitions.
-3. **Onglets spécialisés intégrés** :
-   - **Discussion (Chat)** : Interface épurée avec historique de session, suggestions de questions en un clic, et mode d'apprentissage manuel avec la syntaxe `retiens: X est Y`.
-   - **Règles & Déductions** : Visualisation des règles d'inférence avec quantificateurs (*tous*, *chaque*, *certains*).
-   - **Sandbox & Diagnostic** : Console de test unitaire pour simuler en temps réel les fonctions cognitives du bot (`deduireChaine`, `repondrePourquoi`, etc.).
-   - **Export & API** : Documentation des routes REST et générateur de code.
+### 3.2 Catalogue des Modèles Actifs (Octobre 2026)
+* **Groq** : `openai/gpt-oss-120b` (modèle principal de raisonnement) et `openai/gpt-oss-20b` (modèle rapide).
+* **Google Gemini** : `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-flash-latest` avec bascule automatique SDK GoogleGenAI vers fallback REST direct sans ADC.
+* **OpenRouter** : `nvidia/nemotron-3.5-lightning:free`, `meta-llama/llama-3.3-70b-instruct:free`, `qwen/qwen3-coder:free`, `deepseek/deepseek-r1:free`.
 
 ---
 
-## 5. Enrichissement du Moteur de Raisonnement Symbolique
+## 4. Boucle Agentique Autonome avec Outillage Web & Mémoire (`/api/agent`)
 
-Le fichier `src/core/cognitiveEngine.ts` a été profondément enrichi :
-1. **Raisonnement Causal ("Pourquoi ?")** :
-   - Fonction `repondrePourquoi()` : Remonte l'arbre taxonomique (`moineau` $\rightarrow$ `oiseau` $\rightarrow$ `animal`) pour trouver la règle universelle qui justifie une propriété (ex. *"Parce que le moineau est un oiseau, et que tous les oiseaux volent"*).
-2. **Transitivité d'héritage Is-A (`deduireChaine`)** :
-   - Capable d'inférer des liens jusqu'à 6 niveaux de profondeur avec détection des boucles cycliques.
-3. **Tolérance orthographique et lemmatisation** :
-   - Suppression des accents (`sansAccent`).
-   - Correction phonétique / Levenshtein sur les requêtes courtes pour rattraper les fautes de frappe de l'utilisateur.
+### 4.1 Cascade à 4 Niveaux Tolérante aux Pannes (`runAgentLoop`)
+1. **Niveau 1** : Groq `openai/gpt-oss-120b` avec `tools`.
+2. **Niveau 2** : Groq `openai/gpt-oss-20b` avec `tools`.
+3. **Niveau 3** : Gemini 3.8 Flash (synthèse textuelle de secours sans outillage).
+4. **Niveau 4** : OpenRouter `nvidia/nemotron-3.5-lightning:free` avec `tools`.
+* Zéro erreur HTTP 500 renvoyée à l'utilisateur tant qu'un seul maillon est en mesure de répondre.
 
----
-
-## 6. Générateur de Script Python Autonome (`kaderbot.py`)
-
-Dans l'onglet **Export & API**, la fonction de téléchargement génère un script Python 3 complet et exécutable :
-- Intègre en natif les dictionnaires `memoire`, `regles`, `liens`, `synonymes`.
-- Réplique fidèlement la logique cognitive `extraire_x`, `deduire_chaine`, `repondre_pourquoi`.
-- Intègre le client Groq officiel en Python avec gestion propre des exceptions.
-- Comprend le nouveau système d'apprentissage `apprendre_de_groq` corrigé (distinction Q&R vs Concept).
-- Fonctionne en invite de commande interactive dans n'importe quel terminal avec `python kaderbot.py`.
+### 4.2 Boîte à Outils Agentique
+* **`search_web(query)`** : Recherche générale sur le web mondial via Brave Search API avec gestion de quota journalier (`data/brave_usage.json`).
+* **`search_news(query)`** : Recherche d'actualités récentes via Brave News Search.
+* **`open_url(url)`** : Scraping et extraction textuelle sécurisée avec liste blanche anti-SSRF (blocage de `localhost`, `127.0.0.1`, adresses IP nues et domaines internes).
+* **`memo_lookup(query)`** : Recherche directe de définitions et règles dans la mémoire locale de Kaderbot.
+* **`memo_store(concept, definition)`** : Mémorisation pérenne d'un nouveau fait appris.
+* **`link_concepts(source, target)`** : Création d'une relation taxonomique.
+* **`ask_user(question)`** : Interruption contrôlée pour solliciter une précision de l'utilisateur.
 
 ---
 
-## 7. Architecture Technique, Fichiers Modifiés & Déploiement
+## 5. Routeur d'Intention Ultra-Rapide (`CHAT` vs `AGENT`)
 
-### Tableau récapitulatif des fichiers majeurs
+Dans `server.ts` sur la route `POST /api/agent` :
+* Interception de chaque message par une micro-inférence sur `openai/gpt-oss-20b` avec `max_tokens: 150`, `temperature: 0` et `reasoning_format: 'parsed'`.
+* **Classification `CHAT`** : Détecte les salutations, échanges conversationnels et opinions. Court-circuite la boucle d'outils et répond directement en 150-300ms via `callGroqWithFallback`. Retourne `{ routedTo: 'chat', toolTrace: [] }`.
+* **Classification `AGENT`** : Détecte les demandes d'actualités, recherches d'informations externes ou apprentissages. Déclenche la boucle récursive `runAgentLoop` avec exécution d'outils. Retourne `{ routedTo: 'agent', toolTrace: [...] }`.
+* **Sécurité de Repli** : En cas de timeout ou d'indisponibilité du classifieur, bascule par défaut sur `AGENT`.
 
-| Fichier | Nature des modifications |
+---
+
+## 6. Infrastructure de Mémoire Chirurgicale pour LLM Local Nova (`SmolLM2-1.7B`)
+
+Préparation de l'accueil d'un modèle SLM local autonome (Small Language Model fine-tuné et exporté en GGUF) :
+* **Fonction dédiée `construirePromptContextuelNova`** dans `src/core/cognitiveEngine.ts`.
+* Recherche chirurgicale dans la mémoire JSON locale du fait vérifié le plus pertinent.
+* Injection dynamique d'un en-tête structuré :
+  ```
+  [FAIT VÉRIFIÉ EN MÉMOIRE LOCALE SUR "CONCEPT"]
+  - Définition exacte du concept
+  ```
+* **Règle stricte de segmentation** : Cette injection contextuelle s'applique **exclusivement** au mode local (`local_only` et script Pydroid 3). Les requêtes vers les APIs Cloud (Groq, Gemini, OpenRouter) restent 100% standard et préservent leur historique natif.
+
+---
+
+## 7. Interface Utilisateur, Pastilles d'Outils & Statuts Visuels
+
+### 7.1 Rendu des Réponses & Markdown
+* Intégration de `react-markdown` avec coloration syntaxique des blocs de code, listes à puces structurées, citations et emphase visuelle.
+* Effet machine à écrire (streaming visuel fluide) actif uniquement sur les messages nouveaux (`msg.isNew === true`), désactivé lors du parcours de l'historique pour une fluidité instantanée.
+
+### 7.2 Pastilles d'Outils Compactes & Liens Cliquables
+* Lorsque l'agent exécute des outils, une pastille élégante s'affiche au bas du message :
+  `Outils : 🔎 search_news → 📄 open_url (lemonde.fr)`
+* Les URL ouvertes par l'outil `open_url` sont directement cliquables pour ouvrir l'article source dans un nouvel onglet sécurisé (`rel="noopener noreferrer"`).
+
+### 7.3 Badges d'État & Mode Dégradé
+* **Statut "Agent actif"** : Badge vert pulsant dans l'en-tête supérieur (`Header.tsx`) lorsque l'agent est opérationnel.
+* **Badge "Mode dégradé (sans recherche)"** : Affiché en cas de repli vers un maillon sans outil, avec tooltip détaillant la cause exacte de la bascule.
+
+### 7.4 Gestion Multi-Discussions (Fils Style ChatGPT)
+* Tiroir d'historique latéral complet avec recherche instantanée dans les conversations passées, modification du titre au crayon et suppression sécurisée avec confirmation.
+
+---
+
+## 8. Script Embarqué Autonome Python Pydroid 3 & Export Multi-Mode
+
+* Endpoint serveur `/api/export-pydroid` générant un script Python autonome (`kaderbot.py`).
+* Intègre les dictionnaires de faits, règles, liens et synonymes encodés en Base64 sans risque d'erreur d'échappement.
+* Intègre en natif la fonction `construire_prompt_contextuel_nova(question)` pour le modèle local.
+* Mode d'exécution automatique avec bascule résiliente : Interface graphique Tkinter si disponible sur Android, ou Console interactive ultra-légère en fallback.
+
+---
+
+## 9. Tableau de Synthèse des Fichiers & Déploiement
+
+| Fichier | Rôle & Modifications Majeures |
 | :--- | :--- |
-| `src/types/kaderbot.ts` | Définition des types `MemoryEntry` enrichis (`type`, `mots_cles`, `question_origine`). |
-| `src/core/cognitiveEngine.ts` | Ajout de `trouverQuestionReponse`, `nettoyerMemoirePolluee`, refonte de `extraireX` et `apprendreDeLLM`. |
-| `src/App.tsx` | Correction du chevauchement d'onglets, isolation des erreurs Groq/Gemini, synchronisation de la mémoire assainie. |
-| `src/components/KnowledgeGraphTab.tsx` | Ajout des badges Q&R / Concept, affichage de la question source et des mots-clés. |
-| `server.ts` | Serveur Express, proxy sécurisé Groq (`llama-3.3-70b-versatile`) et Gemini, générateur Python mis à jour. |
-
-### Déploiement pour utilisateurs externes
-- **Prêt pour le Web** : L'application compile sans aucune erreur (`npm run build` validé).
-- **Multi-utilisateurs et confidentialité** : Le stockage `localStorage` est automatiquement cloisonné par navigateur/utilisateur ; chaque visiteur dispose de son propre environnement d'apprentissage autonome.
-- **Hébergement supporté** : Déployable directement sur Vercel, Render, Railway, ou sur serveur privé (Docker / Node.js).
-
----
-
-## 8. Moteur Agentique Autonome & Routeur d'Intention (V14)
-
-### 🌟 Fonctionnalités ajoutées :
-1. **Cascade Multi-Modèles à 4 Niveaux dans `server.ts`** :
-   - **Maillon 1** : Groq `openai/gpt-oss-120b` (avec outillage complet `tools`).
-   - **Maillon 2** : Groq `openai/gpt-oss-20b` (avec outillage complet `tools`).
-   - **Maillon 3** : Gemini 3.8 Flash (sans tools, secours textuel).
-   - **Maillon 4** : OpenRouter `nvidia/nemotron-3.5-lightning:free` (avec tools).
-   - Bascule automatique et transparente sans erreur 500 tant qu'un maillon répond.
-
-2. **Routeur d'Intention Ultra-Rapide (`classifyIntentWithRouter`)** :
-   - Intercepte la requête avant la boucle d'outils.
-   - Utilise `openai/gpt-oss-20b` avec `reasoning_format: 'parsed'` pour classer instantanément entre :
-     - `CHAT` : Salutations, politesse, discussions générales → Traitement direct via `callGroqWithFallback` (~150-300ms).
-     - `AGENT` : Requêtes d'actualité, de recherche web, de faits hors mémoire → Déclenchement de la boucle récursive avec exécution d'outils (Brave Search, scraping d'URL, mémoire cognitive).
-   - En cas d'erreur de classification, repli par défaut sur `AGENT`.
-
-3. **Outillage Agentique (`tools`)** :
-   - `search_web` & `search_news` : Recherche d'actualités et du web mondial via Brave Search API avec compteur journalier et protection de quota.
-   - `open_url` : Lecture et extraction du contenu texte d'une page web avec liste blanche de sécurité.
-   - `memo_lookup` & `memo_store` : Consultation et mémorisation directe dans la mémoire cognitive locale.
-   - `link_concepts` : Création de liens conceptuels ontologiques.
-   - `ask_user` : Demande de clarification directe à l'utilisateur.
-
-4. **Connexion Frontend Complète & Restitution Visuelle (`ChatTab.tsx`, `Header.tsx`, `apiService.ts`)** :
-   - `sendAgentMessage(prompt, history)` : Branchement de la zone de saisie principale sur `/api/agent` avec conservation de l'historique des 10 derniers messages.
-   - Repli transparent sur `/api/chat` en cas d'indisponibilité du serveur.
-   - **Badge Mode Dégradé** : Affichage discret d'un badge *"Mode dégradé (sans recherche)"* avec le motif en infobulle si un fallback est survenu.
-   - **Pastilles d'Outils Compactes** : Affichage chronologique des outils sous le message (ex: `🔎 search_news → 📄 open_url`) avec les URLs des pages cliquables.
-   - **Indicateur d'État En-Tête** : Badge animé *"Agent actif"* dans la barre de titre supérieure lorsque l'agent est opérationnel.
+| `src/core/cognitiveEngine.ts` | Moteur symbolique, recherche sémantique vectorielle, `construirePromptContextuelNova`. |
+| `src/types/kaderbot.ts` | Types enrichis `MemoryEntry`, `ChatMessage` avec métadonnées d'agent (`toolTrace`, `routedTo`, `isFallback`). |
+| `src/services/apiService.ts` | Méthodes `sendAgentMessage` (`/api/agent`), `chat` (`/api/chat`), tests de connectivité Groq/Gemini/OpenRouter. |
+| `server.ts` | Routeur d'intention, boucle agentique à 4 maillons, proxy d'outils Brave/Scraper, export Pydroid 3 et export ZIP. |
+| `src/App.tsx` | Dispatcher principal connectant la saisie à l'agent avec repli chat, gestion des fils et du mode local Nova. |
+| `src/components/ChatTab.tsx` | Affichage Markdown, pastilles d'outils agentiques avec liens cliquables, badge de repli dégradé. |
+| `src/components/Header.tsx` | Indicateur d'état "Agent actif", bascule de modèle et session, commande Actions. |
