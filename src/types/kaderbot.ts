@@ -25,6 +25,15 @@ export type RulesStore = Record<string, GeneralRule[]>;
 export type LinksStore = Record<string, string[]>;
 export type SynonymsStore = Record<string, string | string[]>;
 
+export interface ToolExecutionTrace {
+  tool: string;
+  args?: any;
+  status?: 'success' | 'error';
+  errorMsg?: string;
+  resultSnippet?: string;
+  durationMs?: number;
+}
+
 export interface ChatMessage {
   id: string;
   author: 'Toi' | 'KB';
@@ -50,7 +59,7 @@ export interface ChatMessage {
       | 'groq-chat';
     ruleApplied?: string;
     model?: string;
-    toolTrace?: Array<{ tool: string; args?: any }>;
+    toolTrace?: ToolExecutionTrace[];
     isFallback?: boolean;
     fallbackReason?: string;
     routedTo?: 'chat' | 'agent';

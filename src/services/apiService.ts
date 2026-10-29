@@ -1,4 +1,4 @@
-import { MemoryStore, RulesStore, LinksStore, SynonymsStore } from '../types/kaderbot';
+import { MemoryStore, RulesStore, LinksStore, SynonymsStore, ToolExecutionTrace } from '../types/kaderbot';
 
 export interface ChatApiParams {
   prompt: string;
@@ -282,7 +282,7 @@ export interface AgentApiResponse {
   text?: string;
   provider: string;
   model?: string;
-  toolTrace: Array<{ tool: string; args?: any }>;
+  toolTrace: ToolExecutionTrace[];
   awaitingUser?: boolean;
   question?: string;
   isFallback?: boolean;
@@ -294,17 +294,31 @@ export async function sendAgentMessage(
   prompt: string,
   history: Array<{ role: string; content: string }> = []
 ): Promise<AgentApiResponse> {
-  const res = await fetch('/api/agent', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, history }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
-    throw new Error(err.error || `Erreur serveur (${res.status})`);
+  try {
+    const res = await fetch('/api/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, history }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+      throw new Error(err.error || `Erreur serveur (${res.status})`);
+    }
+
+    return await res.json();
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error("Délai d'attente de l'agent dépassé (45s). Veuillez réessayer avec une question plus ciblée.");
+    }
+    throw err;
   }
-
-  return await res.json();
 }
 

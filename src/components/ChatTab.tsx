@@ -23,8 +23,14 @@ import {
   Clock,
   Pencil,
   Search,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
-import { ChatMessage, ChatThread } from '../types/kaderbot';
+import { ChatMessage, ChatThread, ToolExecutionTrace } from '../types/kaderbot';
 
 const markdownComponents = {
   p: ({ children }: any) => (
@@ -137,9 +143,205 @@ const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
   );
 };
 
+interface AgentTraceAccordionProps {
+  toolTrace: ToolExecutionTrace[];
+}
+
+/**
+ * Composant Accordéon repliable pour masquer les logs et traces techniques de l'agent par défaut.
+ * N'affiche au départ qu'une ligne sobre résumant le nombre d'actions et d'échecs (ex: 403 Forbidden).
+ * Le clic permet d'ouvrir la timeline détaillée des outils.
+ */
+const AgentTraceAccordion: React.FC<AgentTraceAccordionProps> = ({ toolTrace }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!toolTrace || toolTrace.length === 0) return null;
+
+  const total = toolTrace.length;
+  const failures = toolTrace.filter(t => t.status === 'error' || Boolean(t.errorMsg)).length;
+
+  const getToolMeta = (toolName: string) => {
+    switch (toolName) {
+      case 'search_web':
+        return { label: 'Recherche Web (Brave)', icon: '🌐' };
+      case 'search_news':
+        return { label: 'Actualités Récentes', icon: '📰' };
+      case 'open_url':
+        return { label: 'Consultation de Page', icon: '📄' };
+      case 'memo_lookup':
+        return { label: 'Mémoire Cognitive', icon: '🧠' };
+      case 'memo_store':
+        return { label: 'Mémorisation Faits', icon: '💾' };
+      case 'link_concepts':
+        return { label: 'Association d\'Idées', icon: '🔗' };
+      case 'ask_user':
+        return { label: 'Demande de Précision', icon: '❓' };
+      default:
+        return { label: toolName, icon: '⚙️' };
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-2 border-t border-gray-800/70">
+      {/* Bouton de l'accordéon replié par défaut */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-[#0B0F19]/90 hover:bg-[#111726] border border-gray-800 hover:border-gray-700 text-gray-300 hover:text-white transition group text-left cursor-pointer"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm">⚙️</span>
+          <span className="text-xs font-medium text-gray-200">
+            {total} action{total > 1 ? 's' : ''} exécutée{total > 1 ? 's' : ''}
+            {failures > 0 && (
+              <span className="text-rose-400 font-semibold ml-1">
+                ({failures} échec{failures > 1 ? 's' : ''})
+              </span>
+            )}
+          </span>
+          <span className="text-[11px] text-gray-500 hidden sm:inline">
+            — {isOpen ? 'Masquer les détails' : 'Voir les détails'}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0 text-gray-400 group-hover:text-emerald-400 text-xs">
+          <span className="text-[10px] sm:hidden text-gray-500">{isOpen ? 'Masquer' : 'Détails'}</span>
+          {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </div>
+      </button>
+
+      {/* Contenu déroulant avec la timeline des actions */}
+      {isOpen && (
+        <div className="mt-2 p-3 rounded-xl bg-[#070A11] border border-gray-800/80 space-y-2.5 animate-in fade-in duration-150">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-gray-500 mb-1 flex items-center justify-between">
+            <span>Détail des opérations de l'agent</span>
+            <span>{total} étape{total > 1 ? 's' : ''}</span>
+          </div>
+
+          <div className="space-y-2">
+            {toolTrace.map((trace, idx) => {
+              const meta = getToolMeta(trace.tool);
+              const isError = trace.status === 'error' || Boolean(trace.errorMsg);
+              const isUrl = trace.tool === 'open_url' && trace.args?.url;
+              let hostname = '';
+              if (isUrl) {
+                try {
+                  hostname = new URL(trace.args.url).hostname.replace(/^www\./, '');
+                } catch {
+                  hostname = trace.args.url;
+                }
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className={`p-2.5 rounded-lg border text-xs ${
+                    isError
+                      ? 'bg-rose-950/20 border-rose-900/40 text-rose-200'
+                      : 'bg-[#0E131F] border-gray-800/90 text-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-500 font-mono text-[10px]">#{idx + 1}</span>
+                      <span>{meta.icon}</span>
+                      <span className="font-semibold text-white">{meta.label}</span>
+                      <span className="font-mono text-[10px] text-gray-500">({trace.tool})</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {trace.durationMs !== undefined && (
+                        <span className="text-[10px] font-mono text-gray-500">
+                          {trace.durationMs}ms
+                        </span>
+                      )}
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          isError
+                            ? 'bg-rose-900/60 text-rose-200 border border-rose-700/60'
+                            : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                        }`}
+                      >
+                        {isError ? (
+                          <>
+                            <XCircle className="w-2.5 h-2.5" />
+                            <span>Échec</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            <span>Succès</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Paramètres de l'action */}
+                  {trace.args && (
+                    <div className="mt-1.5 text-[11px] text-gray-400 pl-3 border-l-2 border-gray-800">
+                      {trace.args.query && (
+                        <div>
+                          <span className="text-gray-500">Recherche : </span>
+                          <span className="text-cyan-200 font-medium">« {trace.args.query} »</span>
+                        </div>
+                      )}
+                      {isUrl && (
+                        <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                          <span className="text-gray-500">Lien : </span>
+                          <a
+                            href={trace.args.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 underline font-mono text-[11px] truncate max-w-[280px]"
+                            title={trace.args.url}
+                          >
+                            <span>{hostname || trace.args.url}</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        </div>
+                      )}
+                      {trace.args.subject && (
+                        <div>
+                          <span className="text-gray-500">Sujet : </span>
+                          <span className="text-emerald-300">{trace.args.subject}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Message d'erreur clair si échec (ex: 403 Forbidden intercepté sans crash) */}
+                  {isError && trace.errorMsg && (
+                    <div className="mt-2 p-2 rounded bg-rose-950/40 border border-rose-800/40 text-[11px] text-rose-300 font-sans flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <span className="font-semibold text-rose-200">Incident intercepté :</span>
+                        <p className="text-rose-300/90 leading-tight">{trace.errorMsg}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Aperçu du résultat (extrait synthétique) */}
+                  {!isError && trace.resultSnippet && (
+                    <div className="mt-1.5 text-[10px] font-mono text-gray-400 bg-black/40 px-2 py-1 rounded border border-gray-800/60 truncate">
+                      <span className="text-gray-500">Extrait : </span>
+                      <span>{trace.resultSnippet}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface ChatTabProps {
   messages: ChatMessage[];
   isThinking: boolean;
+  thinkingStatus?: string;
   onSendMessage: (text: string) => void;
   onClearMessages: () => void;
   onAdjustWeight: (sujet: string, delta: number) => void;
@@ -161,6 +363,7 @@ interface ChatTabProps {
 export const ChatTab: React.FC<ChatTabProps> = ({
   messages,
   isThinking,
+  thinkingStatus,
   onSendMessage,
   onClearMessages,
   onAdjustWeight,
@@ -685,61 +888,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   </div>
                 )}
 
-                {/* Tool Trace compact pills (🔎 search_news → 📄 open_url) */}
+                {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
                 {!isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
-                  <div className="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center gap-1.5 flex-wrap text-[11px] text-gray-300">
-                    <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Outils :</span>
-                    {msg.meta.toolTrace.map((trace, idx) => {
-                      const toolName = trace.tool;
-                      const icon =
-                        toolName === 'search_web' || toolName === 'search_news'
-                          ? '🔎'
-                          : toolName === 'open_url'
-                          ? '📄'
-                          : toolName === 'memo_lookup'
-                          ? '🧠'
-                          : toolName === 'memo_store'
-                          ? '💾'
-                          : toolName === 'link_concepts'
-                          ? '🔗'
-                          : toolName === 'ask_user'
-                          ? '❓'
-                          : '⚙️';
-
-                      const isUrl = toolName === 'open_url' && trace.args?.url;
-                      let hostname = '';
-                      if (isUrl) {
-                        try {
-                          hostname = new URL(trace.args.url).hostname.replace(/^www\./, '');
-                        } catch {
-                          hostname = trace.args.url;
-                        }
-                      }
-
-                      return (
-                        <React.Fragment key={idx}>
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#161B26] border border-gray-700/60 text-[11px] text-gray-200">
-                            <span>{icon}</span>
-                            <span className="font-mono text-emerald-300">{toolName}</span>
-                            {isUrl && (
-                              <a
-                                href={trace.args.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-cyan-400 hover:text-cyan-300 underline ml-0.5 max-w-[140px] truncate"
-                                title={trace.args.url}
-                              >
-                                {hostname}
-                              </a>
-                            )}
-                          </span>
-                          {idx < msg.meta!.toolTrace!.length - 1 && (
-                            <span className="text-gray-600 font-bold">→</span>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
+                  <AgentTraceAccordion toolTrace={msg.meta.toolTrace} />
                 )}
 
                 {/* Deductive chain visual crumb if applicable */}
@@ -808,13 +959,22 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           );
         })}
 
-        {/* Thinking Indicator (faithfully reproducing the ". . ." animation from Python Tkinter) */}
+        {/* Indicateur de chargement dynamique épuré */}
         {isThinking && (
-          <div className="flex flex-col items-start space-y-1 animate-in fade-in">
-            <span className="text-[11px] font-semibold text-emerald-400 px-1">KADERBOT NOVA</span>
-            <div className="bg-[#0E131F] border border-emerald-500/30 rounded-2xl px-5 py-3 text-emerald-400 flex items-center gap-2">
-              <span className="font-mono text-sm tracking-widest animate-pulse">. . .</span>
-              <span className="text-xs text-gray-400 ml-1">KADERBOT réfléchit...</span>
+          <div className="flex flex-col items-start space-y-1.5 animate-in fade-in">
+            <div className="flex items-center gap-1.5 px-1">
+              <span className="text-[11px] font-semibold text-emerald-400">KADERBOT NOVA</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+            </div>
+            <div className="bg-[#0E131F] border border-emerald-500/30 rounded-2xl px-4 py-3 text-emerald-400 flex items-center gap-3 shadow-lg shadow-emerald-950/20">
+              <div className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+              <span className="text-xs text-gray-200 font-medium">
+                {thinkingStatus || 'Recherche et analyse en cours...'}
+              </span>
             </div>
           </div>
         )}

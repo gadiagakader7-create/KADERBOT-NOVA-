@@ -9,6 +9,7 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        'style-to-js': path.resolve(__dirname, 'src/shims/style-to-js.ts'),
       },
     },
     server: {

@@ -240,6 +240,7 @@ export default function App() {
   }, [threads]);
 
   const [isThinking, setIsThinking] = useState(false);
+  const [thinkingStatus, setThinkingStatus] = useState<string>('KADERBOT réfléchit...');
   const [isAgentActive, setIsAgentActive] = useState(false);
   const [indexingProgress, setIndexingProgress] = useState<number | null>(null);
 
@@ -924,6 +925,12 @@ export default function App() {
     // =========================================================================
     // ÉTAPE 1 : LOCAL SÉMANTIQUE (Embeddings Transformers.js côté navigateur)
     // =========================================================================
+    const isContinueCommand = /^(continue|continuer|suite|poursuis|poursuivre|vas-y|go)\b/i.test(text.trim());
+    setThinkingStatus(
+      isContinueCommand
+        ? 'Poursuite de la recherche et synthèse en cours...'
+        : 'Recherche et réflexion en cours...'
+    );
     setIsThinking(true);
     try {
       // 1. Résolution des pronoms ("il", "elle", "ça") avec les 5 derniers messages
@@ -1154,6 +1161,11 @@ export default function App() {
 
       try {
         // 1. Appel prioritaire de l'Agent intelligent (/api/agent avec les 10 derniers messages)
+        setThinkingStatus(
+          isContinueCommand
+            ? 'Agent KADERBOT : finalisation de la synthèse...'
+            : 'Agent KADERBOT : exploration des sources et vérification...'
+        );
         const agentRes = await sendAgentMessage(text, historyFormatted);
         responseText = agentRes.text || agentRes.question || '';
 
@@ -1288,6 +1300,7 @@ export default function App() {
           <ChatTab
             messages={messages}
             isThinking={isThinking}
+            thinkingStatus={thinkingStatus}
             onSendMessage={handleProcessUserMessage}
             onClearMessages={handleNewThread}
             onAdjustWeight={handleAdjustWeight}

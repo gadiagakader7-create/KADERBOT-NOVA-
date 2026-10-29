@@ -1,6 +1,6 @@
 {
-  "summary": "Code source complet et intégral de KADERBOT NOVA V14 : structures TypeScript, moteur cognitif hybride, service API, serveur Express avec boucle agentique à 4 maillons et routeur d'intention, infrastructure de mémoire contextuelle pour Nova (SmolLM2-1.7B), et composants d'interface React (ChatTab, Header, App).",
-  "createdAt": "2026-10-24T19:59:42.589261904Z",
-  "updatedAt": "2026-10-27T14:32:00.000000000Z",
-  "userFacing": true
+  "summary":  "Documentation du code source complet de KADERBOT NOVA avec l'ensemble des modules : Agent avec outils, Accordéon repliable, Gestion anti-403 et Recherche Hybride.",
+  "createdAt":  "2026-10-24T19:59:42.589261904Z",
+  "updatedAt":  "2026-10-29T20:26:07.973112598Z",
+  "userFacing":  true
 }

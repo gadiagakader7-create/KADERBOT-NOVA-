@@ -1,51 +1,20 @@
-# KADERBOT NOVA V14 — Catalogue des Modèles & Cascade Agentique (Octobre 2026)
+# Code Source Complet et Architecture — KADERBOT NOVA
 
-Ce document résume la mise à jour des catalogues de modèles d'IA et de la chaîne de secours dans `server.ts`.
+## Architecture Globale
 
----
+KADERBOT NOVA intègre une architecture cognitive hybride à 4 niveaux :
+1. **Moteur Local Sémantique** : Vectorisation et recherche hybride (`rechercheHybride`) combinant filtrage par mots-clés et similarité cosinus via `@xenova/transformers`.
+2. **Agent Autonome & Outils** : Boucle agentique sécurisée sur `/api/agent` (Groq `openai/gpt-oss-120b` et `openai/gpt-oss-20b`, OpenRouter, Gemini), capable de rechercher sur le web via Brave API, d'ouvrir des pages web avec `open_url`, d'interroger et de mémoriser des connaissances.
+3. **UI Épurée avec Accordéon Repliable (`AgentTraceAccordion`)** :
+   - Masquage des logs, tableaux bruts et erreurs techniques dans un accordéon fermé par défaut.
+   - Résumé compact : `⚙️ X actions exécutées (Y échecs) — Voir les détails`.
+   - Affichage principal recentré sur la synthèse et le rapport final.
+4. **Résilience Réseau & Anti-Blocage** :
+   - En-têtes réalistes Chrome 130 pour `open_url`.
+   - Interception des erreurs 403 Forbidden sans planter l'agent.
+   - Timeouts stricts (6s scraping, 14s modèles, 25s boucle totale, 45s client).
+   - Traitement instantané des requêtes "Continue" pour éviter les boucles infinies.
 
-## 1. Modèles Groq (Catalogue Octobre 2026)
-
-- **Modèles officiellement supportés et maintenus** :
-  - `openai/gpt-oss-120b` (Grand modèle, raisonnement approfondi & boucle agentique principale)
-  - `openai/gpt-oss-20b` (Modèle ultra-rapide, équilibré)
-- **Modèles dépréciés / retirés définitivement supprimés** :
-  - `llama-3.1-8b-instant`
-  - `llama-3.3-70b-specdec`
-  - `mixtral-8x7b-32768`
-  - `qwen/qwen3.8-27b`
-- **Résolution (`resolveGroqModel`)** :
-  - Si demande spécifique de 120b → `openai/gpt-oss-120b`
-  - Si demande spécifique de 20b → `openai/gpt-oss-20b`
-  - Toute demande de modèle inconnu ou déprécié → bascule automatique vers `openai/gpt-oss-20b`.
-- **Liste `candidateModels`** : uniquement `['openai/gpt-oss-120b', 'openai/gpt-oss-20b']`.
-
----
-
-## 2. Modèles Google Gemini (`callGeminiWithFallback`)
-
-- **Liste des modèles de secours** :
-  1. `gemini-3.8-flash` (GA, ultra-rapide)
-  2. `gemini-3.5-flash` (remplace l'ancien `gemini-3.1-flash-lite`)
-  3. `gemini-flash-latest`
-- **Logs explicites de bascule** : chaque transition est tracée dans la console serveur indiquant le modèle ayant échoué, la cause de l'échec et le modèle vers lequel s'effectue la bascule (`[BASCULE GEMINI SDK]` ou `[BASCULE GEMINI REST]`).
-
----
-
-## 3. Cascade Complète de la Boucle Agentique (`runAgentLoop` / `/api/agent`)
-
-La boucle agentique exécute une cascade tolérante aux pannes sans jamais renvoyer d'erreur HTTP 500 tant qu'un des maillons répond :
-
-1. **Maillon 1** : Groq `openai/gpt-oss-120b` (avec exécution complète des outils : `search_web`, `search_news`, `open_url`, `memo_lookup`, `memo_store`, `link_concepts`, `ask_user`).
-2. **Maillon 2** : Groq `openai/gpt-oss-20b` (avec exécution complète des outils).
-3. **Maillon 3** : Gemini via `callGeminiWithFallback` (synthèse textuelle sans outils).
-4. **Maillon 4** : OpenRouter `nvidia/nemotron-3.5-lightning:free` (avec exécution complète des outils si `OPENROUTER_API_KEY` est configuré).
-
----
-
-## 4. Traçabilité & Logs
-
-À chaque bascule entre maillons ou modèles, un avertissement explicite est émis avec :
-- Le modèle et le fournisseur ayant échoué.
-- La cause technique exacte (code HTTP, message d'erreur ou timeout).
-- Le modèle et le maillon cible de la bascule.
+## Téléchargement du Projet
+L'archive complète du projet prêt à l'emploi est disponible dans l'artefact :
+`kaderbot_projet_complet.zip` (200 Ko, incluant frontend React 19 / TypeScript, serveur Express, configuration Tailwind CSS et tests).
