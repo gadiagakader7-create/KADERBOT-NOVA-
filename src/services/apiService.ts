@@ -31,6 +31,18 @@ export interface ChatApiResponse {
 }
 
 export const apiService = {
+  async verifyAdminSession(): Promise<boolean> {
+    try {
+      const res = await fetch('/api/admin/session', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
   async chat(params: ChatApiParams): Promise<ChatApiResponse> {
     // Strip any sensitive keys - Server exclusively uses process.env keys
     const { prompt, history, provider, groqModel, openrouterModel, systemPrompt } = params as any;

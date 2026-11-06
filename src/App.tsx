@@ -59,23 +59,34 @@ import { SettingsModal } from './components/SettingsModal';
 import { apiService, sendAgentMessage } from './services/apiService';
 
 export default function App() {
-  // Détection du mode administrateur via l'URL (?admin=true)
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('admin') === 'true';
-  });
+  // Le paramètre ?admin=true ne suffit pas : le serveur doit valider ADMIN_TOKEN.
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
 
-  // Synchronisation dynamique du statut admin sur navigation
+  // Authentification serveur du mode admin sur l’URL et lors des changements de navigation.
   useEffect(() => {
-    const checkAdmin = () => {
+    let cancelled = false;
+
+    const checkAdmin = async () => {
       const params = new URLSearchParams(window.location.search);
-      setIsAdmin(params.get('admin') === 'true');
+      if (params.get('admin') !== 'true') {
+        if (!cancelled) setIsAdmin(false);
+        return;
+      }
+
+      const authenticated = await apiService.verifyAdminSession();
+      if (!cancelled) {
+        setIsAdmin(authenticated);
+        if (!authenticated) setActiveTab('chat');
+      }
     };
+    void checkAdmin();
     window.addEventListener('popstate', checkAdmin);
-    return () => window.removeEventListener('popstate', checkAdmin);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('popstate', checkAdmin);
+    };
   }, []);
 
   // En mode public, restreindre les onglets à 'chat' ou 'tools'

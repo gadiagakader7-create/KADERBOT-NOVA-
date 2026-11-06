@@ -951,6 +951,11 @@ app.post('/api/memory/save', requireAdmin, (req, res) => {
   }
 });
 
+// Vérification de session admin : l’URL ?admin=true seule ne donne aucun accès.
+app.post('/api/admin/session', requireAdmin, (_req, res) => {
+  return res.json({ ok: true });
+});
+
 // Endpoint de santé / ping de maintien d'activité (Render cron)
 app.get('/api/health', (req, res) => {
   return res.json({ ok: true });
