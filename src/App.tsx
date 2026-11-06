@@ -120,6 +120,7 @@ export default function App() {
       groqModel: 'openai/gpt-oss-120b',
       openrouterModel: 'meta-llama/llama-3.3-70b-instruct:free',
       geminiModel: 'gemini-3.8-flash',
+      adminToken: '',
       systemPrompt: NOVA_DEFAULT_SYSTEM_PROMPT,
       activeSession: 'defaut',
       soundEnabled: false,

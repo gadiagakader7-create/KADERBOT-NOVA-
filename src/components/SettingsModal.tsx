@@ -46,6 +46,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [openrouterModel, setOpenrouterModel] = useState(
     config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free'
   );
+  const [adminToken, setAdminToken] = useState(config.adminToken || '');
   const [systemPrompt, setSystemPrompt] = useState(config.systemPrompt);
   const [soundEnabled, setSoundEnabled] = useState(config.soundEnabled);
   const [autoLearn, setAutoLearn] = useState(config.autoLearnFromLLM);
@@ -99,6 +100,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setOpenrouterModel(
         config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free'
       );
+      setAdminToken(config.adminToken || '');
       setSystemPrompt(config.systemPrompt);
       setSoundEnabled(config.soundEnabled);
       setAutoLearn(config.autoLearnFromLLM);
@@ -206,6 +208,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       openrouterApiKey: openrouterKey.trim(),
       groqModel,
       openrouterModel,
+      adminToken: adminToken.trim(),
       systemPrompt,
       soundEnabled,
       autoLearnFromLLM: autoLearn,
@@ -318,6 +321,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   Graphe de mémoire, règles et déductions logiques sans aucun appel réseau.
                 </p>
               </button>
+            </div>
+          </div>
+
+          {/* Server administration security */}
+          <div className="p-3.5 rounded-xl bg-sky-950/20 border border-sky-500/30 space-y-3">
+            <div className="flex items-center gap-2 text-sky-300 font-semibold text-xs">
+              <Server className="w-4 h-4" />
+              <span>Sécurité du serveur</span>
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-300 mb-1">Jeton administrateur :</label>
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder="ADMIN_TOKEN défini dans Render"
+                value={adminToken}
+                onChange={e => setAdminToken(e.target.value)}
+                className="w-full bg-[#090B10] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-sky-500 font-mono"
+              />
+              <p className="text-[10px] text-gray-400 mt-1">
+                Nécessaire pour synchroniser la mémoire et exporter Pydroid. Il doit correspondre à la variable <code className="text-sky-400 font-mono">ADMIN_TOKEN</code> de Render.
+              </p>
             </div>
           </div>
 

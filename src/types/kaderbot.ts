@@ -112,6 +112,7 @@ export interface AppConfig {
   groqModel: string;
   openrouterModel: string;
   geminiModel: string;
+  adminToken?: string;
   systemPrompt: string;
   activeSession: string;
   soundEnabled: boolean;

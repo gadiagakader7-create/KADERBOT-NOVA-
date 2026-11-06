@@ -1,5 +1,18 @@
 import { MemoryStore, RulesStore, LinksStore, SynonymsStore, ToolExecutionTrace } from '../types/kaderbot';
 
+function getAdminHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem('kaderbot_config');
+    const config = raw ? JSON.parse(raw) : null;
+    return config?.adminToken?.trim()
+      ? { 'X-Admin-Token': config.adminToken.trim() }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 export interface ChatApiParams {
   prompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -203,7 +216,7 @@ export const apiService = {
     synonymes: SynonymsStore;
     sessions: string[];
   }> {
-    const res = await fetch('/api/memory');
+    const res = await fetch('/api/memory', { headers: getAdminHeaders() });
     if (!res.ok) throw new Error('Impossible de charger la mémoire distante');
     return await res.json();
   },
@@ -217,7 +230,7 @@ export const apiService = {
   }): Promise<{ success: boolean; savedAt: string }> {
     const res = await fetch('/api/memory/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error('Erreur sauvegarde sur serveur');
@@ -234,7 +247,7 @@ export const apiService = {
   }): Promise<Blob> {
     const res = await fetch('/api/export-pydroid', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error('Erreur téléchargement script Pydroid 3');
@@ -266,7 +279,7 @@ export const apiService = {
   },
 
   async refreshMemory(): Promise<{ ok: boolean; data: any; refreshedAt: string }> {
-    const res = await fetch('/api/memory/refresh');
+    const res = await fetch('/api/memory/refresh', { headers: getAdminHeaders() });
     if (!res.ok) throw new Error('Impossible de rafraîchir la mémoire');
     return await res.json();
   },
@@ -321,4 +334,3 @@ export async function sendAgentMessage(
     throw err;
   }
 }
-

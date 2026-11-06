@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { timingSafeEqual } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
@@ -24,8 +25,29 @@ const BRAVE_USAGE_FILE = path.join(DATA_DIR, 'brave_usage.json');
 
 // === 1. CONSTANTES ET SÉCURITÉ DE L'AGENT ===
 const BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || '';
 const MAX_AGENT_ITERATIONS = 4;
 const MAX_BRAVE_CALLS_PER_DAY = 100;
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (!ADMIN_TOKEN) {
+    res.status(503).json({ error: 'Fonction d’administration indisponible : ADMIN_TOKEN n’est pas configuré.' });
+    return;
+  }
+
+  const authorization = req.header('authorization') || '';
+  const bearerToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+  const providedToken = req.header('x-admin-token')?.trim() || bearerToken;
+  const expected = Buffer.from(ADMIN_TOKEN);
+  const provided = Buffer.from(providedToken);
+
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+    res.status(401).json({ error: 'Jeton administrateur invalide ou manquant.' });
+    return;
+  }
+
+  next();
+}
 
 // Compteur d'appels Brave en mémoire (Map avec date du jour), persisté dans data/brave_usage.json
 const braveDailyUsage = new Map<string, number>();
@@ -901,7 +923,7 @@ app.post('/api/resume', async (req, res) => {
 });
 
 // 6. Memory Persistence (Load & Save to JSON disk file)
-app.get('/api/memory', (req, res) => {
+app.get('/api/memory', requireAdmin, (req, res) => {
   try {
     if (fs.existsSync(MEMORY_FILE)) {
       const data = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
@@ -914,7 +936,7 @@ app.get('/api/memory', (req, res) => {
   }
 });
 
-app.post('/api/memory/save', (req, res) => {
+app.post('/api/memory/save', requireAdmin, (req, res) => {
   try {
     const { memoire, regles, liens, synonymes, sessions } = req.body;
     fs.writeFileSync(
@@ -935,7 +957,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Endpoint de rechargement à chaud de la mémoire depuis le disque
-app.get('/api/memory/refresh', (req, res) => {
+app.get('/api/memory/refresh', requireAdmin, (req, res) => {
   try {
     const data = readStorageFile();
     return res.json({
@@ -1836,7 +1858,7 @@ app.get('/api/export-project-zip', (req, res) => {
 });
 
 // 7. Python Pydroid 3 Export Script (Multi-mode: Console & Tkinter)
-app.post('/api/export-pydroid', (req, res) => {
+app.post('/api/export-pydroid', requireAdmin, (req, res) => {
   try {
     const {
       memoire = {},
