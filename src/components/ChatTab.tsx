@@ -174,6 +174,12 @@ const AgentTraceAccordion: React.FC<AgentTraceAccordionProps> = ({ toolTrace }) 
         return { label: 'Mémorisation Faits', icon: '💾' };
       case 'link_concepts':
         return { label: 'Association d\'Idées', icon: '🔗' };
+      case 'create_note':
+        return { label: 'Création de note', icon: '📝' };
+      case 'search_notes':
+        return { label: 'Recherche de notes', icon: '📚' };
+      case 'send_message':
+        return { label: 'Messagerie', icon: '✉️' };
       case 'ask_user':
         return { label: 'Demande de Précision', icon: '❓' };
       default:

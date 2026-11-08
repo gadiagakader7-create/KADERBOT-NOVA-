@@ -22,10 +22,19 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
 const BRAVE_USAGE_FILE = path.join(DATA_DIR, 'brave_usage.json');
+const NOTES_FILE = path.join(DATA_DIR, 'kaderbot_notes.json');
+const ACTION_LOG_FILE = path.join(DATA_DIR, 'kaderbot_action_logs.json');
 
 // === 1. CONSTANTES ET SÉCURITÉ DE L'AGENT ===
 const BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || '';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || '';
+const TELEGRAM_ALLOWED_CHAT_IDS = new Set(
+  (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+);
 const MAX_AGENT_ITERATIONS = 4;
 const MAX_BRAVE_CALLS_PER_DAY = 100;
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
@@ -62,6 +71,7 @@ const TOOL_POLICIES: Record<string, { risk: 'safe' | 'write' | 'external'; confi
   search_news: { risk: 'safe', confirmation: false },
   open_url: { risk: 'safe', confirmation: false },
   memo_lookup: { risk: 'safe', confirmation: false },
+  search_notes: { risk: 'safe', confirmation: false },
   ask_user: { risk: 'safe', confirmation: false },
   memo_store: { risk: 'write', confirmation: true },
   link_concepts: { risk: 'write', confirmation: true },
@@ -69,7 +79,7 @@ const TOOL_POLICIES: Record<string, { risk: 'safe' | 'write' | 'external'; confi
   update_note: { risk: 'write', confirmation: true },
   delete_note: { risk: 'write', confirmation: true },
   create_event: { risk: 'write', confirmation: true },
-  send_message: { risk: 'external', confirmation: true },
+  send_message: { risk: 'external', confirmation: false },
 };
 
 function validateToolArguments(tool: string, args: Record<string, unknown>): string | null {
@@ -81,15 +91,23 @@ function validateToolArguments(tool: string, args: Record<string, unknown>): str
     const key = tool === 'memo_lookup' ? 'sujet' : 'query';
     if (!isNonEmptyString(args[key]) || String(args[key]).length > 500) return `Paramètre ${key} invalide.`;
   }
+  if (tool === 'search_notes' && (!isNonEmptyString(args.query) || String(args.query).length > 500)) return 'Paramètre query invalide.';
   if (tool === 'open_url' && (!isNonEmptyString(args.url) || String(args.url).length > 2048)) return 'Paramètre url invalide.';
   if (tool === 'memo_store' && (!isNonEmptyString(args.sujet) || !isNonEmptyString(args.definition))) return 'Sujet et définition requis.';
   if (tool === 'link_concepts' && (!isNonEmptyString(args.source) || !isNonEmptyString(args.cible))) return 'Source et cible requises.';
   if (tool === 'ask_user' && (!isNonEmptyString(args.question) || String(args.question).length > 500)) return 'Question invalide.';
 
+  if (tool === 'create_note') {
+    if (!isNonEmptyString(args.title) || !isNonEmptyString(args.body)) return 'Titre et contenu requis pour la note.';
+    if (String(args.title).length > 200 || String(args.body).length > 10000) return 'Note trop longue.';
+    if (args.tags !== undefined && (!Array.isArray(args.tags) || args.tags.some(tag => !isNonEmptyString(tag)))) return 'Tags invalides.';
+  }
+
   if (tool === 'send_message') {
     if (!['sms', 'telegram', 'whatsapp'].includes(String(args.channel))) return 'Canal de message non autorisé.';
     if (!isNonEmptyString(args.target) || !isNonEmptyString(args.text)) return 'Destinataire et texte requis.';
     if (String(args.text).length > 4000) return 'Message trop long.';
+    if ((args.channel === 'sms' || args.channel === 'telegram') && args.confirm !== true) return 'Confirmation explicite requise pour ce canal.';
   }
   return null;
 }
@@ -97,6 +115,7 @@ function validateToolArguments(tool: string, args: Record<string, unknown>): str
 function summarizePendingAction(tool: string, args: Record<string, unknown>): string {
   if (tool === 'memo_store') return `Mémoriser « ${String(args.sujet)} » : ${String(args.definition).slice(0, 180)}`;
   if (tool === 'link_concepts') return `Créer le lien « ${String(args.source)} » → « ${String(args.cible)} »`;
+  if (tool === 'create_note') return `Créer la note « ${String(args.title)} »`;
   if (tool === 'send_message') return `Envoyer un message ${String(args.channel)} à ${String(args.target)} : « ${String(args.text).slice(0, 180)} »`;
   if (tool === 'create_event') return `Créer l’événement « ${String(args.title || 'sans titre')} »`;
   return `Autoriser l’action ${tool}`;
@@ -276,6 +295,49 @@ function writeStorageFile(data: any): void {
     );
   } catch (err) {
     console.error('Erreur écriture kaderbot_storage.json:', err);
+  }
+}
+
+type KaderbotNote = {
+  id: string;
+  title: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AgentActionLog = {
+  id: string;
+  tool: string;
+  args?: Record<string, unknown>;
+  status: 'success' | 'error' | 'rejected' | 'expired';
+  message?: string;
+  createdAt: string;
+};
+
+function readJsonArray<T>(filePath: string): T[] {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn(`Erreur lecture ${filePath}:`, err);
+    return [];
+  }
+}
+
+function writeJsonArray<T>(filePath: string, data: T[]): void {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function appendActionLog(entry: Omit<AgentActionLog, 'id' | 'createdAt'>): void {
+  try {
+    const logs = readJsonArray<AgentActionLog>(ACTION_LOG_FILE);
+    logs.push({ ...entry, id: randomUUID(), createdAt: new Date().toISOString() });
+    writeJsonArray(ACTION_LOG_FILE, logs.slice(-500));
+  } catch (err) {
+    console.warn('Erreur écriture journal agentique:', err);
   }
 }
 
@@ -1063,6 +1125,14 @@ app.get('/api/memory/refresh', requireAdmin, (req, res) => {
   }
 });
 
+app.get('/api/notes', requireAdmin, (_req, res) => {
+  return res.json({ notes: readJsonArray<KaderbotNote>(NOTES_FILE) });
+});
+
+app.get('/api/agent/logs', requireAdmin, (_req, res) => {
+  return res.json({ logs: readJsonArray<AgentActionLog>(ACTION_LOG_FILE).slice(-200).reverse() });
+});
+
 // === 2. DÉFINITION DES OUTILS DE L'AGENT (Format JSON Schema Groq/OpenAI) ===
 const AGENT_TOOLS = [
   {
@@ -1172,6 +1242,54 @@ const AGENT_TOOLS = [
           },
         },
         required: ['source', 'cible'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_note',
+      description: 'Crée une note locale persistante après confirmation de l’utilisateur.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          body: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['title', 'body'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_notes',
+      description: 'Recherche dans les notes locales par titre, contenu ou tags.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 20 },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_message',
+      description: 'Envoie un message Telegram après confirmation ou prépare un partage WhatsApp sans envoi automatique.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', enum: ['telegram', 'whatsapp', 'sms'] },
+          target: { type: 'string' },
+          text: { type: 'string' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['channel', 'target', 'text'],
       },
     },
   },
@@ -1391,6 +1509,56 @@ const TOOL_IMPLEMENTATIONS: Record<string, (args: any) => Promise<string>> = {
     return out.trim();
   },
 
+  search_notes: async ({ query, limit = 10 }: { query?: string; limit?: number }) => {
+    if (!query?.trim()) return 'Requête de notes vide.';
+    const q = query.trim().toLowerCase();
+    const notes = readJsonArray<KaderbotNote>(NOTES_FILE)
+      .filter(note => `${note.title} ${note.body} ${note.tags.join(' ')}`.toLowerCase().includes(q))
+      .slice(-(Math.min(Math.max(Number(limit) || 10, 1), 20)));
+    if (notes.length === 0) return `Aucune note trouvée pour « ${query.trim()} ».`;
+    return notes
+      .map(note => `- ${note.title}${note.tags.length ? ` [${note.tags.join(', ')}]` : ''}\n  ${note.body.slice(0, 500)} (id: ${note.id})`)
+      .join('\n');
+  },
+
+  create_note: async ({ title, body, tags = [] }: { title?: string; body?: string; tags?: string[] }) => {
+    if (!title?.trim() || !body?.trim()) return 'Titre et contenu requis pour créer une note.';
+    const now = new Date().toISOString();
+    const note: KaderbotNote = {
+      id: randomUUID(),
+      title: title.trim(),
+      body: body.trim(),
+      tags: Array.isArray(tags) ? tags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 20) : [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const notes = readJsonArray<KaderbotNote>(NOTES_FILE);
+    notes.push(note);
+    writeJsonArray(NOTES_FILE, notes.slice(-1000));
+    return `Note « ${note.title} » créée avec succès.`;
+  },
+
+  send_message: async ({ channel, target, text }: { channel?: string; target?: string; text?: string }) => {
+    if (!channel || !target?.trim() || !text?.trim()) return 'Canal, destinataire et texte requis.';
+    if (channel === 'whatsapp') {
+      const shareUrl = `https://wa.me/?text=${encodeURIComponent(text.trim())}`;
+      return `Message WhatsApp préparé pour ${target.trim()} (aucun envoi automatique). Ouvre ce lien puis appuie sur Envoyer : ${shareUrl}`;
+    }
+    if (channel === 'telegram') {
+      if (!TELEGRAM_BOT_TOKEN) return 'TELEGRAM_BOT_TOKEN n’est pas configuré sur Render.';
+      if (!TELEGRAM_ALLOWED_CHAT_IDS.has(target.trim())) return `Le chat Telegram ${target.trim()} n’est pas autorisé par l’allowlist.`;
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: target.trim(), text: text.trim() }),
+      });
+      const payload: any = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) return `Échec Telegram : ${payload?.description || `HTTP ${response.status}`}`;
+      return `Message Telegram envoyé à ${target.trim()}.`;
+    }
+    return 'L’envoi SMS n’est pas disponible depuis la Web App. Utilise un lien sms: ou un compagnon Android.';
+  },
+
   memo_store: async ({ sujet, definition }: { sujet?: string; definition?: string }) => {
     if (!sujet?.trim() || !definition?.trim()) {
       return 'Sujet ou définition manquant pour memo_store.';
@@ -1449,7 +1617,10 @@ const AGENT_SYSTEM_PROMPT =
   '(2) Recherche sur le web via search_news ou search_web pour tout fait récent ou d’actualité.\n' +
   '(3) Si open_url renvoie une erreur (403, accès protégé, anti-bot ou timeout), ignore immédiatement cette source et passe aux autres URLs trouvées ou utilise les résumés de recherche.\n' +
   '(4) Si l’utilisateur demande "Continue" ou "continuer", utilise directement les informations déjà réunies pour produire la synthèse finale sans relancer de boucle superflue.\n' +
-  '(5) Réponds toujours en français fluide, structuré avec du Markdown (listes, gras), sans inventer.';
+  '(5) Pour créer une note, utilise create_note ; pour chercher une note, utilise search_notes.\n' +
+  '(6) Pour Telegram, utilise send_message avec channel=telegram et confirm=true ; une confirmation utilisateur sera demandée avant l’envoi.\n' +
+  '(7) Pour WhatsApp, utilise send_message avec channel=whatsapp : cela prépare seulement un lien, sans envoi automatique.\n' +
+  '(8) Réponds toujours dans la langue de l’utilisateur, de façon concise et sans inventer.';
 
 // Helper exécutant la boucle d'outils agentique pour un endpoint/modèle donné (Groq ou OpenRouter)
 async function runToolLoopWithModel(
@@ -1575,7 +1746,10 @@ async function runToolLoopWithModel(
         }
 
         const policy = TOOL_POLICIES[fnName];
-        if (policy?.confirmation) {
+        const requiresConfirmation =
+          policy?.confirmation === true ||
+          (fnName === 'send_message' && parsedArgs.channel !== 'whatsapp');
+        if (requiresConfirmation) {
           const pendingAction = createPendingAction(fnName, parsedArgs);
           toolTrace.push({
             tool: fnName,
@@ -1976,9 +2150,13 @@ app.post('/api/agent/action', async (req, res) => {
   const action = pendingAgentActions.get(actionId);
   pendingAgentActions.delete(actionId);
   if (!action) return res.status(404).json({ error: 'Action introuvable ou déjà traitée.' });
-  if (Date.parse(action.expiresAt) <= Date.now()) return res.status(410).json({ error: 'Cette demande de confirmation a expiré.' });
+  if (Date.parse(action.expiresAt) <= Date.now()) {
+    appendActionLog({ tool: action.tool, args: action.args, status: 'expired', message: 'Confirmation expirée.' });
+    return res.status(410).json({ error: 'Cette demande de confirmation a expiré.' });
+  }
 
   if (decision === 'reject') {
+    appendActionLog({ tool: action.tool, args: action.args, status: 'rejected', message: 'Refusée par l’utilisateur.' });
     return res.json({
       ok: true,
       text: `Action refusée : ${action.summary}`,
@@ -1995,6 +2173,7 @@ app.post('/api/agent/action', async (req, res) => {
     const validationError = validateToolArguments(action.tool, action.args);
     if (validationError) return res.status(400).json({ error: validationError });
     const result = await handler(action.args);
+    appendActionLog({ tool: action.tool, args: action.args, status: 'success', message: result });
     return res.json({
       ok: true,
       text: result,
@@ -2002,6 +2181,7 @@ app.post('/api/agent/action', async (req, res) => {
       toolTrace: [{ tool: action.tool, args: action.args, status: 'success', resultSnippet: result.replace(/\s+/g, ' ').slice(0, 120) }],
     });
   } catch (err: any) {
+    appendActionLog({ tool: action.tool, args: action.args, status: 'error', message: err.message || 'Échec de l’exécution.' });
     return res.status(500).json({ error: err.message || 'Échec de l’exécution de l’action.' });
   }
 });
