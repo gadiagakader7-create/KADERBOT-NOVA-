@@ -24,6 +24,7 @@ const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
 const BRAVE_USAGE_FILE = path.join(DATA_DIR, 'brave_usage.json');
 const NOTES_FILE = path.join(DATA_DIR, 'kaderbot_notes.json');
 const ACTION_LOG_FILE = path.join(DATA_DIR, 'kaderbot_action_logs.json');
+const EVENTS_FILE = path.join(DATA_DIR, 'kaderbot_events.json');
 
 // === 1. CONSTANTES ET SÉCURITÉ DE L'AGENT ===
 const BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
@@ -72,6 +73,7 @@ const TOOL_POLICIES: Record<string, { risk: 'safe' | 'write' | 'external'; confi
   open_url: { risk: 'safe', confirmation: false },
   memo_lookup: { risk: 'safe', confirmation: false },
   search_notes: { risk: 'safe', confirmation: false },
+  list_events: { risk: 'safe', confirmation: false },
   ask_user: { risk: 'safe', confirmation: false },
   memo_store: { risk: 'write', confirmation: true },
   link_concepts: { risk: 'write', confirmation: true },
@@ -92,6 +94,17 @@ function validateToolArguments(tool: string, args: Record<string, unknown>): str
     if (!isNonEmptyString(args[key]) || String(args[key]).length > 500) return `Paramètre ${key} invalide.`;
   }
   if (tool === 'search_notes' && (!isNonEmptyString(args.query) || String(args.query).length > 500)) return 'Paramètre query invalide.';
+  if (tool === 'list_events') {
+    if (!isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Période de recherche requise.';
+    if (Number.isNaN(Date.parse(String(args.start_iso))) || Number.isNaN(Date.parse(String(args.end_iso)))) return 'Dates ISO invalides.';
+  }
+  if (tool === 'create_event') {
+    if (!isNonEmptyString(args.title) || !isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Titre et dates requis pour l’événement.';
+    const start = Date.parse(String(args.start_iso));
+    const end = Date.parse(String(args.end_iso));
+    if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 'Période de l’événement invalide.';
+    if (String(args.title).length > 200) return 'Titre d’événement trop long.';
+  }
   if (tool === 'open_url' && (!isNonEmptyString(args.url) || String(args.url).length > 2048)) return 'Paramètre url invalide.';
   if (tool === 'memo_store' && (!isNonEmptyString(args.sujet) || !isNonEmptyString(args.definition))) return 'Sujet et définition requis.';
   if (tool === 'link_concepts' && (!isNonEmptyString(args.source) || !isNonEmptyString(args.cible))) return 'Source et cible requises.';
@@ -313,6 +326,16 @@ type AgentActionLog = {
   args?: Record<string, unknown>;
   status: 'success' | 'error' | 'rejected' | 'expired';
   message?: string;
+  createdAt: string;
+};
+
+type KaderbotEvent = {
+  id: string;
+  title: string;
+  startIso: string;
+  endIso: string;
+  location?: string;
+  description?: string;
   createdAt: string;
 };
 
@@ -1133,6 +1156,10 @@ app.get('/api/agent/logs', requireAdmin, (_req, res) => {
   return res.json({ logs: readJsonArray<AgentActionLog>(ACTION_LOG_FILE).slice(-200).reverse() });
 });
 
+app.get('/api/calendar/events', requireAdmin, (_req, res) => {
+  return res.json({ events: readJsonArray<KaderbotEvent>(EVENTS_FILE).slice(-500).reverse() });
+});
+
 // === 2. DÉFINITION DES OUTILS DE L'AGENT (Format JSON Schema Groq/OpenAI) ===
 const AGENT_TOOLS = [
   {
@@ -1242,6 +1269,40 @@ const AGENT_TOOLS = [
           },
         },
         required: ['source', 'cible'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_event',
+      description: 'Crée un événement dans l’agenda KADERBOT après confirmation et fournit un lien Google Calendar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          start_iso: { type: 'string', description: 'Date ISO 8601 avec fuseau horaire.' },
+          end_iso: { type: 'string', description: 'Date ISO 8601 avec fuseau horaire.' },
+          location: { type: 'string' },
+          description: { type: 'string' },
+        },
+        required: ['title', 'start_iso', 'end_iso'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_events',
+      description: 'Liste les événements KADERBOT compris dans une période donnée.',
+      parameters: {
+        type: 'object',
+        properties: {
+          start_iso: { type: 'string' },
+          end_iso: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 50 },
+        },
+        required: ['start_iso', 'end_iso'],
       },
     },
   },
@@ -1521,6 +1582,45 @@ const TOOL_IMPLEMENTATIONS: Record<string, (args: any) => Promise<string>> = {
       .join('\n');
   },
 
+  list_events: async ({ start_iso, end_iso, limit = 20 }: { start_iso?: string; end_iso?: string; limit?: number }) => {
+    const start = Date.parse(String(start_iso || ''));
+    const end = Date.parse(String(end_iso || ''));
+    if (Number.isNaN(start) || Number.isNaN(end)) return 'Dates ISO invalides.';
+    const events = readJsonArray<KaderbotEvent>(EVENTS_FILE)
+      .filter(event => Date.parse(event.startIso) < end && Date.parse(event.endIso) > start)
+      .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))
+      .slice(0, Math.min(Math.max(Number(limit) || 20, 1), 50));
+    if (events.length === 0) return 'Aucun événement trouvé dans cette période.';
+    return events
+      .map(event => `- ${event.title} : ${event.startIso} → ${event.endIso}${event.location ? ` | ${event.location}` : ''}`)
+      .join('\n');
+  },
+
+  create_event: async ({ title, start_iso, end_iso, location, description }: { title?: string; start_iso?: string; end_iso?: string; location?: string; description?: string }) => {
+    if (!title?.trim() || !start_iso || !end_iso) return 'Titre et dates requis pour l’événement.';
+    const event: KaderbotEvent = {
+      id: randomUUID(),
+      title: title.trim(),
+      startIso: new Date(start_iso).toISOString(),
+      endIso: new Date(end_iso).toISOString(),
+      location: location?.trim() || undefined,
+      description: description?.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    const events = readJsonArray<KaderbotEvent>(EVENTS_FILE);
+    events.push(event);
+    writeJsonArray(EVENTS_FILE, events.slice(-1000));
+
+    const toCalendarDate = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const calendarUrl = new URL('https://calendar.google.com/calendar/render');
+    calendarUrl.searchParams.set('action', 'TEMPLATE');
+    calendarUrl.searchParams.set('text', event.title);
+    calendarUrl.searchParams.set('dates', `${toCalendarDate(event.startIso)}/${toCalendarDate(event.endIso)}`);
+    if (event.location) calendarUrl.searchParams.set('location', event.location);
+    if (event.description) calendarUrl.searchParams.set('details', event.description);
+    return `Événement « ${event.title} » créé. Ajoute-le à ton agenda Google ici : ${calendarUrl.toString()}`;
+  },
+
   create_note: async ({ title, body, tags = [] }: { title?: string; body?: string; tags?: string[] }) => {
     if (!title?.trim() || !body?.trim()) return 'Titre et contenu requis pour créer une note.';
     const now = new Date().toISOString();
@@ -1620,7 +1720,8 @@ const AGENT_SYSTEM_PROMPT =
   '(5) Pour créer une note, utilise create_note ; pour chercher une note, utilise search_notes.\n' +
   '(6) Pour Telegram, utilise send_message avec channel=telegram et confirm=true ; une confirmation utilisateur sera demandée avant l’envoi.\n' +
   '(7) Pour WhatsApp, utilise send_message avec channel=whatsapp : cela prépare seulement un lien, sans envoi automatique.\n' +
-  '(8) Réponds toujours dans la langue de l’utilisateur, de façon concise et sans inventer.';
+  '(8) Pour l’agenda, utilise create_event ou list_events. Demande toujours des dates ISO 8601 avec fuseau horaire si elles sont ambiguës.\n' +
+  '(9) Réponds toujours dans la langue de l’utilisateur, de façon concise et sans inventer.';
 
 // Helper exécutant la boucle d'outils agentique pour un endpoint/modèle donné (Groq ou OpenRouter)
 async function runToolLoopWithModel(
