@@ -1,20 +1,20 @@
-# Code Source Complet et Architecture — KADERBOT NOVA
+# Code Source Complet et Architecture ReAct — KADERBOT NOVA
 
-## Architecture Globale
+## Architecture Globale & Boucle ReAct
 
-KADERBOT NOVA intègre une architecture cognitive hybride à 4 niveaux :
-1. **Moteur Local Sémantique** : Vectorisation et recherche hybride (`rechercheHybride`) combinant filtrage par mots-clés et similarité cosinus via `@xenova/transformers`.
-2. **Agent Autonome & Outils** : Boucle agentique sécurisée sur `/api/agent` (Groq `openai/gpt-oss-120b` et `openai/gpt-oss-20b`, OpenRouter, Gemini), capable de rechercher sur le web via Brave API, d'ouvrir des pages web avec `open_url`, d'interroger et de mémoriser des connaissances.
-3. **UI Épurée avec Accordéon Repliable (`AgentTraceAccordion`)** :
-   - Masquage des logs, tableaux bruts et erreurs techniques dans un accordéon fermé par défaut.
-   - Résumé compact : `⚙️ X actions exécutées (Y échecs) — Voir les détails`.
-   - Affichage principal recentré sur la synthèse et le rapport final.
-4. **Résilience Réseau & Anti-Blocage** :
-   - En-têtes réalistes Chrome 130 pour `open_url`.
-   - Interception des erreurs 403 Forbidden sans planter l'agent.
-   - Timeouts stricts (6s scraping, 14s modèles, 25s boucle totale, 45s client).
-   - Traitement instantané des requêtes "Continue" pour éviter les boucles infinies.
+KADERBOT NOVA est équipé d'une boucle agentique avancée fondée sur le paradigme **ReAct (Reasoning + Acting)** :
 
-## Téléchargement du Projet
-L'archive complète du projet prêt à l'emploi est disponible dans l'artefact :
-`kaderbot_projet_complet.zip` (200 Ko, incluant frontend React 19 / TypeScript, serveur Express, configuration Tailwind CSS et tests).
+### 1. Boucle ReAct Étendue (25 Itérations Max)
+- **Pensée (Thought)** : Découpage méthodique de la tâche complexe, identification des manques d'informations et hypothèses de recherche.
+- **Action** : Choix de l'outil approprié (`memo_lookup`, `search_news`, `search_web`, `open_url`, `memo_store`, `link_concepts`, `ask_user`).
+- **Observation** : Constat sur les retours d'outils, détection des succès ou d'erreurs (403, protection anti-bot).
+- **Adaptation de la Stratégie (Reflection)** : Réorientation immédiate sans blocage pour atteindre la réponse synthétique optimale.
+- Capacité poussée jusqu'à **25 itérations** avec timeout de sécurité à 90 secondes côté serveur et 120 secondes côté client.
+
+### 2. Interface Utilisateur & Accordéon "Réflexion"
+- **Pendant la génération (live)** : Composant `ThinkingAccordion` affichant **"🧠 Réflexion"**, points pulsants et statut dynamique. Le clic déplie la vue détaillée des 4 étapes du cycle ReAct et la progression.
+- **Dans le message final** : Composant `AgentTraceAccordion` replié sous l'intitulé **"🧠 Réflexion • X étapes de raisonnement (ReAct)"**. Au clic, l'utilisateur inspecte chaque étape avec la pensée de l'agent, l'action exécutée, l'observation et l'adaptation de stratégie.
+
+### 3. Archive Complète
+L'archive complète et fonctionnelle du projet est disponible dans l'artefact :
+`kaderbot_projet_complet.zip` (203 Ko, incluant frontend React 19, TypeScript, Express, shims ESM et configuration Tailwind).

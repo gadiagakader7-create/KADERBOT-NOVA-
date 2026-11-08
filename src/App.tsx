@@ -1184,11 +1184,11 @@ export default function App() {
       let metaPayload: ChatMessage['meta'] = {};
 
       try {
-        // 1. Appel prioritaire de l'Agent intelligent (/api/agent avec les 10 derniers messages)
+        // 1. Appel prioritaire de l'Agent intelligent ReAct (/api/agent avec les 10 derniers messages)
         setThinkingStatus(
           isContinueCommand
-            ? 'Agent KADERBOT : finalisation de la synthèse...'
-            : 'Agent KADERBOT : exploration des sources et vérification...'
+            ? 'Boucle ReAct : finalisation et synthèse finale...'
+            : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...'
         );
         const agentRes = await sendAgentMessage(text, historyFormatted);
         responseText = agentRes.text || agentRes.question || '';

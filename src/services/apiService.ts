@@ -346,7 +346,7 @@ export async function sendAgentMessage(
   history: Array<{ role: string; content: string }> = []
 ): Promise<AgentApiResponse> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   try {
     const res = await fetch('/api/agent', {
@@ -367,7 +367,7 @@ export async function sendAgentMessage(
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      throw new Error("Délai d'attente de l'agent dépassé (45s). Veuillez réessayer avec une question plus ciblée.");
+      throw new Error("Délai d'attente de l'agent dépassé (120s). Veuillez réessayer avec une question plus ciblée.");
     }
     throw err;
   }

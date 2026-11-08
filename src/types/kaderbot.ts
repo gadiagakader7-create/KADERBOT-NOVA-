@@ -26,11 +26,15 @@ export type LinksStore = Record<string, string[]>;
 export type SynonymsStore = Record<string, string | string[]>;
 
 export interface ToolExecutionTrace {
+  step?: number;
+  thought?: string;
   tool: string;
   args?: any;
   status?: 'success' | 'error';
   errorMsg?: string;
   resultSnippet?: string;
+  observation?: string;
+  strategy?: string;
   durationMs?: number;
 }
 

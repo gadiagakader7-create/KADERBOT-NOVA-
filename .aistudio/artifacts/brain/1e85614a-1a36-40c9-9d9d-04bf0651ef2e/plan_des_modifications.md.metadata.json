@@ -1,5 +1,5 @@
 {
-  "summary":  "Plan détaillé des modifications pour la refonte UI (accordéon repliable), la résolution des 403 Forbidden et la gestion des timeouts sur les commandes de continuation.",
-  "updatedAt":  "2026-10-29T20:26:00.358212036Z",
+  "summary":  "Plan des modifications pour l'intégration de la boucle ReAct (Reasoning + Acting) avec 25 itérations et accordéon repliable 'Réflexion'.",
+  "updatedAt":  "2026-10-30T10:14:50.166398601Z",
   "userFacing":  true
 }

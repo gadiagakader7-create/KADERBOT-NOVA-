@@ -1,42 +1,36 @@
-# Plan Détaillé des Modifications — KADERBOT NOVA
+# Plan des Modifications — Boucle ReAct & Accordéon "Réflexion" (KADERBOT NOVA)
 
-## 1. Problématiques Résolues
+## 1. Objectifs Réalisés
 
-### A. Refonte de l'Interface Utilisateur (UI Épurée)
-- **Problème initial** : Affichage anarchique des logs techniques, tableaux de données brutes, messages d'erreurs HTTP 403 dans le fil principal de discussion.
-- **Solution appliquée** :
-  - **Composant `AgentTraceAccordion`** replié par défaut.
-  - Bouton résumé discret : `⚙️ X actions exécutées (Y échecs) — Voir les détails`.
-  - Au clic, déploiement d'une timeline ordonnée des étapes (`#1`, `#2`...) avec badges de statut (`✓ Succès` ou `✕ Échec`), durée d'exécution en ms, requêtes/URLs cliquables et extraits pertinents.
-  - Le fil de discussion principal se focalise exclusivement sur le message utilisateur et le rapport synthétique formaté en Markdown.
+### A. Intégration de la Boucle de Raisonnement ReAct (Reasoning + Acting)
+- **Principe ReAct appliqué** :
+  1. **Pensée (Thought)** : Décomposition de la tâche en sous-objectifs, analyse de l'état actuel et formulation de l'hypothèse de travail.
+  2. **Action** : Sélection et appel de l'outil approprié (`memo_lookup`, `search_news`, `search_web`, `open_url`, `memo_store`, `link_concepts`, `ask_user`).
+  3. **Observation** : Analyse rigoureuse des données retournées par l'outil ou constat des incidents (ex: protection 403, timeout).
+  4. **Adaptation de la Stratégie (Reflection)** : Réajustement dynamique de la démarche (pivot vers d'autres URLs en cas de blocage, affinement des mots-clés, synthèse dès que les informations suffisent).
 
-### B. Indicateur de Chargement Réactif
-- **Problème initial** : Gel apparent ou messages génériques lors des recherches longues ou des commandes "Continue".
-- **Solution appliquée** :
-  - Bulle de statut animée avec pulsation, rebond fluide et message contextuel dynamique :
-    - `Recherche et réflexion en cours...`
-    - `Agent KADERBOT : exploration des sources et vérification...`
-    - `Poursuite de la recherche et synthèse en cours...` (sur commande "Continue").
+### B. Extension de la Capacité de Raisonnement à 25 Itérations
+- `MAX_AGENT_ITERATIONS` porté de 8 à **25 itérations** dans `server.ts`.
+- `MAX_LOOP_DURATION_MS` ajusté à **90 secondes** côté serveur pour permettre une exploration en profondeur sans coupure prématurée.
+- Timeout client étendu à **120 secondes** via `AbortController` dans `src/services/apiService.ts`.
 
-### C. Élimination des Erreurs HTTP 403 (Forbidden)
-- **Problème initial** : Blocage anti-bot (Cloudflare, serveurs d'actualités) renvoyant des 403 lors de l'appel à `open_url`.
-- **Solution appliquée** :
-  - Headers HTTP complets simulant un navigateur Chrome 130 sur Windows (`Sec-Ch-Ua`, `Accept-Language`, `User-Agent`).
-  - Interception douce des codes 403/401 et challenges Cloudflare : pas de crash ni d'interruption. L'incident est tracé dans `toolTrace` avec une explication claire et le LLM est guidé vers d'autres sources.
-
-### D. Optimisation des Délais et Commande "Continue"
-- **Problème initial** : Boucles d'outils répétées et risques de timeout HTTP 504.
-- **Solution appliquée** :
-  - `MAX_AGENT_ITERATIONS = 4`.
-  - Limite globale d'exécution de boucle fixée à 25 secondes (`MAX_LOOP_DURATION_MS = 25000`).
-  - Timeouts stricts avec `AbortController` (6s sur Brave Search, 6s sur `open_url`, 14s sur les appels LLM, 45s sur le client frontend).
-  - Détection prioritaire des mots-clés de continuation (`continue`, `suite`, `poursuis`) orientés directement vers la synthèse finale sans ré-itérations superflues.
+### C. Fenêtre / Accordéon Repliable "Réflexion"
+- **Pendant la réflexion (`ThinkingAccordion`)** :
+  - Petite fenêtre repliable sous le nom de KADERBOT NOVA avec mention **"🧠 Réflexion"**, points animés et statut en direct.
+  - Clic interactif permettant de déployer les détails de l'étape en cours, la barre de progression ReAct et les 4 piliers méthodologiques (Pensée, Action, Observation, Adaptation).
+- **Dans la réponse finale (`AgentTraceAccordion`)** :
+  - Accordéon sobre replié par défaut : **"🧠 Réflexion • X étapes de raisonnement (ReAct)"**.
+  - Au clic, déploiement complet de la chronologie étape par étape avec :
+    - 💭 **Pensée & Décomposition (Thought)**
+    - ⚙️ **Action exécutée** (outil, arguments, URL source cliquable)
+    - 👁️ **Observation** (extraits ou constat d'incident)
+    - 🎯 **Adaptation de la stratégie** (comment l'agent a réagi pour poursuivre)
 
 ---
 
 ## 2. Fichiers Modifiés
-1. `src/types/kaderbot.ts` : Ajout du type `ToolExecutionTrace` et enrichissement de `ChatMessage.meta`.
-2. `src/services/apiService.ts` : AbortController 45s, support du typage enrichi pour `toolTrace`.
-3. `server.ts` : Headers desktop anti-blocage, gestion des 403, boucle agentique sécurisée (25s max, 4 itérations max).
-4. `src/components/ChatTab.tsx` : Intégration du composant `AgentTraceAccordion` et refonte de l'indicateur de chargement.
-5. `src/App.tsx` : Gestion de l'état `thinkingStatus` et transmission au composant `ChatTab`.
+1. `server.ts` : Passage à 25 itérations, enrichissement du prompt système ReAct, capture des pensées et de l'adaptation de stratégie à chaque étape.
+2. `src/types/kaderbot.ts` : Extension de `ToolExecutionTrace` avec `step`, `thought`, `observation`, `strategy`.
+3. `src/services/apiService.ts` : Ajustement du timeout à 120s pour supporter jusqu'à 25 itérations.
+4. `src/components/ChatTab.tsx` : Création de `ThinkingAccordion` et refonte complète de `AgentTraceAccordion` sous forme d'accordéon ReAct "Réflexion".
+5. `src/App.tsx` : Gestion et transmission des statuts dynamiques ReAct au composant de discussion.
