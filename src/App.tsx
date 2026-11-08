@@ -56,7 +56,7 @@ import { ToolsTab } from './components/ToolsTab';
 import { SessionsTab } from './components/SessionsTab';
 import { ActionMenuModal } from './components/ActionMenuModal';
 import { SettingsModal } from './components/SettingsModal';
-import { apiService, sendAgentMessage } from './services/apiService';
+import { apiService, decideAgentAction, sendAgentMessage } from './services/apiService';
 
 export default function App() {
   // Le paramètre ?admin=true ne suffit pas : le serveur doit valider ADMIN_TOKEN.
@@ -622,6 +622,18 @@ export default function App() {
    * 4. Étape 3 : Cloud Fallback (Gemini/Groq avec historique complet des 5 derniers messages)
    * 5. Apprentissage automatique avec calcul du vecteur sémantique pour la prochaine fois
    */
+  const handleAgentActionDecision = async (actionId: string, decision: 'approve' | 'reject') => {
+    try {
+      const result = await decideAgentAction(actionId, decision);
+      addBotMessage(result.text, {
+        source: 'systeme',
+        toolTrace: result.toolTrace,
+      });
+    } catch (err: any) {
+      addBotMessage(`Impossible de traiter cette action : ${err.message}`, { source: 'systeme' });
+    }
+  };
+
   const handleProcessUserMessage = async (rawMessage: string) => {
     const text = rawMessage.trim();
     if (!text) return;
@@ -1201,6 +1213,7 @@ export default function App() {
           isFallback: agentRes.isFallback,
           fallbackReason: agentRes.fallbackReason,
           routedTo: agentRes.routedTo,
+          pendingAction: agentRes.pendingAction,
         };
 
         if (
@@ -1244,7 +1257,7 @@ export default function App() {
       // =========================================================================
       // ÉTAPE 4 : APPRENTISSAGE AUTOMATIQUE & CALCUL D'EMBEDDING LOCAL
       // =========================================================================
-      if (config.autoLearnFromLLM) {
+      if (config.autoLearnFromLLM && !metaPayload.pendingAction) {
         const learned = apprendreDeLLM(text, responseText, memoire, botSource === 'groq' || botSource === 'groq-chat' ? 'groq' : 'gemini');
         if (learned) {
           // Calcule et stocke son vecteur dans l'entrée avant de sauvegarder
@@ -1331,6 +1344,7 @@ export default function App() {
             onDeleteThread={handleDeleteThread}
             onRenameThread={handleRenameThread}
             onMessageAnimationComplete={handleMessageAnimationComplete}
+            onAgentActionDecision={handleAgentActionDecision}
           />
         )}
 

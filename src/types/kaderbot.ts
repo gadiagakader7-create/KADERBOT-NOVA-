@@ -34,6 +34,15 @@ export interface ToolExecutionTrace {
   durationMs?: number;
 }
 
+export interface PendingAgentAction {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+  risk: 'write' | 'external';
+  expiresAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   author: 'Toi' | 'KB';
@@ -63,6 +72,7 @@ export interface ChatMessage {
     isFallback?: boolean;
     fallbackReason?: string;
     routedTo?: 'chat' | 'agent';
+    pendingAction?: PendingAgentAction;
   };
 }
 

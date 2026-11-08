@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { timingSafeEqual } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
@@ -28,6 +28,93 @@ const BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || '';
 const MAX_AGENT_ITERATIONS = 4;
 const MAX_BRAVE_CALLS_PER_DAY = 100;
+const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
+const AGENT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const AGENT_RATE_LIMIT_MAX = 10;
+
+type PendingAgentAction = {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+  risk: 'write' | 'external';
+  expiresAt: string;
+};
+
+const pendingAgentActions = new Map<string, PendingAgentAction>();
+const agentRateLimits = new Map<string, { startedAt: number; count: number }>();
+
+function checkAgentRateLimit(req: express.Request): boolean {
+  const key = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const current = agentRateLimits.get(key);
+  if (!current || now - current.startedAt >= AGENT_RATE_LIMIT_WINDOW_MS) {
+    agentRateLimits.set(key, { startedAt: now, count: 1 });
+    return true;
+  }
+  if (current.count >= AGENT_RATE_LIMIT_MAX) return false;
+  current.count += 1;
+  return true;
+}
+
+const TOOL_POLICIES: Record<string, { risk: 'safe' | 'write' | 'external'; confirmation: boolean }> = {
+  search_web: { risk: 'safe', confirmation: false },
+  search_news: { risk: 'safe', confirmation: false },
+  open_url: { risk: 'safe', confirmation: false },
+  memo_lookup: { risk: 'safe', confirmation: false },
+  ask_user: { risk: 'safe', confirmation: false },
+  memo_store: { risk: 'write', confirmation: true },
+  link_concepts: { risk: 'write', confirmation: true },
+  create_note: { risk: 'write', confirmation: true },
+  update_note: { risk: 'write', confirmation: true },
+  delete_note: { risk: 'write', confirmation: true },
+  create_event: { risk: 'write', confirmation: true },
+  send_message: { risk: 'external', confirmation: true },
+};
+
+function validateToolArguments(tool: string, args: Record<string, unknown>): string | null {
+  const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  const policy = TOOL_POLICIES[tool];
+  if (!policy) return `Outil non autorisé : ${tool}`;
+
+  if (tool === 'search_web' || tool === 'search_news' || tool === 'memo_lookup') {
+    const key = tool === 'memo_lookup' ? 'sujet' : 'query';
+    if (!isNonEmptyString(args[key]) || String(args[key]).length > 500) return `Paramètre ${key} invalide.`;
+  }
+  if (tool === 'open_url' && (!isNonEmptyString(args.url) || String(args.url).length > 2048)) return 'Paramètre url invalide.';
+  if (tool === 'memo_store' && (!isNonEmptyString(args.sujet) || !isNonEmptyString(args.definition))) return 'Sujet et définition requis.';
+  if (tool === 'link_concepts' && (!isNonEmptyString(args.source) || !isNonEmptyString(args.cible))) return 'Source et cible requises.';
+  if (tool === 'ask_user' && (!isNonEmptyString(args.question) || String(args.question).length > 500)) return 'Question invalide.';
+
+  if (tool === 'send_message') {
+    if (!['sms', 'telegram', 'whatsapp'].includes(String(args.channel))) return 'Canal de message non autorisé.';
+    if (!isNonEmptyString(args.target) || !isNonEmptyString(args.text)) return 'Destinataire et texte requis.';
+    if (String(args.text).length > 4000) return 'Message trop long.';
+  }
+  return null;
+}
+
+function summarizePendingAction(tool: string, args: Record<string, unknown>): string {
+  if (tool === 'memo_store') return `Mémoriser « ${String(args.sujet)} » : ${String(args.definition).slice(0, 180)}`;
+  if (tool === 'link_concepts') return `Créer le lien « ${String(args.source)} » → « ${String(args.cible)} »`;
+  if (tool === 'send_message') return `Envoyer un message ${String(args.channel)} à ${String(args.target)} : « ${String(args.text).slice(0, 180)} »`;
+  if (tool === 'create_event') return `Créer l’événement « ${String(args.title || 'sans titre')} »`;
+  return `Autoriser l’action ${tool}`;
+}
+
+function createPendingAction(tool: string, args: Record<string, unknown>): PendingAgentAction {
+  const expiresAt = new Date(Date.now() + PENDING_ACTION_TTL_MS).toISOString();
+  const action: PendingAgentAction = {
+    id: randomUUID(),
+    tool,
+    args,
+    summary: summarizePendingAction(tool, args),
+    risk: TOOL_POLICIES[tool]?.risk === 'external' ? 'external' : 'write',
+    expiresAt,
+  };
+  pendingAgentActions.set(action.id, action);
+  return action;
+}
 
 function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction): void {
   if (!ADMIN_TOKEN) {
@@ -1381,6 +1468,7 @@ async function runToolLoopWithModel(
   toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }>;
   awaitingUser?: boolean;
   question?: string;
+  pendingAction?: PendingAgentAction;
 }> {
   const isContinuePrompt = ['continue', 'continuer', 'poursuis', 'vas-y', 'go on', 'suite'].includes(userPrompt.trim().toLowerCase());
   const effectiveUserPrompt = isContinuePrompt
@@ -1463,12 +1551,42 @@ async function runToolLoopWithModel(
           parsedArgs = {};
         }
 
+        const validationError = validateToolArguments(fnName, parsedArgs);
+        if (validationError) {
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: validationError });
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `Erreur de validation : ${validationError}`,
+          });
+          continue;
+        }
+
         // Cas ask_user : interruption de la boucle et retour direct
         if (fnName === 'ask_user') {
           toolTrace.push({ tool: fnName, args: parsedArgs, status: 'success' });
           return {
             awaitingUser: true,
             question: parsedArgs.question || 'Pouvez-vous préciser votre demande ?',
+            provider: providerLabel,
+            model,
+            toolTrace,
+          };
+        }
+
+        const policy = TOOL_POLICIES[fnName];
+        if (policy?.confirmation) {
+          const pendingAction = createPendingAction(fnName, parsedArgs);
+          toolTrace.push({
+            tool: fnName,
+            args: parsedArgs,
+            status: 'success',
+            resultSnippet: 'En attente de confirmation utilisateur',
+          });
+          return {
+            awaitingUser: true,
+            pendingAction,
+            question: `Confirmation requise : ${pendingAction.summary}`,
             provider: providerLabel,
             model,
             toolTrace,
@@ -1779,6 +1897,9 @@ Classification:`;
 
 // === 5. ENDPOINT /api/agent ===
 app.post('/api/agent', async (req, res) => {
+  if (!checkAgentRateLimit(req)) {
+    return res.status(429).json({ error: 'Limite atteinte : maximum 10 requêtes agentiques par minute.' });
+  }
   try {
     const { prompt, history = [], systemPrompt } = req.body;
     if (!prompt || typeof prompt !== 'string') {
@@ -1845,7 +1966,47 @@ app.post('/api/agent', async (req, res) => {
   }
 });
 
-// Route de téléchargement de l'archive ZIP complète du projet web
+// Décision explicite de l’utilisateur pour une action suspendue par la policy.
+app.post('/api/agent/action', async (req, res) => {
+  const { actionId, decision } = req.body || {};
+  if (typeof actionId !== 'string' || !['approve', 'reject'].includes(decision)) {
+    return res.status(400).json({ error: 'actionId et décision valide requis.' });
+  }
+
+  const action = pendingAgentActions.get(actionId);
+  pendingAgentActions.delete(actionId);
+  if (!action) return res.status(404).json({ error: 'Action introuvable ou déjà traitée.' });
+  if (Date.parse(action.expiresAt) <= Date.now()) return res.status(410).json({ error: 'Cette demande de confirmation a expiré.' });
+
+  if (decision === 'reject') {
+    return res.json({
+      ok: true,
+      text: `Action refusée : ${action.summary}`,
+      provider: 'policy',
+      toolTrace: [{ tool: action.tool, args: action.args, status: 'error', errorMsg: 'Refusée par l’utilisateur.' }],
+    });
+  }
+
+  try {
+    const handler = TOOL_IMPLEMENTATIONS[action.tool];
+    if (typeof handler !== 'function') {
+      return res.status(409).json({ error: `L’outil ${action.tool} n’est pas encore disponible.` });
+    }
+    const validationError = validateToolArguments(action.tool, action.args);
+    if (validationError) return res.status(400).json({ error: validationError });
+    const result = await handler(action.args);
+    return res.json({
+      ok: true,
+      text: result,
+      provider: 'policy',
+      toolTrace: [{ tool: action.tool, args: action.args, status: 'success', resultSnippet: result.replace(/\s+/g, ' ').slice(0, 120) }],
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Échec de l’exécution de l’action.' });
+  }
+});
+
+// Route de téléchargement de l’archive ZIP complète du projet web
 app.get('/api/export-project-zip', (req, res) => {
   try {
     const zipPath = path.resolve(__dirname, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_projet_complet.zip');

@@ -30,7 +30,7 @@ import {
   CheckCircle2,
   XCircle,
 } from 'lucide-react';
-import { ChatMessage, ChatThread, ToolExecutionTrace } from '../types/kaderbot';
+import { ChatMessage, ChatThread, PendingAgentAction, ToolExecutionTrace } from '../types/kaderbot';
 
 const markdownComponents = {
   p: ({ children }: any) => (
@@ -338,6 +338,60 @@ const AgentTraceAccordion: React.FC<AgentTraceAccordionProps> = ({ toolTrace }) 
   );
 };
 
+interface AgentActionApprovalProps {
+  action: PendingAgentAction;
+  onDecision: (actionId: string, decision: 'approve' | 'reject') => Promise<void>;
+}
+
+const AgentActionApproval: React.FC<AgentActionApprovalProps> = ({ action, onDecision }) => {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
+
+  const handleDecision = async (nextDecision: 'approve' | 'reject') => {
+    if (isProcessing || decision) return;
+    setIsProcessing(true);
+    setDecision(nextDecision);
+    try {
+      await onDecision(action.id, nextDecision);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-amber-500/30">
+      <div className="rounded-xl bg-amber-950/30 border border-amber-500/40 p-3">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-amber-200">Confirmation nécessaire</p>
+            <p className="text-[11px] text-amber-100/80 mt-1 break-words">{action.summary}</p>
+            <p className="text-[10px] text-gray-500 mt-1">Cette demande expire dans quelques minutes.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            disabled={isProcessing || Boolean(decision)}
+            onClick={() => void handleDecision('approve')}
+            className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold transition"
+          >
+            {decision === 'approve' && isProcessing ? 'Approbation...' : 'Approuver'}
+          </button>
+          <button
+            type="button"
+            disabled={isProcessing || Boolean(decision)}
+            onClick={() => void handleDecision('reject')}
+            className="flex-1 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-rose-900/70 border border-gray-700 disabled:opacity-50 text-gray-200 text-xs font-semibold transition"
+          >
+            {decision === 'reject' && isProcessing ? 'Refus...' : 'Refuser'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface ChatTabProps {
   messages: ChatMessage[];
   isThinking: boolean;
@@ -358,6 +412,7 @@ interface ChatTabProps {
   onDeleteThread?: (threadId: string) => void;
   onRenameThread?: (threadId: string, newTitle: string) => void;
   onMessageAnimationComplete?: (id: string) => void;
+  onAgentActionDecision?: (actionId: string, decision: 'approve' | 'reject') => Promise<void>;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -380,6 +435,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onDeleteThread,
   onRenameThread,
   onMessageAnimationComplete,
+  onAgentActionDecision,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -886,6 +942,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       {msg.text}
                     </ReactMarkdown>
                   </div>
+                )}
+
+                {!isUser && msg.meta?.pendingAction && onAgentActionDecision && (
+                  <AgentActionApproval action={msg.meta.pendingAction} onDecision={onAgentActionDecision} />
                 )}
 
                 {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}

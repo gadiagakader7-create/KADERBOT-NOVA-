@@ -1,4 +1,4 @@
-import { MemoryStore, RulesStore, LinksStore, SynonymsStore, ToolExecutionTrace } from '../types/kaderbot';
+import { MemoryStore, RulesStore, LinksStore, SynonymsStore, ToolExecutionTrace, PendingAgentAction } from '../types/kaderbot';
 
 function getAdminHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
@@ -313,6 +313,32 @@ export interface AgentApiResponse {
   isFallback?: boolean;
   fallbackReason?: string;
   routedTo?: 'chat' | 'agent';
+  pendingAction?: PendingAgentAction;
+}
+
+export interface AgentActionDecisionResponse {
+  ok: boolean;
+  text: string;
+  provider: string;
+  toolTrace: ToolExecutionTrace[];
+}
+
+export async function decideAgentAction(
+  actionId: string,
+  decision: 'approve' | 'reject'
+): Promise<AgentActionDecisionResponse> {
+  const res = await fetch('/api/agent/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actionId, decision }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+    throw new Error(err.error || `Erreur serveur (${res.status})`);
+  }
+
+  return await res.json();
 }
 
 export async function sendAgentMessage(
