@@ -63,7 +63,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative shrink-0">
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#10A37F] to-[#06B6D4] p-0.5 shadow-md shadow-emerald-500/20">
                 <div className="w-full h-full bg-[#0E131F] rounded-[14px] flex items-center justify-center">
-                  <Brain className="w-5 h-5 text-emerald-400" />
+                  <Brain className="w-5 h-5 text-emerald-400 animate-pulse" />
                 </div>
               </div>
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-[#090B10] rounded-full" />

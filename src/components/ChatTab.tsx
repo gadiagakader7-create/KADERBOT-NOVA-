@@ -1049,15 +1049,13 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto min-h-0 px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5 overscroll-contain"
       >
-        {/* Session banner, utile uniquement pour le travail administrateur */}
-        {isAdmin && (
-          <div className="flex justify-center">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Session cognitive : {activeSession}</span>
-            </div>
+        {/* Session cognitive : indicateur simple conservé pour tous les utilisateurs */}
+        <div className="flex justify-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
           </div>
-        )}
+        </div>
 
         {/* Message bubbles */}
         {messages.map(msg => {
