@@ -740,16 +740,23 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
-  const quickPills = [
-    { label: 'C’est quoi...', text: "c'est quoi " },
-    { label: 'Pourquoi...', text: 'pourquoi ' },
-    { label: 'Retenir un fait', text: 'retiens: ' },
-    { label: 'Règle tous les...', text: 'retiens: tous les ' },
-    { label: 'Lier concepts', text: 'lie: ' },
-    { label: 'Générer idées', text: 'idees 5: ' },
-    { label: 'Traduire', text: 'traduis en anglais: ' },
-    { label: 'Lister mémoire', text: 'lister: memoire' },
-  ];
+  const quickPills = isAdmin
+    ? [
+        { label: 'C’est quoi...', text: "c'est quoi " },
+        { label: 'Pourquoi...', text: 'pourquoi ' },
+        { label: 'Retenir un fait', text: 'retiens: ' },
+        { label: 'Règle tous les...', text: 'retiens: tous les ' },
+        { label: 'Lier concepts', text: 'lie: ' },
+        { label: 'Générer idées', text: 'idees 5: ' },
+        { label: 'Traduire', text: 'traduis en anglais: ' },
+        { label: 'Lister mémoire', text: 'lister: memoire' },
+      ]
+    : [
+        { label: 'Poser une question', text: 'Je voudrais savoir ' },
+        { label: 'Explique-moi quelque chose', text: 'Explique-moi ' },
+        { label: 'Aide-moi à rédiger', text: 'Aide-moi à rédiger ' },
+        { label: 'Recherche une information', text: 'Recherche une information sur ' },
+      ];
 
   const activeThread = (threads || []).find(t => t.id === activeThreadId);
 
@@ -779,7 +786,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   });
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] cyber-bg">
+    <div className={`flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] ${isAdmin ? 'cyber-bg' : 'public-bg'}`}>
       {/* Top Thread & History Subheader Bar */}
       <div className="shrink-0 flex-shrink-0 px-3 sm:px-4 py-2 bg-[#090B10]/95 border-b border-gray-800/80 flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-2 min-w-0">
@@ -789,7 +796,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             title="Ouvrir l'historique des discussions"
           >
             <History className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Historique</span>
+                    <span>{isAdmin ? 'Historique' : 'Mes discussions'}</span>
             {(threads?.length || 0) > 0 && (
               <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono">
                 {threads?.length}
@@ -801,7 +808,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           <div className="min-w-0 flex items-center gap-1.5 text-xs text-gray-400">
             <span className="hidden sm:inline text-gray-700">|</span>
             <span className="truncate font-medium text-gray-300 max-w-[130px] sm:max-w-[280px]">
-              {activeThread ? activeThread.title : 'Nouvelle discussion'}
+              {activeThread ? activeThread.title : isAdmin ? 'Nouvelle discussion' : 'Nouvelle conversation'}
             </span>
           </div>
         </div>
@@ -813,7 +820,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           title="Démarrer une nouvelle discussion vierge"
         >
           <Plus className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="hidden sm:inline">Nouvelle discussion</span>
+          <span className="hidden sm:inline">{isAdmin ? 'Nouvelle discussion' : 'Nouvelle conversation'}</span>
         </button>
       </div>
 
@@ -1042,13 +1049,15 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto min-h-0 px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5 overscroll-contain"
       >
-        {/* Session banner */}
-        <div className="flex justify-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Session cognitive : {activeSession}</span>
+        {/* Session banner, utile uniquement pour le travail administrateur */}
+        {isAdmin && (
+          <div className="flex justify-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Session cognitive : {activeSession}</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Message bubbles */}
         {messages.map(msg => {
@@ -1065,7 +1074,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 }`}
               >
                 <span>{isUser ? 'TOI' : 'KADERBOT NOVA'}</span>
-                {!isUser && msg.meta?.source && (
+                {isAdmin && !isUser && msg.meta?.source && (
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 border border-gray-700/60">
                     {msg.meta.source === 'groq-agent'
                       ? '🤖 Agent Groq'
@@ -1088,7 +1097,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       : 'Système'}
                   </span>
                 )}
-                {!isUser && msg.meta?.isFallback && (
+                {isAdmin && !isUser && msg.meta?.isFallback && (
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-500/40 cursor-help"
                     title={msg.meta.fallbackReason || 'Mode dégradé sans recherche'}
@@ -1131,12 +1140,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 )}
 
                 {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
-                {!isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
+                {isAdmin && !isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
                   <AgentTraceAccordion toolTrace={msg.meta.toolTrace} />
                 )}
 
                 {/* Deductive chain visual crumb if applicable */}
-                {!isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
+                {isAdmin && !isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
                   <div className="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center gap-1.5 flex-wrap text-[11px] text-cyan-300 font-mono">
                     <span className="text-gray-500">Chaîne cognitive :</span>
                     {msg.meta.chemin.map((step, idx) => (
@@ -1202,9 +1211,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         })}
 
         {/* Fenêtre Accordéon repliable "Réflexion" pendant le raisonnement */}
-        {isThinking && (
-          <ThinkingAccordion thinkingStatus={thinkingStatus} />
-        )}
+        {isThinking && <ThinkingAccordion thinkingStatus={isAdmin ? thinkingStatus : 'Je réfléchis à ta demande...'} />}
 
         <div ref={messagesEndRef} />
       </div>
@@ -1264,7 +1271,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder="Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..."
+              placeholder={isAdmin ? "Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..." : 'Écris ton message...'}
               className="w-full bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
             />
           </div>

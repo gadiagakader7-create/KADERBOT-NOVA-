@@ -55,6 +55,52 @@ export const Header: React.FC<HeaderProps> = ({
     return 'Llama 70B';
   };
 
+  if (!isAdmin) {
+    return (
+      <header className="sticky top-0 z-40 w-full shrink-0 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-4 py-3 sm:px-6">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#10A37F] to-[#06B6D4] p-0.5 shadow-md shadow-emerald-500/20">
+                <div className="w-full h-full bg-[#0E131F] rounded-[14px] flex items-center justify-center">
+                  <Brain className="w-5 h-5 text-emerald-400" />
+                </div>
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-[#090B10] rounded-full" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-wide truncate">KADERBOT</h1>
+              <p className="text-[11px] sm:text-xs text-gray-400 truncate">Ton assistant personnel</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => onUpdateConfig({ soundEnabled: !config.soundEnabled })}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors ${
+                config.soundEnabled
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                  : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'
+              }`}
+              title={config.soundEnabled ? 'Désactiver la lecture vocale' : 'Activer la lecture vocale'}
+              aria-label={config.soundEnabled ? 'Désactiver la lecture vocale' : 'Activer la lecture vocale'}
+            >
+              {config.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+            {isInstallable && (
+              <button
+                onClick={install}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-600/15 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-600/25 text-xs font-semibold transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Installer</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="sticky top-0 z-40 w-full shrink-0 flex-shrink-0 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-3 py-2 sm:px-6 sm:py-2.5 transition-all">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-2.5 md:gap-4">

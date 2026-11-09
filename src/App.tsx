@@ -216,7 +216,7 @@ export default function App() {
     return {
       id: 'welcome',
       author: 'KB',
-      text: `${welcome} Je suis KADERBOT NOVA. Je comprends le sens de tes phrases et me souviens de nos échanges. Pose-moi une question ou discute simplement avec moi !`,
+      text: `${welcome} Je suis KADERBOT, ton assistant personnel. Tu peux me poser une question, me demander une explication ou m’aider à rédiger un texte.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       meta: { source: 'systeme' },
     };

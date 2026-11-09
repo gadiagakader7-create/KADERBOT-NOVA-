@@ -43,6 +43,10 @@
   background-size: 100% 100%, 32px 32px, 32px 32px;
 }
 
+.public-bg {
+  background-image: radial-gradient(circle at 50% 0%, rgba(16, 163, 127, 0.09) 0%, transparent 58%);
+}
+
 @keyframes pulseGlow {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50% { opacity: 0.8; transform: scale(1.05); }
