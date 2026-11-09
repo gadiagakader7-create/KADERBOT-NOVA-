@@ -307,6 +307,10 @@ const AgentTraceAccordion: React.FC<AgentTraceAccordionProps> = ({ toolTrace }) 
         return { label: 'Création de note', icon: '📝' };
       case 'search_notes':
         return { label: 'Recherche de notes', icon: '📚' };
+      case 'create_event':
+        return { label: 'Ajout Événement Agenda', icon: '📅' };
+      case 'list_events':
+        return { label: 'Consultation Agenda', icon: '🗓️' };
       case 'send_message':
         return { label: 'Messagerie', icon: '✉️' };
       case 'ask_user':

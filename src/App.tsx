@@ -64,42 +64,6 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
 
-  // Authentification serveur du mode admin sur l’URL et lors des changements de navigation.
-  useEffect(() => {
-    let cancelled = false;
-
-    const checkAdmin = async () => {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('admin') !== 'true') {
-        if (!cancelled) setIsAdmin(false);
-        return;
-      }
-
-      const authenticated = await apiService.verifyAdminSession();
-      if (!cancelled) {
-        setIsAdmin(authenticated);
-        if (!authenticated) setActiveTab('chat');
-      }
-    };
-    void checkAdmin();
-    window.addEventListener('popstate', checkAdmin);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('popstate', checkAdmin);
-    };
-  }, []);
-
-  // En mode public, restreindre les onglets à 'chat' ou 'tools'
-  useEffect(() => {
-    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
-      setActiveTab('chat');
-    }
-  }, [isAdmin, activeTab]);
-
-  // État des modales
-  const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-
   // Configuration générale de KADERBOT NOVA
   const NOVA_DEFAULT_SYSTEM_PROMPT =
     'Tu es KADERBOT NOVA, un assistant IA expert et pédagogue. Tu réponds toujours en français.\n' +
@@ -138,6 +102,45 @@ export default function App() {
       autoLearnFromLLM: true,
     };
   });
+
+  // Authentification serveur du mode admin sur l’URL et lors des changements de configuration.
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkAdmin = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const hasAdminParam = params.get('admin') === 'true';
+      const hasConfigToken = Boolean(config.adminToken?.trim());
+
+      if (!hasAdminParam && !hasConfigToken) {
+        if (!cancelled) setIsAdmin(false);
+        return;
+      }
+
+      const authenticated = await apiService.verifyAdminSession();
+      if (!cancelled) {
+        setIsAdmin(authenticated);
+        if (!authenticated && hasAdminParam) setActiveTab('chat');
+      }
+    };
+    void checkAdmin();
+    window.addEventListener('popstate', checkAdmin);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('popstate', checkAdmin);
+    };
+  }, [config.adminToken]);
+
+  // En mode public, restreindre les onglets à 'chat' ou 'tools'
+  useEffect(() => {
+    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
+      setActiveTab('chat');
+    }
+  }, [isAdmin, activeTab]);
+
+  // État des modales
+  const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // Gestion des sessions
   const [sessions, setSessions] = useState<string[]>(() => {

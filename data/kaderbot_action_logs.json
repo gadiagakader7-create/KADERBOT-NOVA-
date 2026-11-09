@@ -1,0 +1,39 @@
+[
+  {
+    "tool": "send_message",
+    "args": {
+      "channel": "telegram",
+      "confirm": true,
+      "target": "@alice",
+      "text": "Bonjour tout le monde!"
+    },
+    "status": "success",
+    "message": "TELEGRAM_BOT_TOKEN n’est pas configuré sur Render.",
+    "id": "d2e9b86e-150e-402b-a500-8d66effc2f17",
+    "createdAt": "2026-11-08T14:26:56.413Z"
+  },
+  {
+    "tool": "create_note",
+    "args": {
+      "body": "Lait, Pain, Beurre",
+      "title": "Courses"
+    },
+    "status": "success",
+    "message": "Note « Courses » créée avec succès.",
+    "id": "a5794ee7-96b1-42a3-960e-54502b235be9",
+    "createdAt": "2026-11-08T14:27:04.096Z"
+  },
+  {
+    "tool": "create_event",
+    "args": {
+      "end_iso": "2026-11-09T15:00:00Z",
+      "location": "Paris",
+      "start_iso": "2026-11-09T14:00:00Z",
+      "title": "Réunion projet"
+    },
+    "status": "success",
+    "message": "Événement « Réunion projet » créé. Ajoute-le à ton agenda Google ici : https://calendar.google.com/calendar/render?action=TEMPLATE&text=R%C3%A9union+projet&dates=20261109T140000Z%2F20261109T150000Z&location=Paris",
+    "id": "5906dced-6347-490a-a6b7-2a50e54a5706",
+    "createdAt": "2026-11-08T14:27:20.843Z"
+  }
+]

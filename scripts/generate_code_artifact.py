@@ -1,7 +1,7 @@
 import os
 
-target_path = '/.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_code_source_complet.md'
 root_dir = '/app/applet'
+target_path = os.path.join(root_dir, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_code_source_complet.md')
 
 files_to_include = [
     ('package.json', 'json', 'Configuration des dépendances et scripts du projet'),
