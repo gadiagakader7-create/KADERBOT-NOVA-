@@ -368,13 +368,14 @@ const AgentTraceAccordion: React.FC<AgentTraceAccordionProps> = ({ toolTrace }) 
             {toolTrace.map((trace, idx) => {
               const meta = getToolMeta(trace.tool);
               const isError = trace.status === 'error' || Boolean(trace.errorMsg);
-              const isUrl = trace.tool === 'open_url' && trace.args?.url;
+              const traceUrl = typeof trace.args?.url === 'string' ? trace.args.url : '';
+              const isUrl = trace.tool === 'open_url' && traceUrl;
               let hostname = '';
               if (isUrl) {
                 try {
-                  hostname = new URL(trace.args.url).hostname.replace(/^www\./, '');
+                  hostname = new URL(traceUrl).hostname.replace(/^www\./, '');
                 } catch {
-                  hostname = trace.args.url;
+                  hostname = traceUrl;
                 }
               }
 

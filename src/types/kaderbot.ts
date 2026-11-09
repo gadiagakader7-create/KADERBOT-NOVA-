@@ -1,3 +1,7 @@
+import type { PendingAgentAction, ToolExecutionTrace } from './agent';
+
+export type { PendingAgentAction, ToolExecutionTrace } from './agent';
+
 export interface MemoryEntry {
   def: string;
   poids: number; // 0.1 to 1.0
@@ -24,28 +28,6 @@ export type MemoryStore = Record<string, MemoryEntry[]>;
 export type RulesStore = Record<string, GeneralRule[]>;
 export type LinksStore = Record<string, string[]>;
 export type SynonymsStore = Record<string, string | string[]>;
-
-export interface ToolExecutionTrace {
-  step?: number;
-  thought?: string;
-  tool: string;
-  args?: any;
-  status?: 'success' | 'error';
-  errorMsg?: string;
-  resultSnippet?: string;
-  observation?: string;
-  strategy?: string;
-  durationMs?: number;
-}
-
-export interface PendingAgentAction {
-  id: string;
-  tool: string;
-  args: Record<string, unknown>;
-  summary: string;
-  risk: 'write' | 'external';
-  expiresAt: string;
-}
 
 export interface ChatMessage {
   id: string;
