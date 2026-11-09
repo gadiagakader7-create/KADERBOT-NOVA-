@@ -630,7 +630,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const editInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const handleTypingTick = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -655,6 +655,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
+
+  // La zone de message grandit avec le texte sans dépasser une hauteur confortable sur mobile.
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  }, [inputText]);
 
   // Auto-focus rename field when editing a thread title
   useEffect(() => {
@@ -725,12 +733,24 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendCurrentMessage = () => {
     const trimmed = inputText.trim();
     if (!trimmed || isThinking) return;
     onSendMessage(trimmed);
     setInputText('');
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendCurrentMessage();
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Entrée seule = retour à la ligne. Ctrl/Cmd + Entrée = envoi rapide.
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendCurrentMessage();
+    }
   };
 
   const handleScrollUnits = (direction: 'up' | 'down') => {
@@ -1264,13 +1284,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
           {/* Text entry field */}
           <div className="relative flex-1">
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
+              rows={1}
               value={inputText}
               onChange={e => setInputText(e.target.value)}
+              onKeyDown={handleInputKeyDown}
               placeholder={isAdmin ? "Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..." : 'Écris ton message...'}
-              className="w-full bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
+              className="w-full max-h-32 min-h-[42px] resize-none overflow-y-auto bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
             />
           </div>
 
