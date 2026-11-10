@@ -8,7 +8,7 @@ import { GoogleGenAI } from '@google/genai';
 import { AGENT_TOOLS, TOOL_POLICIES } from './src/agent/toolRegistry';
 import { createToolImplementations } from './src/agent/toolImplementations';
 import { createPendingAction, validateToolArguments } from './src/agent/toolSecurity';
-import { runToolLoopWithModel } from './src/agent/reactLoop';
+import { runAgentLoop } from './src/agent/modelRouter';
 import type { PendingAgentAction } from './src/types/agent';
 
 dotenv.config();
@@ -1184,130 +1184,13 @@ const reactLoopDeps = {
 };
 
 // Cascade agentique complète : Groq 120B → Groq 20B → Gemini (sans tools) → OpenRouter Nemotron (avec tools)
-async function runAgentLoop(
-  userPrompt: string,
-  history: Array<{ role: string; content: string }> = [],
-  systemPrompt?: string
-): Promise<{
-  text?: string;
-  provider: string;
-  model?: string;
-  toolTrace: Array<{ tool: string; args?: any }>;
-  awaitingUser?: boolean;
-  question?: string;
-  isFallback?: boolean;
-  fallbackReason?: string;
-}> {
-  const groqApiKey = process.env.GROQ_API_KEY?.trim();
-  const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
-
-  // === MAILLON 1 : Groq openai/gpt-oss-120b (avec tools) ===
-  if (groqApiKey) {
-    try {
-      const res = await runToolLoopWithModel(
-        'https://api.groq.com/openai/v1/chat/completions',
-        groqApiKey,
-        'openai/gpt-oss-120b',
-        'groq-agent',
-        userPrompt,
-        history,
-        reactLoopDeps,
-        systemPrompt
-      );
-      return res;
-    } catch (err120: any) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 1 (Groq openai/gpt-oss-120b) a échoué (cause: ${err120.message}). Bascule vers Maillon 2 (Groq openai/gpt-oss-20b)...`
-      );
-    }
-
-    // === MAILLON 2 : Groq openai/gpt-oss-20b (avec tools) ===
-    try {
-      const res = await runToolLoopWithModel(
-        'https://api.groq.com/openai/v1/chat/completions',
-        groqApiKey,
-        'openai/gpt-oss-20b',
-        'groq-agent',
-        userPrompt,
-        history,
-        reactLoopDeps,
-        systemPrompt
-      );
-      return {
-        ...res,
-        isFallback: true,
-        fallbackReason: 'Groq openai/gpt-oss-120b a échoué, bascule sur openai/gpt-oss-20b',
-      };
-    } catch (err20: any) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 2 (Groq openai/gpt-oss-20b) a échoué (cause: ${err20.message}). Bascule vers Maillon 3 (Gemini sans tools)...`
-      );
-    }
-  } else {
-    console.warn(
-      '[BASCULE AGENT] Aucune variable GROQ_API_KEY configurée. Bascule vers Maillon 3 (Gemini sans tools)...'
-    );
-  }
-
-  // === MAILLON 3 : Gemini (sans tools) ===
-  try {
-    const formattedHistory = history
-      .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
-      .join('\n');
-    const fullPrompt = `${systemPrompt || AGENT_SYSTEM_PROMPT}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${userPrompt}\nKADERBOT:`;
-
-    const geminiRes = await callGeminiWithFallback(fullPrompt, systemPrompt || AGENT_SYSTEM_PROMPT);
-    return {
-      text: geminiRes.text,
-      provider: 'gemini',
-      model: geminiRes.model,
-      toolTrace: [],
-      isFallback: true,
-      fallbackReason: 'Groq 120B et 20B indisponibles, bascule sur Gemini (sans tools)',
-    };
-  } catch (geminiErr: any) {
-    if (openRouterApiKey) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 3 (Gemini) a échoué (cause: ${geminiErr.message}). Bascule vers Maillon 4 (OpenRouter nvidia/nemotron-3.5-lightning:free)...`
-      );
-    } else {
-      console.warn(
-        `[BASCULE AGENT] Maillon 3 (Gemini) a échoué (cause: ${geminiErr.message}). Aucun maillon OpenRouter configuré.`
-      );
-    }
-  }
-
-  // === MAILLON 4 : OpenRouter 'nvidia/nemotron-3.5-lightning:free' (avec tools) ===
-  if (openRouterApiKey) {
-    try {
-      const res = await runToolLoopWithModel(
-        'https://openrouter.ai/api/v1/chat/completions',
-        openRouterApiKey,
-        'nvidia/nemotron-3.5-lightning:free',
-        'openrouter-agent',
-        userPrompt,
-        history,
-        reactLoopDeps,
-        systemPrompt,
-        {
-          'HTTP-Referer': 'https://kaderbot.app',
-          'X-Title': 'KADERBOT NOVA',
-        }
-      );
-      return {
-        ...res,
-        isFallback: true,
-        fallbackReason: 'Groq et Gemini indisponibles, bascule sur OpenRouter nvidia/nemotron-3.5-lightning:free',
-      };
-    } catch (openRouterErr: any) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 4 (OpenRouter nvidia/nemotron-3.5-lightning:free) a échoué (cause: ${openRouterErr.message}). Tous les maillons ont échoué.`
-      );
-    }
-  }
-
-  throw new Error('Tous les maillons de l’agent ont échoué (Groq gpt-oss-120b, Groq gpt-oss-20b, Gemini, OpenRouter Nemotron).');
-}
+const modelRouterDeps = {
+  groqApiKey: process.env.GROQ_API_KEY,
+  openRouterApiKey: process.env.OPENROUTER_API_KEY,
+  defaultSystemPrompt: AGENT_SYSTEM_PROMPT,
+  reactLoopDeps,
+  callGeminiWithFallback,
+};
 
 // === ROUTER INTENTION (CHAT vs AGENT) ===
 async function classifyIntentWithRouter(
@@ -1432,7 +1315,7 @@ app.post('/api/agent', async (req, res) => {
     }
 
     // 2. Si intention AGENT (ou échec de CHAT) : Exécute la cascade agentique complète
-    const agentResult = await runAgentLoop(prompt, history, systemPrompt);
+    const agentResult = await runAgentLoop(prompt, history, modelRouterDeps, systemPrompt);
     return res.json({
       ...agentResult,
       routedTo: 'agent',
