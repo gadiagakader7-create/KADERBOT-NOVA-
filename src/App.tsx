@@ -103,16 +103,16 @@ export default function App() {
     };
   });
 
-  // Authentification serveur du mode admin sur l’URL et lors des changements de configuration.
+  // Le mode admin exige explicitement ?admin=true puis une validation serveur.
+  // La présence d’un jeton dans localStorage ne doit jamais transformer le lien public en lien admin.
   useEffect(() => {
     let cancelled = false;
 
     const checkAdmin = async () => {
       const params = new URLSearchParams(window.location.search);
       const hasAdminParam = params.get('admin') === 'true';
-      const hasConfigToken = Boolean(config.adminToken?.trim());
 
-      if (!hasAdminParam && !hasConfigToken) {
+      if (!hasAdminParam) {
         if (!cancelled) setIsAdmin(false);
         return;
       }
