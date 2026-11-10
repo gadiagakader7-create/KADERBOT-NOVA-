@@ -6,15 +6,15 @@ Ce document rassemble l'intégralité du code source de l'application **KADERBOT
 
 ## Sommaire des Fichiers Inclus
 - [`package.json`](#packagejson) — Configuration des dépendances et scripts du projet *(39 lignes)*
-- [`vite.config.ts`](#viteconfigts) — Configuration du bundler Vite, aliases et shims *(23 lignes)*
-- [`server.ts`](#serverts) — Serveur Express & Boucle Agentique ReAct (25 itérations, outils Brave/Web/Mémoire) *(2967 lignes)*
-- [`src/types/kaderbot.ts`](#srctypeskaderbotts) — Typage TypeScript complet (ReAct, Mémoire, Messages, Graphe) *(135 lignes)*
+- [`vite.config.ts`](#viteconfigts) — Configuration du bundler Vite, aliases et shims *(26 lignes)*
+- [`server.ts`](#serverts) — Serveur Express & Boucle Agentique ReAct (25 itérations, outils Brave/Web/Mémoire) *(2749 lignes)*
+- [`src/types/kaderbot.ts`](#srctypeskaderbotts) — Typage TypeScript complet (ReAct, Mémoire, Messages, Graphe) *(117 lignes)*
 - [`src/services/apiService.ts`](#srcservicesapiServicets) — Service API client avec appel agent ReAct et timeout 120s *(374 lignes)*
 - [`src/shims/style-to-js.ts`](#srcshimsstyle-to-jsts) — Shim ESM natif pour compatibilité style-to-js / react-markdown *(61 lignes)*
-- [`src/components/ChatTab.tsx`](#srccomponentsChatTabtsx) — Interface Chat avec accordéons Réflexion (live & ReAct breakdown) *(1299 lignes)*
+- [`src/components/ChatTab.tsx`](#srccomponentsChatTabtsx) — Interface Chat avec accordéons Réflexion (live & ReAct breakdown) *(1326 lignes)*
 - [`src/App.tsx`](#srcApptsx) — Composant racine, gestion de session et moteur hybride *(1553 lignes)*
 - [`src/core/cognitiveEngine.ts`](#srccorecognitiveEnginets) — Moteur cognitif, recherche sémantique hybride et déduction logique *(1427 lignes)*
-- [`src/components/Header.tsx`](#srccomponentsHeadertsx) — En-tête de navigation et statut des connexions *(225 lignes)*
+- [`src/components/Header.tsx`](#srccomponentsHeadertsx) — En-tête de navigation et statut des connexions *(271 lignes)*
 - [`src/components/KnowledgeGraphTab.tsx`](#srccomponentsKnowledgeGraphTabtsx) — Visualisation et gestion du graphe de connaissances *(518 lignes)*
 - [`src/components/RulesTab.tsx`](#srccomponentsRulesTabtsx) — Gestion des règles logiques et inférences *(307 lignes)*
 - [`src/components/SessionsTab.tsx`](#srccomponentsSessionsTabtsx) — Gestion multi-sessions de la mémoire cognitive *(596 lignes)*
@@ -83,15 +83,18 @@ Ce document rassemble l'intégralité du code source de l'application **KADERBOT
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { fileURLToPath } from 'url';
+import { defineConfig } from 'vite';
+
+const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
-        'style-to-js': path.resolve(__dirname, 'src/shims/style-to-js.ts'),
+        '@': path.resolve(rootDir, '.'),
+        'style-to-js': path.resolve(rootDir, 'src/shims/style-to-js.ts'),
       },
     },
     server: {
@@ -120,6 +123,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { randomUUID, timingSafeEqual } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
+import { AGENT_TOOLS, TOOL_POLICIES } from './src/agent/toolRegistry';
+import type { PendingAgentAction } from './src/types/agent';
 
 dotenv.config();
 
@@ -127,7 +132,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+
+const portArgIndex = process.argv.indexOf('--port');
+const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? Number(process.argv[portArgIndex + 1]) : NaN;
+const PORT = Number(process.env.PORT) || (!Number.isNaN(cliPort) && cliPort > 0 ? cliPort : 3000);
+
+const hostArgIndex = process.argv.indexOf('--host');
+const cliHost = hostArgIndex !== -1 && process.argv[hostArgIndex + 1] ? process.argv[hostArgIndex + 1] : undefined;
+const HOST = process.env.HOST || cliHost || '0.0.0.0';
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -143,7 +155,7 @@ const EVENTS_FILE = path.join(DATA_DIR, 'kaderbot_events.json');
 
 // === 1. CONSTANTES ET SÉCURITÉ DE L'AGENT ===
 const BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || 'kaderbot-admin-secret';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || '';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || '';
 const TELEGRAM_ALLOWED_CHAT_IDS = new Set(
   (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
@@ -157,14 +169,6 @@ const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 const AGENT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const AGENT_RATE_LIMIT_MAX = 10;
 
-type PendingAgentAction = {
-  id: string;
-  tool: string;
-  args: Record<string, unknown>;
-  summary: string;
-  risk: 'write' | 'external';
-  expiresAt: string;
-};
 
 const pendingAgentActions = new Map<string, PendingAgentAction>();
 const agentRateLimits = new Map<string, { startedAt: number; count: number }>();
@@ -182,23 +186,6 @@ function checkAgentRateLimit(req: express.Request): boolean {
   return true;
 }
 
-const TOOL_POLICIES: Record<string, { risk: 'safe' | 'write' | 'external'; confirmation: boolean }> = {
-  search_web: { risk: 'safe', confirmation: false },
-  search_news: { risk: 'safe', confirmation: false },
-  open_url: { risk: 'safe', confirmation: false },
-  memo_lookup: { risk: 'safe', confirmation: false },
-  search_notes: { risk: 'safe', confirmation: false },
-  list_events: { risk: 'safe', confirmation: false },
-  ask_user: { risk: 'safe', confirmation: false },
-  memo_store: { risk: 'write', confirmation: true },
-  link_concepts: { risk: 'write', confirmation: true },
-  create_note: { risk: 'write', confirmation: true },
-  update_note: { risk: 'write', confirmation: true },
-  delete_note: { risk: 'write', confirmation: true },
-  create_event: { risk: 'write', confirmation: true },
-  send_message: { risk: 'external', confirmation: false },
-};
-
 function validateToolArguments(tool: string, args: Record<string, unknown>): string | null {
   const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
   const policy = TOOL_POLICIES[tool];
@@ -210,8 +197,8 @@ function validateToolArguments(tool: string, args: Record<string, unknown>): str
   }
   if (tool === 'search_notes' && (!isNonEmptyString(args.query) || String(args.query).length > 500)) return 'Paramètre query invalide.';
   if (tool === 'list_events') {
-    if (args.start_iso && Number.isNaN(Date.parse(String(args.start_iso)))) return 'Date de début ISO invalide.';
-    if (args.end_iso && Number.isNaN(Date.parse(String(args.end_iso)))) return 'Date de fin ISO invalide.';
+    if (!isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Période de recherche requise.';
+    if (Number.isNaN(Date.parse(String(args.start_iso))) || Number.isNaN(Date.parse(String(args.end_iso)))) return 'Dates ISO invalides.';
   }
   if (tool === 'create_event') {
     if (!isNonEmptyString(args.title) || !isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Titre et dates requis pour l’événement.';
@@ -1210,7 +1197,7 @@ app.post('/api/resume', async (req, res) => {
 });
 
 // 6. Memory Persistence (Load & Save to JSON disk file)
-app.get('/api/memory', (req, res) => {
+app.get('/api/memory', requireAdmin, (req, res) => {
   try {
     if (fs.existsSync(MEMORY_FILE)) {
       const data = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
@@ -1275,218 +1262,7 @@ app.get('/api/calendar/events', requireAdmin, (_req, res) => {
   return res.json({ events: readJsonArray<KaderbotEvent>(EVENTS_FILE).slice(-500).reverse() });
 });
 
-// === 2. DÉFINITION DES OUTILS DE L'AGENT (Format JSON Schema Groq/OpenAI) ===
-const AGENT_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'search_web',
-      description: 'Recherche générale sur le web via Brave. À utiliser pour toute question factuelle, actuelle, ou inconnue.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'Requête textuelle de recherche.',
-          },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'open_url',
-      description: 'Ouvre une URL et renvoie le texte principal de la page. Utilise après search_web pour approfondir un résultat.',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: {
-            type: 'string',
-            description: 'L’URL absolue de la page web à explorer.',
-          },
-        },
-        required: ['url'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'search_news',
-      description: "Recherche d'actualités récentes via Brave News. Utiliser pour les événements récents.",
-      parameters: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'Requête pour actualités récentes.',
-          },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'memo_lookup',
-      description: 'Consulte la mémoire cognitive locale de KADERBOT (faits, définitions, Q&R appris) avant de chercher sur le web. Toujours appeler AVANT search_web si la question peut être connue.',
-      parameters: {
-        type: 'object',
-        properties: {
-          sujet: {
-            type: 'string',
-            description: 'Le concept, mot ou sujet à vérifier dans la mémoire locale.',
-          },
-        },
-        required: ['sujet'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'memo_store',
-      description: "Enregistre un fait ou une définition validé par l'utilisateur dans la mémoire cognitive. À n'utiliser que si l'utilisateur dit explicitement 'retiens' ou demande de mémoriser. JAMAIS automatiquement depuis le web.",
-      parameters: {
-        type: 'object',
-        properties: {
-          sujet: {
-            type: 'string',
-            description: 'Le sujet ou concept clé du fait.',
-          },
-          definition: {
-            type: 'string',
-            description: 'La définition ou le fait validé par l’utilisateur.',
-          },
-        },
-        required: ['sujet', 'definition'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'link_concepts',
-      description: "Crée un lien d'héritage (source est-un cible) dans le graphe de connaissances.",
-      parameters: {
-        type: 'object',
-        properties: {
-          source: {
-            type: 'string',
-            description: 'Le concept source / sous-concept (ex: "chat").',
-          },
-          cible: {
-            type: 'string',
-            description: 'Le concept parent / catégorie (ex: "félin").',
-          },
-        },
-        required: ['source', 'cible'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'create_event',
-      description: 'Crée un événement dans l’agenda KADERBOT après confirmation et fournit un lien Google Calendar.',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          start_iso: { type: 'string', description: 'Date ISO 8601 avec fuseau horaire.' },
-          end_iso: { type: 'string', description: 'Date ISO 8601 avec fuseau horaire.' },
-          location: { type: 'string' },
-          description: { type: 'string' },
-        },
-        required: ['title', 'start_iso', 'end_iso'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'list_events',
-      description: 'Consulte les événements du calendrier sur une période (start_iso et end_iso optionnels, par défaut les 60 prochains jours).',
-      parameters: {
-        type: 'object',
-        properties: {
-          start_iso: { type: 'string', description: 'Date de début ISO optionnelle' },
-          end_iso: { type: 'string', description: 'Date de fin ISO optionnelle' },
-          limit: { type: 'integer', minimum: 1, maximum: 50 },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'create_note',
-      description: 'Crée une note locale persistante après confirmation de l’utilisateur.',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          body: { type: 'string' },
-          tags: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['title', 'body'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'search_notes',
-      description: 'Recherche dans les notes locales par titre, contenu ou tags.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string' },
-          limit: { type: 'integer', minimum: 1, maximum: 20 },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'send_message',
-      description: 'Envoie un message Telegram après confirmation ou prépare un partage WhatsApp sans envoi automatique.',
-      parameters: {
-        type: 'object',
-        properties: {
-          channel: { type: 'string', enum: ['telegram', 'whatsapp', 'sms'] },
-          target: { type: 'string' },
-          text: { type: 'string' },
-          confirm: { type: 'boolean' },
-        },
-        required: ['channel', 'target', 'text'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'ask_user',
-      description: "Pose une question courte à l'utilisateur quand la demande est ambiguë et que tu ne peux pas deviner. Une seule fois par conversation maximum.",
-      parameters: {
-        type: 'object',
-        properties: {
-          question: {
-            type: 'string',
-            description: 'La question courte et ciblée à poser à l’utilisateur.',
-          },
-        },
-        required: ['question'],
-      },
-    },
-  },
-];
-
+// === 2. REGISTRE CENTRAL DES OUTILS ===
 // Helper pour exécuter une recherche sur l'API Brave (Search ou News)
 async function executeBraveSearch(query: string, isNews: boolean): Promise<string> {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim() || BRAVE_API_KEY;
@@ -1697,12 +1473,11 @@ const TOOL_IMPLEMENTATIONS: Record<string, (args: any) => Promise<string>> = {
   },
 
   list_events: async ({ start_iso, end_iso, limit = 20 }: { start_iso?: string; end_iso?: string; limit?: number }) => {
-    const now = Date.now();
-    const start = start_iso ? Date.parse(String(start_iso)) : now - 7 * 24 * 3600 * 1000;
-    const end = end_iso ? Date.parse(String(end_iso)) : now + 60 * 24 * 3600 * 1000;
+    const start = Date.parse(String(start_iso || ''));
+    const end = Date.parse(String(end_iso || ''));
     if (Number.isNaN(start) || Number.isNaN(end)) return 'Dates ISO invalides.';
     const events = readJsonArray<KaderbotEvent>(EVENTS_FILE)
-      .filter(event => Date.parse(event.startIso) <= end && Date.parse(event.endIso) >= start)
+      .filter(event => Date.parse(event.startIso) < end && Date.parse(event.endIso) > start)
       .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))
       .slice(0, Math.min(Math.max(Number(limit) || 20, 1), 50));
     if (events.length === 0) return 'Aucun événement trouvé dans cette période.';
@@ -2240,7 +2015,7 @@ async function classifyIntentWithRouter(
   }
 
   try {
-    const classificationPrompt = `Réponds uniquement CHAT ou AGENT. AGENT si le message demande une recherche web, une info actuelle ou factuelle hors mémoire, mémoriser un fait, consulter ou créer une note ou un événement dans l'agenda, ou envoyer un message. CHAT sinon (salutations simples, conversation informelle, opinions, création littéraire sans outil).
+    const classificationPrompt = `Réponds uniquement CHAT ou AGENT. AGENT si le message demande une recherche web, une info actuelle ou factuelle hors mémoire, ou apprendre/mémoriser un fait. CHAT sinon (salutations, conversation, opinions, création).
 
 Message: "${userPrompt.replace(/"/g, '\\"')}"
 Classification:`;
@@ -2275,13 +2050,9 @@ Classification:`;
     const content = (msgObj?.content || '').trim().toUpperCase();
     const reasoning = (msgObj?.reasoning || '').trim().toUpperCase();
 
-    const hasAgent = content.includes('AGENT') || (!content && reasoning.slice(-80).includes('AGENT'));
-    const hasChat = content.includes('CHAT') || (!content && reasoning.slice(-80).includes('CHAT'));
-
-    if (hasAgent && !hasChat) return 'AGENT';
-    if (hasChat && !hasAgent) return 'CHAT';
-    if (hasAgent) return 'AGENT';
-    if (hasChat) return 'CHAT';
+    if (content.includes('CHAT') || (!content && reasoning.slice(-80).includes('CHAT'))) {
+      return 'CHAT';
+    }
     return 'AGENT';
   } catch (err: any) {
     console.warn(`[ROUTER AGENT] Erreur classification (${err.message}), défaut = AGENT`);
@@ -3074,12 +2845,26 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Serveur KADERBOT NOVA opérationnel sur http://localhost:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`🚀 Serveur KADERBOT NOVA opérationnel sur http://${HOST}:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    console.error('Erreur serveur HTTP:', err);
   });
 }
 
-startServer();
+process.on('unhandledRejection', (reason) => {
+  console.warn('Unhandled Rejection at:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err);
+});
+
+startServer().catch((err) => {
+  console.error('Erreur démarrage serveur:', err);
+});
 ```
 
 ---
@@ -3090,6 +2875,10 @@ startServer();
 > **Description** : Typage TypeScript complet (ReAct, Mémoire, Messages, Graphe)
 
 ```typescript
+import type { PendingAgentAction, ToolExecutionTrace } from './agent';
+
+export type { PendingAgentAction, ToolExecutionTrace } from './agent';
+
 export interface MemoryEntry {
   def: string;
   poids: number; // 0.1 to 1.0
@@ -3116,28 +2905,6 @@ export type MemoryStore = Record<string, MemoryEntry[]>;
 export type RulesStore = Record<string, GeneralRule[]>;
 export type LinksStore = Record<string, string[]>;
 export type SynonymsStore = Record<string, string | string[]>;
-
-export interface ToolExecutionTrace {
-  step?: number;
-  thought?: string;
-  tool: string;
-  args?: any;
-  status?: 'success' | 'error';
-  errorMsg?: string;
-  resultSnippet?: string;
-  observation?: string;
-  strategy?: string;
-  durationMs?: number;
-}
-
-export interface PendingAgentAction {
-  id: string;
-  tool: string;
-  args: Record<string, unknown>;
-  summary: string;
-  risk: 'write' | 'external';
-  expiresAt: string;
-}
 
 export interface ChatMessage {
   id: string;
@@ -4064,13 +3831,14 @@ const AgentTraceAccordion: React.FC<AgentTraceAccordionProps> = ({ toolTrace }) 
             {toolTrace.map((trace, idx) => {
               const meta = getToolMeta(trace.tool);
               const isError = trace.status === 'error' || Boolean(trace.errorMsg);
-              const isUrl = trace.tool === 'open_url' && trace.args?.url;
+              const traceUrl = typeof trace.args?.url === 'string' ? trace.args.url : '';
+              const isUrl = trace.tool === 'open_url' && traceUrl;
               let hostname = '';
               if (isUrl) {
                 try {
-                  hostname = new URL(trace.args.url).hostname.replace(/^www\./, '');
+                  hostname = new URL(traceUrl).hostname.replace(/^www\./, '');
                 } catch {
-                  hostname = trace.args.url;
+                  hostname = traceUrl;
                 }
               }
 
@@ -4326,7 +4094,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const editInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const handleTypingTick = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -4351,6 +4119,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
+
+  // La zone de message grandit avec le texte sans dépasser une hauteur confortable sur mobile.
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  }, [inputText]);
 
   // Auto-focus rename field when editing a thread title
   useEffect(() => {
@@ -4421,12 +4197,24 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendCurrentMessage = () => {
     const trimmed = inputText.trim();
     if (!trimmed || isThinking) return;
     onSendMessage(trimmed);
     setInputText('');
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendCurrentMessage();
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Entrée seule = retour à la ligne. Ctrl/Cmd + Entrée = envoi rapide.
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendCurrentMessage();
+    }
   };
 
   const handleScrollUnits = (direction: 'up' | 'down') => {
@@ -4436,16 +4224,23 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
-  const quickPills = [
-    { label: 'C’est quoi...', text: "c'est quoi " },
-    { label: 'Pourquoi...', text: 'pourquoi ' },
-    { label: 'Retenir un fait', text: 'retiens: ' },
-    { label: 'Règle tous les...', text: 'retiens: tous les ' },
-    { label: 'Lier concepts', text: 'lie: ' },
-    { label: 'Générer idées', text: 'idees 5: ' },
-    { label: 'Traduire', text: 'traduis en anglais: ' },
-    { label: 'Lister mémoire', text: 'lister: memoire' },
-  ];
+  const quickPills = isAdmin
+    ? [
+        { label: 'C’est quoi...', text: "c'est quoi " },
+        { label: 'Pourquoi...', text: 'pourquoi ' },
+        { label: 'Retenir un fait', text: 'retiens: ' },
+        { label: 'Règle tous les...', text: 'retiens: tous les ' },
+        { label: 'Lier concepts', text: 'lie: ' },
+        { label: 'Générer idées', text: 'idees 5: ' },
+        { label: 'Traduire', text: 'traduis en anglais: ' },
+        { label: 'Lister mémoire', text: 'lister: memoire' },
+      ]
+    : [
+        { label: 'Poser une question', text: 'Je voudrais savoir ' },
+        { label: 'Explique-moi quelque chose', text: 'Explique-moi ' },
+        { label: 'Aide-moi à rédiger', text: 'Aide-moi à rédiger ' },
+        { label: 'Recherche une information', text: 'Recherche une information sur ' },
+      ];
 
   const activeThread = (threads || []).find(t => t.id === activeThreadId);
 
@@ -4475,7 +4270,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   });
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] cyber-bg">
+    <div className={`flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] ${isAdmin ? 'cyber-bg' : 'public-bg'}`}>
       {/* Top Thread & History Subheader Bar */}
       <div className="shrink-0 flex-shrink-0 px-3 sm:px-4 py-2 bg-[#090B10]/95 border-b border-gray-800/80 flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-2 min-w-0">
@@ -4485,7 +4280,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             title="Ouvrir l'historique des discussions"
           >
             <History className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Historique</span>
+                    <span>{isAdmin ? 'Historique' : 'Mes discussions'}</span>
             {(threads?.length || 0) > 0 && (
               <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono">
                 {threads?.length}
@@ -4497,7 +4292,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           <div className="min-w-0 flex items-center gap-1.5 text-xs text-gray-400">
             <span className="hidden sm:inline text-gray-700">|</span>
             <span className="truncate font-medium text-gray-300 max-w-[130px] sm:max-w-[280px]">
-              {activeThread ? activeThread.title : 'Nouvelle discussion'}
+              {activeThread ? activeThread.title : isAdmin ? 'Nouvelle discussion' : 'Nouvelle conversation'}
             </span>
           </div>
         </div>
@@ -4509,7 +4304,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           title="Démarrer une nouvelle discussion vierge"
         >
           <Plus className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="hidden sm:inline">Nouvelle discussion</span>
+          <span className="hidden sm:inline">{isAdmin ? 'Nouvelle discussion' : 'Nouvelle conversation'}</span>
         </button>
       </div>
 
@@ -4738,11 +4533,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto min-h-0 px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5 overscroll-contain"
       >
-        {/* Session banner */}
+        {/* Session cognitive : indicateur simple conservé pour tous les utilisateurs */}
         <div className="flex justify-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Session cognitive : {activeSession}</span>
+            <span>Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
           </div>
         </div>
 
@@ -4761,7 +4556,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 }`}
               >
                 <span>{isUser ? 'TOI' : 'KADERBOT NOVA'}</span>
-                {!isUser && msg.meta?.source && (
+                {isAdmin && !isUser && msg.meta?.source && (
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 border border-gray-700/60">
                     {msg.meta.source === 'groq-agent'
                       ? '🤖 Agent Groq'
@@ -4784,7 +4579,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       : 'Système'}
                   </span>
                 )}
-                {!isUser && msg.meta?.isFallback && (
+                {isAdmin && !isUser && msg.meta?.isFallback && (
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-500/40 cursor-help"
                     title={msg.meta.fallbackReason || 'Mode dégradé sans recherche'}
@@ -4827,12 +4622,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 )}
 
                 {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
-                {!isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
+                {isAdmin && !isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
                   <AgentTraceAccordion toolTrace={msg.meta.toolTrace} />
                 )}
 
                 {/* Deductive chain visual crumb if applicable */}
-                {!isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
+                {isAdmin && !isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
                   <div className="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center gap-1.5 flex-wrap text-[11px] text-cyan-300 font-mono">
                     <span className="text-gray-500">Chaîne cognitive :</span>
                     {msg.meta.chemin.map((step, idx) => (
@@ -4898,9 +4693,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         })}
 
         {/* Fenêtre Accordéon repliable "Réflexion" pendant le raisonnement */}
-        {isThinking && (
-          <ThinkingAccordion thinkingStatus={thinkingStatus} />
-        )}
+        {isThinking && <ThinkingAccordion thinkingStatus={isAdmin ? thinkingStatus : 'Je réfléchis à ta demande...'} />}
 
         <div ref={messagesEndRef} />
       </div>
@@ -4955,13 +4748,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
           {/* Text entry field */}
           <div className="relative flex-1">
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
+              rows={1}
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder="Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..."
-              className="w-full bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
+              onKeyDown={handleInputKeyDown}
+              placeholder={isAdmin ? "Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..." : 'Écris ton message...'}
+              className="w-full max-h-32 min-h-[42px] resize-none overflow-y-auto bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
             />
           </div>
 
@@ -5220,7 +5014,7 @@ export default function App() {
     return {
       id: 'welcome',
       author: 'KB',
-      text: `${welcome} Je suis KADERBOT NOVA. Je comprends le sens de tes phrases et me souviens de nos échanges. Pose-moi une question ou discute simplement avec moi !`,
+      text: `${welcome} Je suis KADERBOT, ton assistant personnel. Tu peux me poser une question, me demander une explication ou m’aider à rédiger un texte.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       meta: { source: 'systeme' },
     };
@@ -8056,6 +7850,52 @@ export const Header: React.FC<HeaderProps> = ({
     return 'Llama 70B';
   };
 
+  if (!isAdmin) {
+    return (
+      <header className="sticky top-0 z-40 w-full shrink-0 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-4 py-3 sm:px-6">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#10A37F] to-[#06B6D4] p-0.5 shadow-md shadow-emerald-500/20">
+                <div className="w-full h-full bg-[#0E131F] rounded-[14px] flex items-center justify-center">
+                  <Brain className="w-5 h-5 text-emerald-400 animate-pulse" />
+                </div>
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-[#090B10] rounded-full" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-wide truncate">KADERBOT</h1>
+              <p className="text-[11px] sm:text-xs text-gray-400 truncate">Ton assistant personnel</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => onUpdateConfig({ soundEnabled: !config.soundEnabled })}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors ${
+                config.soundEnabled
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                  : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'
+              }`}
+              title={config.soundEnabled ? 'Désactiver la lecture vocale' : 'Activer la lecture vocale'}
+              aria-label={config.soundEnabled ? 'Désactiver la lecture vocale' : 'Activer la lecture vocale'}
+            >
+              {config.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+            {isInstallable && (
+              <button
+                onClick={install}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-600/15 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-600/25 text-xs font-semibold transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Installer</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="sticky top-0 z-40 w-full shrink-0 flex-shrink-0 bg-[#090B10]/95 backdrop-blur-md border-b border-gray-800/80 px-3 py-2 sm:px-6 sm:py-2.5 transition-all">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-2.5 md:gap-4">
@@ -9879,9 +9719,9 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
   ];
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#050508] max-w-5xl mx-auto space-y-6">
+    <div className="flex-1 min-w-0 w-full overflow-x-hidden overflow-y-auto p-3 sm:p-6 bg-[#050508] max-w-5xl mx-auto space-y-6 box-border">
       {/* Sub-nav tabs */}
-      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-[#090B10] border border-gray-800 overflow-x-auto">
+      <div className="min-w-0 w-full flex items-center gap-2 p-1.5 rounded-2xl bg-[#090B10] border border-gray-800 overflow-x-auto">
         <button
           onClick={() => setActiveTool('idees')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
@@ -10135,10 +9975,10 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
       {/* 3. CORRECTEUR TOOL */}
       {activeTool === 'correction' && (
         <div className="space-y-5 animate-in fade-in duration-200">
-          <div className="p-4 sm:p-5 rounded-2xl bg-[#0E131F] border border-gray-800 shadow-xl space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <div className="min-w-0 w-full p-4 sm:p-5 rounded-2xl bg-[#0E131F] border border-gray-800 shadow-xl space-y-4 box-border">
+            <h3 className="min-w-0 text-sm font-bold text-white flex items-start gap-2">
               <CheckCheck className="w-4 h-4 text-purple-400" />
-              <span>Correcteur Orthographique & Grammatical</span>
+              <span className="min-w-0 break-words">Correcteur Orthographique & Grammatical</span>
             </h3>
 
             <form onSubmit={handleCorrige} className="space-y-3">
@@ -10147,7 +9987,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
                 placeholder="Colle ton texte contenant des fautes à corriger..."
                 value={corrigeInput}
                 onChange={e => setCorrigeInput(e.target.value)}
-                className="w-full bg-[#161822] border border-gray-800 rounded-xl p-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50"
+                className="block w-full max-w-full min-w-0 box-border bg-[#161822] border border-gray-800 rounded-xl p-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50"
               />
 
               <div className="flex justify-end">
@@ -10163,7 +10003,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
           </div>
 
           {corrigeResult && (
-            <div className="p-4 rounded-2xl bg-[#0E131F] border border-purple-500/30 space-y-2">
+            <div className="min-w-0 w-full p-4 rounded-2xl bg-[#0E131F] border border-purple-500/30 space-y-2 box-border">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-purple-400">Texte corrigé :</span>
                 <button
@@ -10173,7 +10013,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
                   {copiedKey === 'corrige' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
-              <p className="text-sm text-gray-100 whitespace-pre-wrap">{corrigeResult}</p>
+              <p className="min-w-0 max-w-full break-words text-sm text-gray-100 whitespace-pre-wrap">{corrigeResult}</p>
             </div>
           )}
         </div>
