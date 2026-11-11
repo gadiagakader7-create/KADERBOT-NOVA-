@@ -515,6 +515,34 @@ export function levenshtein(a: string, b: string): number {
   return lignePrec[b.length];
 }
 
+/**
+ * Variante court-circuitée de Levenshtein : elle s'arrête dès que la distance
+ * dépasse le plafond demandé. La recherche floue n'a pas besoin de connaître
+ * la distance exacte d'une clé qui ne pourra jamais atteindre son seuil.
+ */
+function levenshteinPlafonnee(a: string, b: string, plafond: number): number {
+  if (a.length < b.length) return levenshteinPlafonnee(b, a, plafond);
+  if (b.length === 0) return a.length <= plafond ? a.length : plafond + 1;
+  if (a.length - b.length > plafond) return plafond + 1;
+
+  let lignePrec = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 0; i < a.length; i++) {
+    const ligne = [i + 1];
+    let minimumLigne = ligne[0];
+
+    for (let j = 0; j < b.length; j++) {
+      const cout = a[i] === b[j] ? 0 : 1;
+      const valeur = Math.min(ligne[j] + 1, lignePrec[j + 1] + 1, lignePrec[j] + cout);
+      ligne.push(valeur);
+      if (valeur < minimumLigne) minimumLigne = valeur;
+    }
+
+    if (minimumLigne > plafond) return plafond + 1;
+    lignePrec = ligne;
+  }
+  return lignePrec[b.length];
+}
+
 export function similarite(a: string, b: string): number {
   if (!a || !b) return 0.0;
   if (a === b) return 1.0;
@@ -583,15 +611,26 @@ export function rechercherFlou(
   const keys = Array.from(new Set([...Object.keys(memoire), ...Object.keys(regles)]));
   let meilleur: string | null = null;
   let meilleurScore = 0.0;
+
+  // Les bonus maximum (+0.15 pour inclusion et +0.10 pour préfixe) permettent
+  // de calculer un plafond sûr avant d'allouer la matrice complète.
+  const scoreBaseMinimal = Math.max(0, seuil - 0.25);
+
   for (const cle of keys) {
     const normalise = sansAccent(cle.toLowerCase());
-    let score = similarite(motNorm, normalise);
-    if (motNorm.includes(normalise) || normalise.includes(motNorm)) {
-      score += 0.15;
-    }
-    if (motNorm.length >= 3 && normalise.startsWith(motNorm.slice(0, 3))) {
-      score += 0.1;
-    }
+    const maxLen = Math.max(motNorm.length, normalise.length);
+    const plafond = Math.floor(maxLen * (1 - scoreBaseMinimal));
+
+    // Une différence de longueur supérieure au plafond rend toute distance
+    // acceptable impossible, même avec les deux bonus.
+    if (Math.abs(motNorm.length - normalise.length) > plafond) continue;
+
+    const distance = levenshteinPlafonnee(motNorm, normalise, plafond);
+    if (distance > plafond) continue;
+
+    let score = maxLen ? 1.0 - distance / maxLen : 0.0;
+    if (motNorm.includes(normalise) || normalise.includes(motNorm)) score += 0.15;
+    if (motNorm.length >= 3 && normalise.startsWith(motNorm.slice(0, 3))) score += 0.1;
     if (score > meilleurScore) {
       meilleurScore = score;
       meilleur = cle;
