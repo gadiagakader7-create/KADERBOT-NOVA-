@@ -48,22 +48,40 @@ export async function calculerVecteur(texte: string): Promise<number[]> {
   }
 }
 
-// Cache mémoire en arrière-plan pour éviter de recalculer les vecteurs déjà générés
+// Cache mémoire en arrière-plan pour éviter de recalculer les vecteurs déjà générés.
 const cacheEmbeddings = new Map<string, number[]>();
+// Partage les calculs en cours : deux appels simultanés pour le même texte
+// attendent la même promesse au lieu de lancer deux inférences du modèle.
+const calculsEmbeddingsEnCours = new Map<string, Promise<number[]>>();
+
+function normaliserCleEmbedding(texte: string): string {
+  return texte.trim().toLowerCase();
+}
 
 /**
  * Récupère un vecteur déjà en cache ou le calcule si nécessaire.
  */
 export async function obtenirVecteurCache(texte: string): Promise<number[]> {
-  const cle = texte.trim().toLowerCase();
-  if (cacheEmbeddings.has(cle)) {
-    return cacheEmbeddings.get(cle)!;
-  }
-  const vec = await calculerVecteur(texte);
-  if (vec.length > 0) {
-    cacheEmbeddings.set(cle, vec);
-  }
-  return vec;
+  const cle = normaliserCleEmbedding(texte);
+  if (!cle) return [];
+
+  const vecteurEnCache = cacheEmbeddings.get(cle);
+  if (vecteurEnCache) return vecteurEnCache;
+
+  const calculEnCours = calculsEmbeddingsEnCours.get(cle);
+  if (calculEnCours) return calculEnCours;
+
+  const nouveauCalcul = calculerVecteur(texte).then(vec => {
+    if (vec.length > 0) {
+      cacheEmbeddings.set(cle, vec);
+    }
+    return vec;
+  }).finally(() => {
+    calculsEmbeddingsEnCours.delete(cle);
+  });
+
+  calculsEmbeddingsEnCours.set(cle, nouveauCalcul);
+  return nouveauCalcul;
 }
 
 /**
@@ -1424,4 +1442,3 @@ export function construirePromptContextuelNova(
 
   return { promptComplet, faitTrouve, source };
 }
-
