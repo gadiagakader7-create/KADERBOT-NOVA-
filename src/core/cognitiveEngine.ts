@@ -202,8 +202,9 @@ export async function rechercheHybride(
 
 /**
  * Tâche 1 : Pré-calcul des vecteurs pour toute la mémoire (jusqu'à 12 000+ entrées).
- * Parcourt toutes les entrées de mémoire, calcule le vecteur de la clé (le sujet) via obtenirVecteur(sujet),
- * le stocke dans entry.vecteur, et traite par lots de 50 avec pause asynchrone (10ms).
+ * Parcourt les sujets de mémoire, calcule leurs vecteurs et les stocke dans les entrées.
+ * Le traitement se fait par petits lots concurrents pour accélérer le pré-calcul sans
+ * lancer trop d'inférences simultanées sur les appareils mobiles.
  */
 export async function precalculerTousLesVecteurs(
   memoire: MemoryStore,
@@ -217,31 +218,36 @@ export async function precalculerTousLesVecteurs(
     return memoire;
   }
 
-  const BATCH_SIZE = 50;
+  // Quatre inférences maximum à la fois : bon compromis entre vitesse et chauffe
+  // sur mobile. La cache des promesses déduplique aussi les demandes identiques.
+  const BATCH_SIZE = 4;
 
-  for (let i = 0; i < total; i++) {
-    const sujet = sujets[i];
-    const entries = memoire[sujet] || [];
+  for (let debut = 0; debut < total; debut += BATCH_SIZE) {
+    const fin = Math.min(debut + BATCH_SIZE, total);
+    const lot = sujets.slice(debut, fin);
 
-    // Vérifie si au moins une entrée nécessite le calcul de son vecteur
-    const needVec = entries.some(e => !e.vecteur || e.vecteur.length === 0);
-    if (needVec) {
+    await Promise.all(lot.map(async sujet => {
+      const entries = memoire[sujet] || [];
+
+      // Vérifie si au moins une entrée nécessite le calcul de son vecteur
+      const needVec = entries.some(e => !e.vecteur || e.vecteur.length === 0);
+      if (!needVec) return;
+
       const vec = await obtenirVecteur(sujet);
-      if (vec && vec.length > 0) {
-        for (const entry of entries) {
-          if (!entry.vecteur || entry.vecteur.length === 0) {
-            entry.vecteur = vec;
-          }
+      if (vec.length === 0) return;
+
+      for (const entry of entries) {
+        if (!entry.vecteur || entry.vecteur.length === 0) {
+          entry.vecteur = vec;
         }
       }
-    }
+    }));
 
-    // Traite par lots de 50 avec pause pour libérer le thread principal
-    if ((i + 1) % BATCH_SIZE === 0 || i === total - 1) {
-      const pct = Math.round(((i + 1) / total) * 100);
-      onProgress?.(pct);
-      await new Promise(r => setTimeout(r, 10));
-    }
+    const traites = fin;
+    onProgress?.(Math.round((traites / total) * 100));
+
+    // Rend la main au navigateur entre deux lots pour préserver la fluidité de l'UI.
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
   }
 
   return memoire;
