@@ -1,4 +1,3 @@
-import { pipeline, env } from '@xenova/transformers';
 import {
   ChatMessage,
   GeneralRule,
@@ -9,10 +8,23 @@ import {
   SynonymsStore,
 } from '../types/kaderbot';
 
-// Configuration de transformers.js pour l'environnement navigateur
-// Permet de télécharger le modèle léger depuis le hub HuggingFace et de le mettre en cache local
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+type TransformersModule = typeof import('@xenova/transformers');
+
+// Le moteur lourd n'est chargé qu'au premier besoin sémantique. Cela évite de
+// ralentir le démarrage de l'interface publique et réduit le bundle initial.
+let moduleTransformersPromise: Promise<TransformersModule> | null = null;
+
+async function obtenirModuleTransformers(): Promise<TransformersModule> {
+  if (!moduleTransformersPromise) {
+    moduleTransformersPromise = import('@xenova/transformers').then(module => {
+      // Configuration navigateur : modèle distant et cache local du navigateur.
+      module.env.allowLocalModels = false;
+      module.env.useBrowserCache = true;
+      return module;
+    });
+  }
+  return moduleTransformersPromise;
+}
 
 // Singleton d'extraction d'embeddings côté client
 let extracteurEmbeddingsPromise: Promise<any> | null = null;
@@ -23,11 +35,11 @@ let extracteurEmbeddingsPromise: Promise<any> | null = null;
  */
 export async function obtenirExtracteurEmbeddings() {
   if (!extracteurEmbeddingsPromise) {
-    extracteurEmbeddingsPromise = pipeline(
+    extracteurEmbeddingsPromise = obtenirModuleTransformers().then(({ pipeline }) => pipeline(
       'feature-extraction',
       'Xenova/all-MiniLM-L6-v2',
       { quantized: true }
-    );
+    ));
   }
   return extracteurEmbeddingsPromise;
 }
