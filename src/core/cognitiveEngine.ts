@@ -122,7 +122,8 @@ export function similariteCosinus(vecA: number[], vecB: number[]): number {
  */
 export async function rechercheHybride(
   question: string,
-  memoire: MemoryStore
+  memoire: MemoryStore,
+  seuilSimilarite = 0.82
 ): Promise<{ sujet: string; entry: MemoryEntry; score: number } | null> {
   if (!question || !memoire || Object.keys(memoire).length === 0) return null;
 
@@ -192,8 +193,8 @@ export async function rechercheHybride(
     }
   }
 
-  // 3. Retourne l'entrée avec le meilleur score si score > 0.82
-  if (meilleurResultat && maxScore > 0.82) {
+  // 3. Retourne l'entrée avec le meilleur score au-dessus du seuil demandé
+  if (meilleurResultat && maxScore > seuilSimilarite) {
     return meilleurResultat;
   }
 
@@ -265,24 +266,39 @@ export async function trouverSensSimilaire(
   if (!question || !memoire || Object.keys(memoire).length === 0) return null;
 
   try {
+    // Fast path : la majorité des demandes pertinentes peuvent être résolues
+    // après filtrage lexical, sans parcourir toute la mémoire vectorielle.
+    const matchRapide = await rechercheHybride(question, memoire, seuilSimilarite);
+    if (matchRapide) return matchRapide;
+
     const questionVec = await obtenirVecteurCache(question);
     if (!questionVec || questionVec.length === 0) return null;
+
+    const candidats = Object.entries(memoire).flatMap(([sujet, entries]) =>
+      entries.map(entry => ({ sujet, entry }))
+    );
+
+    // Les entrées historiques sans vecteur sont calculées par lots limités
+    // afin d’éviter une longue série d’inférences séquentielles.
+    const BATCH_SIZE = 4;
+    for (let debut = 0; debut < candidats.length; debut += BATCH_SIZE) {
+      const lot = candidats.slice(debut, debut + BATCH_SIZE);
+      await Promise.all(lot.map(async ({ sujet, entry }) => {
+        if (entry.vecteur && entry.vecteur.length > 0) return;
+
+        const texteRef = entry.question_origine
+          ? `${entry.question_origine} (${sujet})`
+          : `${sujet} : ${entry.def}`;
+        entry.vecteur = await obtenirVecteurCache(texteRef);
+      }));
+    }
 
     let meilleurMatch: { sujet: string; entry: MemoryEntry; score: number } | null = null;
     let maxScore = -1;
 
-    for (const [sujet, entries] of Object.entries(memoire)) {
-      for (const entry of entries) {
-        let entryVec = entry.vecteur;
-        if (!entryVec || entryVec.length === 0) {
-          // Si l'entrée n'a pas encore son vecteur, le calculer à partir du contenu ou de la question d'origine
-          const texteRef = entry.question_origine
-            ? `${entry.question_origine} (${sujet})`
-            : `${sujet} : ${entry.def}`;
-          entryVec = await obtenirVecteurCache(texteRef);
-          entry.vecteur = entryVec;
-        }
-
+    for (const { sujet, entry } of candidats) {
+      const entryVec = entry.vecteur;
+      if (entryVec && entryVec.length > 0) {
         const score = similariteCosinus(questionVec, entryVec);
         if (score > maxScore) {
           maxScore = score;
