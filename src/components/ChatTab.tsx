@@ -1,8 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import {
   Send,
+  Loader2,
   Trash2,
   Mic,
   MicOff,
@@ -40,19 +44,19 @@ import { ChatMessage, ChatThread, PendingAgentAction, ToolExecutionTrace } from 
 
 const markdownComponents = {
   p: ({ children }: any) => (
-    <p className="mb-2.5 last:mb-0 leading-relaxed text-gray-100">{children}</p>
+    <p className="mb-3 last:mb-0 leading-relaxed text-gray-100 break-words">{children}</p>
   ),
   ul: ({ children }: any) => (
-    <ul className="list-disc list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
+    <ul className="list-disc list-inside space-y-1.5 my-2.5 text-gray-200 pl-1 break-words">
       {children}
     </ul>
   ),
   ol: ({ children }: any) => (
-    <ol className="list-decimal list-inside space-y-1.5 my-2.5 text-gray-200 pl-1">
+    <ol className="list-decimal list-inside space-y-1.5 my-2.5 text-gray-200 pl-1 break-words">
       {children}
     </ol>
   ),
-  li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
+  li: ({ children }: any) => <li className="leading-relaxed break-words">{children}</li>,
   strong: ({ children }: any) => (
     <strong className="font-semibold text-emerald-300">{children}</strong>
   ),
@@ -61,13 +65,13 @@ const markdownComponents = {
     const isMultiLine = typeof children === 'string' && children.includes('\n');
     if (className || isMultiLine) {
       return (
-        <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto text-emerald-200 leading-normal">
+        <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto max-w-full text-emerald-200 leading-normal">
           <code className={className}>{children}</code>
         </pre>
       );
     }
     return (
-      <code className="px-1.5 py-0.5 rounded bg-gray-800/90 text-emerald-300 font-mono text-[11px] sm:text-xs border border-gray-700/50">
+      <code className="px-1.5 py-0.5 rounded bg-gray-800/90 text-emerald-300 font-mono text-[11px] sm:text-xs border border-gray-700/50 break-all">
         {children}
       </code>
     );
@@ -78,18 +82,18 @@ const markdownComponents = {
     </blockquote>
   ),
   h1: ({ children }: any) => (
-    <h1 className="text-base font-bold text-white mb-2">{children}</h1>
+    <h1 className="text-base font-bold text-white mb-2 break-words">{children}</h1>
   ),
   h2: ({ children }: any) => (
-    <h2 className="text-sm font-bold text-emerald-400 mb-1.5">{children}</h2>
+    <h2 className="text-sm font-bold text-emerald-400 mb-1.5 break-words">{children}</h2>
   ),
   h3: ({ children }: any) => (
-    <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
+    <h3 className="text-xs font-bold text-cyan-300 mb-1 break-words">{children}</h3>
   ),
   hr: () => <hr className="my-3 border-gray-800" />,
   table: ({ children }: any) => (
-    <div className="my-3 w-full overflow-x-auto rounded-xl border border-gray-800 bg-[#080B12]/95 shadow-lg shadow-black/40">
-      <table className="min-w-full divide-y divide-gray-800 text-left text-xs border-collapse">
+    <div className="w-full overflow-x-auto max-w-full my-3 rounded-xl border border-gray-800 bg-[#080B12]/95 shadow-lg shadow-black/40">
+      <table className="min-w-full border-collapse text-left text-xs">
         {children}
       </table>
     </div>
@@ -133,80 +137,106 @@ const markdownComponents = {
   del: ({ children }: any) => (
     <del className="line-through text-gray-500">{children}</del>
   ),
+  math: ({ children }: any) => (
+    <div className="overflow-x-auto w-full py-2 my-2 text-center">{children}</div>
+  ),
+  inlineMath: ({ children }: any) => (
+    <span className="inline-block px-0.5">{children}</span>
+  ),
+  div: ({ className, children, ...props }: any) => {
+    if (className?.includes('math') || className?.includes('katex')) {
+      return (
+        <div className="overflow-x-auto w-full py-2 my-2 text-center" {...props}>
+          {children}
+        </div>
+      );
+    }
+    return (
+      <div className={className} {...props}>
+        {children}
+      </div>
+    );
+  },
 };
 
-interface BotTypewriterMessageProps {
-  text?: string;
-  onComplete: () => void;
-  onTick?: () => void;
+/**
+ * Prétraite le texte Markdown pour convertir proprement les notations LaTeX
+ * (\( ... \), \[ ... \], et expressions \displaystyle sans délimiteurs)
+ * en syntaxe standard $inline$ et $$bloc$$ reconnue par remark-math et rehype-katex,
+ * sans jamais corrompre les formules contenant déjà des délimiteurs $ ou $$.
+ */
+function formatMarkdownMath(content: string): string {
+  if (!content) return '';
+
+  let formatted = content;
+
+  // 1. Convertit les blocs LaTeX \[ ... \] en $$ ... $$
+  formatted = formatted.replace(/\\\[([\s\S]*?)\\\]/g, (_match, math) => `$$\n${math.trim()}\n$$`);
+
+  // 2. Convertit les expressions LaTeX en ligne \( ... \) en $ ... $
+  formatted = formatted.replace(/\\\(([\s\S]*?)\\\)/g, (_match, math) => `$${math.trim()}$`);
+
+  // 3. Détecte les lignes isolées débutant par \displaystyle sans $
+  const lines = formatted.split('\n');
+  const processed = lines.map(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('\\displaystyle') && !trimmed.includes('$')) {
+      return `$$\n${trimmed}\n$$`;
+    }
+    if (
+      trimmed.startsWith('\\begin{') &&
+      !trimmed.includes('$') &&
+      /\\end\{(?:matrix|pmatrix|bmatrix|cases|aligned|align|equation)\*?\}$/.test(trimmed)
+    ) {
+      return `$$\n${trimmed}\n$$`;
+    }
+    return line;
+  });
+
+  return processed.join('\n');
+}
+
+interface MarkdownErrorBoundaryProps {
+  children: React.ReactNode;
+  rawText: string;
+}
+
+interface MarkdownErrorBoundaryState {
+  hasError: boolean;
 }
 
 /**
- * Composant de message KADERBOT NOVA avec effet machine à écrire (streaming)
- * Uniquement actif pour les nouveaux messages en temps réel (msg.isNew === true).
- * Sécurisé contre les valeurs nulles, indéfinies ou vides et sans effet de bord dans les updaters de state.
+ * Barrière de sécurité pour isoler tout problème de rendu Markdown ou KaTeX.
+ * En cas de formule mal formée, affiche le texte brut sans jamais crasher l'interface.
  */
-const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
-  text = '',
-  onComplete,
-  onTick,
-}) => {
-  const safeText = (text || '').trim();
-  const [displayedLength, setDisplayedLength] = useState(1);
-  const isTyping = displayedLength < safeText.length;
-  const onCompleteRef = useRef(onComplete);
-  const onTickRef = useRef(onTick);
+class MarkdownErrorBoundary extends React.Component<
+  MarkdownErrorBoundaryProps,
+  MarkdownErrorBoundaryState
+> {
+  constructor(props: MarkdownErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
-  useEffect(() => {
-    onCompleteRef.current = onComplete;
-    onTickRef.current = onTick;
-  }, [onComplete, onTick]);
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
 
-  useEffect(() => {
-    if (safeText.length <= 1) {
-      const timer = setTimeout(() => {
-        onCompleteRef.current?.();
-      }, 50);
-      return () => clearTimeout(timer);
+  componentDidCatch(error: any) {
+    console.warn('Erreur interceptée par MarkdownErrorBoundary :', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="text-gray-100 text-xs sm:text-sm leading-relaxed break-words whitespace-pre-wrap">
+          {this.props.rawText}
+        </div>
+      );
     }
-
-    let current = 1;
-    // Vitesse fluide ~20ms par caractère
-    const interval = setInterval(() => {
-      const step = safeText.length > 350 ? 2 : 1;
-      current = Math.min(safeText.length, current + step);
-      setDisplayedLength(current);
-      onTickRef.current?.();
-
-      if (current >= safeText.length) {
-        clearInterval(interval);
-        setTimeout(() => {
-          onCompleteRef.current?.();
-        }, 100);
-      }
-    }, 20);
-
-    return () => clearInterval(interval);
-  }, [safeText]);
-
-  const displayedContent = safeText.slice(0, displayedLength);
-
-  return (
-    <div className="relative">
-      <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-          {displayedContent || safeText}
-        </ReactMarkdown>
-      </div>
-      {isTyping && (
-        <span
-          className="inline-block w-1.5 h-3.5 bg-emerald-400 animate-pulse ml-0.5 align-middle rounded-xs"
-          title="Frappe en cours..."
-        />
-      )}
-    </div>
-  );
-};
+    return this.props.children;
+  }
+}
 
 interface ThinkingAccordionProps {
   thinkingStatus?: string;
@@ -697,10 +727,6 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleTypingTick = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
   // Sync prefilledText when passed from Action menu or chips
   useEffect(() => {
     if (prefilledText !== undefined && prefilledText !== '') {
@@ -718,7 +744,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'auto',
+      });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
   }, [messages, isThinking]);
 
   // La zone de message grandit avec le texte sans dépasser une hauteur confortable sur mobile.
@@ -1132,167 +1165,186 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       {/* Messages Scroll Area - Only this container scrolls */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto min-h-0 px-3 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-5 overscroll-contain"
+        style={{ overflowAnchor: 'none' }}
+        className="flex-1 overflow-y-auto min-h-0 px-4 py-4 sm:px-6 sm:py-6 overscroll-contain [overflow-anchor:none]"
       >
-        {/* Session cognitive : indicateur simple conservé pour tous les utilisateurs */}
-        <div className="flex justify-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
+        <div className="max-w-4xl mx-auto w-full space-y-4 sm:space-y-6">
+          {/* Session cognitive : indicateur simple conservé pour tous les utilisateurs */}
+          <div className="flex justify-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
+            </div>
           </div>
-        </div>
 
-        {/* Message bubbles */}
-        {messages.map(msg => {
-          const isUser = msg.author === 'Toi';
-          return (
-            <div
-              key={msg.id}
-              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group transition-all`}
-            >
-              {/* Author name & source badge */}
+          {/* Message bubbles */}
+          {messages.map(msg => {
+            const isUser = msg.author === 'Toi';
+            return (
               <div
-                className={`flex items-center gap-2 mb-1 px-1 text-[11px] font-semibold ${
-                  isUser ? 'text-gray-400' : 'text-emerald-400'
-                }`}
+                key={msg.id}
+                className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group transition-all`}
               >
-                <span>{isUser ? 'TOI' : 'KADERBOT NOVA'}</span>
-                {isAdmin && !isUser && msg.meta?.source && (
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 border border-gray-700/60">
-                    {msg.meta.source === 'groq-agent'
-                      ? '🤖 Agent Groq'
-                      : msg.meta.source === 'openrouter-agent'
-                      ? '🤖 Agent OpenRouter'
-                      : msg.meta.source === 'groq-chat'
-                      ? '⚡ Groq Chat'
-                      : msg.meta.source === 'deduction'
-                      ? '⛓️ Déduction logique'
-                      : msg.meta.source === 'local_memoire'
-                      ? '🧠 Mémoire interne'
-                      : msg.meta.source === 'regle'
-                      ? '📐 Règle universelle'
-                      : msg.meta.source === 'gemini'
-                      ? '✨ Gemini 3.8'
-                      : msg.meta.source === 'groq'
-                      ? '⚡ Groq'
-                      : msg.meta.source === 'openrouter'
-                      ? '🦙 Llama (OpenRouter)'
-                      : 'Système'}
-                  </span>
-                )}
-                {isAdmin && !isUser && msg.meta?.isFallback && (
-                  <span
-                    className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-500/40 cursor-help"
-                    title={msg.meta.fallbackReason || 'Mode dégradé sans recherche'}
-                  >
-                    ⚠️ Mode dégradé (sans recherche)
-                  </span>
-                )}
-                <span className="text-gray-600 text-[10px]">{msg.timestamp}</span>
-              </div>
-
-              {/* Message box */}
-              <div
-                className={`relative max-w-[92%] sm:max-w-[78%] rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 text-xs sm:text-sm leading-relaxed shadow-lg ${
-                  isUser
-                    ? 'bg-[#1E2028] text-white border border-gray-700/60 rounded-tr-sm'
-                    : 'bg-[#0E131F] text-gray-100 border border-emerald-500/25 rounded-tl-sm shadow-emerald-950/20'
-                }`}
-              >
-                {/* Main text with Markdown & Typewriter streaming */}
-                {isUser ? (
-                  <div className="whitespace-pre-wrap break-words">{msg.text || ''}</div>
-                ) : msg.isNew ? (
-                  <BotTypewriterMessage
-                    text={msg.text || ''}
-                    onComplete={() => {
-                      onMessageAnimationComplete?.(msg.id);
-                    }}
-                    onTick={handleTypingTick}
-                  />
-                ) : (
-                  <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {(msg.text && msg.text.trim()) || ''}
-                    </ReactMarkdown>
-                  </div>
-                )}
-
-                {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
-                {isAdmin && !isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
-                  <AgentTraceAccordion toolTrace={msg.meta.toolTrace} />
-                )}
-
-                {/* Deductive chain visual crumb if applicable */}
-                {isAdmin && !isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
-                  <div className="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center gap-1.5 flex-wrap text-[11px] text-cyan-300 font-mono">
-                    <span className="text-gray-500">Chaîne cognitive :</span>
-                    {msg.meta.chemin.map((step, idx) => (
-                      <React.Fragment key={idx}>
-                        <span className="bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-800/30">
-                          {step}
-                        </span>
-                        {idx < msg.meta!.chemin!.length - 1 && <span className="text-gray-600">→</span>}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                )}
-
-                {/* Interactive Cognitive Feedback buttons (Admin Only - Just like Python script!) */}
-                {isAdmin && !isUser && msg.meta?.sujet && (
-                  <div className="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-[11px] text-gray-400">
-                      Ce fait sur <span className="text-emerald-400 font-mono font-bold">{msg.meta.sujet}</span> est-il exact ?
+                {/* Author name & source badge */}
+                <div
+                  className={`flex items-center gap-2 mb-1 px-1 text-[11px] font-semibold ${
+                    isUser ? 'text-gray-400' : 'text-emerald-400'
+                  }`}
+                >
+                  <span>{isUser ? 'TOI' : 'KADERBOT NOVA'}</span>
+                  {isAdmin && !isUser && msg.meta?.source && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 border border-gray-700/60">
+                      {msg.meta.source === 'groq-agent'
+                        ? '🤖 Agent Groq'
+                        : msg.meta.source === 'openrouter-agent'
+                        ? '🤖 Agent OpenRouter'
+                        : msg.meta.source === 'groq-chat'
+                        ? '⚡ Groq Chat'
+                        : msg.meta.source === 'deduction'
+                        ? '⛓️ Déduction logique'
+                        : msg.meta.source === 'local_memoire'
+                        ? '🧠 Mémoire interne'
+                        : msg.meta.source === 'regle'
+                        ? '📐 Règle universelle'
+                        : msg.meta.source === 'gemini'
+                        ? '✨ Gemini 3.8'
+                        : msg.meta.source === 'groq'
+                        ? '⚡ Groq'
+                        : msg.meta.source === 'openrouter'
+                        ? '🦙 Llama (OpenRouter)'
+                        : 'Système'}
                     </span>
-                    <div className="flex items-center gap-1.5">
+                  )}
+                  {isAdmin && !isUser && msg.meta?.isFallback && (
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-500/40 cursor-help"
+                      title={msg.meta.fallbackReason || 'Mode dégradé sans recherche'}
+                    >
+                      ⚠️ Mode dégradé (sans recherche)
+                    </span>
+                  )}
+                  <span className="text-gray-600 text-[10px]">{msg.timestamp}</span>
+                </div>
+
+                {/* Message presentation: User Bubble vs Bot Free Flow (DeepSeek style) */}
+                {isUser ? (
+                  /* Utilisateur : Bulle alignée à droite, max-w-[85%], bg-[#1E2028], rounded-2xl, bordure */
+                  <div className="relative max-w-[85%] rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 text-xs sm:text-sm leading-relaxed shadow-lg bg-[#1E2028] text-white border border-gray-700/60 rounded-tr-sm">
+                    <div className="whitespace-pre-wrap break-words">{msg.text || ''}</div>
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                       <button
-                        onClick={() => onAdjustWeight(msg.meta!.sujet!, 0.1)}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium transition active:scale-95"
-                        title="Renforcer le poids de confiance (+0.1)"
+                        onClick={() => handleCopy(msg.id, msg.text || '')}
+                        className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
+                        title="Copier le texte"
                       >
-                        <ThumbsUp className="w-3 h-3" />
-                        <span>Exact (+0.1)</span>
+                        {copiedId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Bot : Style DeepSeek - aucun fond, aucune bordure, aucun padding de boîte, avec fondu doux */
+                  <div className="relative w-full max-w-none bg-transparent px-0 py-2 text-xs sm:text-sm leading-relaxed text-gray-100 animate-in fade-in duration-500 animate-fade-in">
+                    {/* Main text with Markdown & KaTeX LaTeX math */}
+                    <div className="text-gray-100 text-xs sm:text-sm leading-relaxed break-words">
+                      <MarkdownErrorBoundary rawText={msg.text || ''}>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkMath]}
+                          rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                          components={markdownComponents}
+                        >
+                          {formatMarkdownMath((msg.text && msg.text.trim()) || '')}
+                        </ReactMarkdown>
+                      </MarkdownErrorBoundary>
+                    </div>
+
+                    {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
+                    {isAdmin && !isUser && msg.meta?.toolTrace && msg.meta.toolTrace.length > 0 && (
+                      <AgentTraceAccordion toolTrace={msg.meta.toolTrace} />
+                    )}
+
+                    {/* Deductive chain visual crumb if applicable */}
+                    {isAdmin && !isUser && msg.meta?.chemin && msg.meta.chemin.length > 1 && (
+                      <div className="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center gap-1.5 flex-wrap text-[11px] text-cyan-300 font-mono">
+                        <span className="text-gray-500">Chaîne cognitive :</span>
+                        {msg.meta.chemin.map((step, idx) => (
+                          <React.Fragment key={idx}>
+                            <span className="bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-800/30">
+                              {step}
+                            </span>
+                            {idx < msg.meta!.chemin!.length - 1 && <span className="text-gray-600">→</span>}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Interactive Cognitive Feedback buttons (Admin Only - Just like Python script!) */}
+                    {isAdmin && !isUser && msg.meta?.sujet && (
+                      <div className="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] text-gray-400">
+                          Ce fait sur <span className="text-emerald-400 font-mono font-bold">{msg.meta.sujet}</span> est-il exact ?
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => onAdjustWeight(msg.meta!.sujet!, 0.1)}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium transition active:scale-95"
+                            title="Renforcer le poids de confiance (+0.1)"
+                          >
+                            <ThumbsUp className="w-3 h-3" />
+                            <span>Exact (+0.1)</span>
+                          </button>
+                          <button
+                            onClick={() => onAdjustWeight(msg.meta!.sujet!, -0.15)}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-500/30 text-rose-300 text-[11px] font-medium transition active:scale-95"
+                            title="Baisser le poids de confiance (-0.15)"
+                          >
+                            <ThumbsDown className="w-3 h-3" />
+                            <span>Inexact (-0.15)</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bot message actions: Copy & Speech bar */}
+                    <div className="mt-2 flex items-center gap-2 text-gray-500 opacity-60 hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => handleCopy(msg.id, msg.text || '')}
+                        className="px-2 py-1 rounded bg-gray-900/80 hover:bg-gray-800 border border-gray-800 text-gray-400 hover:text-white text-[11px] flex items-center gap-1.5 transition"
+                        title="Copier le texte"
+                      >
+                        {copiedId === msg.id ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-400">Copié</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Copier</span>
+                          </>
+                        )}
                       </button>
                       <button
-                        onClick={() => onAdjustWeight(msg.meta!.sujet!, -0.15)}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-500/30 text-rose-300 text-[11px] font-medium transition active:scale-95"
-                        title="Baisser le poids de confiance (-0.15)"
+                        onClick={() => speakText(msg.text || '')}
+                        className="px-2 py-1 rounded bg-gray-900/80 hover:bg-gray-800 border border-gray-800 text-gray-400 hover:text-white text-[11px] flex items-center gap-1.5 transition"
+                        title="Lire à haute voix"
                       >
-                        <ThumbsDown className="w-3 h-3" />
-                        <span>Inexact (-0.15)</span>
+                        <Volume2 className="w-3 h-3" />
+                        <span>Écouter</span>
                       </button>
                     </div>
                   </div>
                 )}
-
-                {/* Message action bar: Copy & Speech */}
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                  <button
-                    onClick={() => handleCopy(msg.id, msg.text || '')}
-                    className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
-                    title="Copier le texte"
-                  >
-                    {copiedId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  </button>
-                  {!isUser && (
-                    <button
-                      onClick={() => speakText(msg.text || '')}
-                      className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
-                      title="Lire à haute voix"
-                    >
-                      <Volume2 className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
 
-        {/* Fenêtre Accordéon repliable "Réflexion" pendant le raisonnement */}
-        {isThinking && <ThinkingAccordion thinkingStatus={isAdmin ? thinkingStatus : 'Je réfléchis à ta demande...'} />}
+          {/* Fenêtre Accordéon repliable "Réflexion" pendant le raisonnement */}
+          {isThinking && (
+            <ThinkingAccordion thinkingStatus={isAdmin ? thinkingStatus : 'Je réfléchis à ta demande...'} />
+          )}
 
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Floating Scroll Buttons (From Tkinter V13.8 on Android) */}
@@ -1362,8 +1414,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             disabled={!inputText.trim() || isThinking}
             className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs sm:text-sm font-bold shadow-md shadow-emerald-950/40 transition active:scale-95"
           >
-            <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Envoyer</span>
+            {isThinking ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-200" />
+                <span className="hidden sm:inline">Réflexion...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4" />
+                <span className="hidden sm:inline">Envoyer</span>
+              </>
+            )}
           </button>
 
           {/* New Discussion Button */}

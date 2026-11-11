@@ -1209,7 +1209,6 @@ export default function App() {
             : chatRes.provider === 'groq'
             ? 'groq'
             : 'gemini';
-
         metaPayload = {
           source: botSource,
           model: chatRes.model,
@@ -1218,6 +1217,8 @@ export default function App() {
         };
       }
 
+      // L'indicateur "Réflexion" disparaît dès que le bot s'apprête à afficher sa réponse finale
+      setIsThinking(false);
       addBotMessage(responseText, metaPayload);
       setGroqLog(prev => [{ q: text, r: responseText, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 20)]);
 
