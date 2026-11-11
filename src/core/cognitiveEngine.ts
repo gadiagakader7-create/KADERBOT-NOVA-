@@ -163,6 +163,27 @@ export async function rechercheHybride(
     return null;
   }
 
+  // Calcule les sujets manquants une seule fois et par petits lots. Plusieurs
+  // entrées peuvent partager le même sujet et le même vecteur.
+  const sujetsAIndexer = Array.from(new Set(
+    candidats
+      .filter(({ entry }) => !entry.vecteur || entry.vecteur.length === 0)
+      .map(({ sujet }) => sujet)
+  ));
+  const BATCH_SIZE = 4;
+  for (let debut = 0; debut < sujetsAIndexer.length; debut += BATCH_SIZE) {
+    const lot = sujetsAIndexer.slice(debut, debut + BATCH_SIZE);
+    await Promise.all(lot.map(async sujet => {
+      const vec = await obtenirVecteur(sujet);
+      if (vec.length === 0) return;
+      for (const candidat of candidats) {
+        if (candidat.sujet === sujet && (!candidat.entry.vecteur || candidat.entry.vecteur.length === 0)) {
+          candidat.entry.vecteur = vec;
+        }
+      }
+    }));
+  }
+
   // 2. Comparaison vectorielle (sur le sous-ensemble filtré)
   const questionVec = await obtenirVecteur(question);
   if (!questionVec || questionVec.length === 0) {
@@ -173,12 +194,7 @@ export async function rechercheHybride(
   let maxScore = -1;
 
   for (const item of candidats) {
-    let entryVec = item.entry.vecteur;
-    if (!entryVec || entryVec.length === 0) {
-      // Secours si le vecteur n'était pas encore pré-calculé
-      entryVec = await obtenirVecteur(item.sujet);
-      item.entry.vecteur = entryVec;
-    }
+    const entryVec = item.entry.vecteur;
 
     if (entryVec && entryVec.length > 0) {
       const score = similariteCosinus(questionVec, entryVec);

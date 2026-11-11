@@ -39,9 +39,7 @@ import {
   trouverQuestionReponse,
   estRequeteDefinition,
   nettoyerMemoirePolluee,
-  trouverSensSimilaire,
   rechercheHybride,
-  precalculerTousLesVecteurs,
   obtenirVecteur,
   obtenirVecteurCache,
   resoudrePronomsAvecHistorique,
@@ -257,55 +255,6 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingStatus, setThinkingStatus] = useState<string>('KADERBOT réfléchit...');
   const [isAgentActive, setIsAgentActive] = useState(false);
-  const [indexingProgress, setIndexingProgress] = useState<number | null>(null);
-
-  // Tâche 1 : Pré-calcul des vecteurs (exécuté une seule fois avec le flag hasPrecalculated)
-  useEffect(() => {
-    const hasPrecalculated = localStorage.getItem('hasPrecalculated');
-    if (hasPrecalculated === 'true') {
-      return;
-    }
-
-    let isMounted = true;
-
-    const lancerPrecalcul = async () => {
-      try {
-        setIndexingProgress(0);
-        await precalculerTousLesVecteurs(memoire, pct => {
-          if (isMounted) {
-            setIndexingProgress(pct);
-          }
-        });
-
-        if (isMounted) {
-          setMemoire({ ...memoire });
-          try {
-            localStorage.setItem(`kaderbot_memoire_${config.activeSession}`, JSON.stringify(memoire));
-          } catch (e) {
-            console.warn('Quota localStorage atteint lors de la sauvegarde:', e);
-          }
-          localStorage.setItem('hasPrecalculated', 'true');
-          setTimeout(() => {
-            if (isMounted) setIndexingProgress(null);
-          }, 1500);
-        }
-      } catch (err) {
-        console.error('Erreur lors du pré-calcul des vecteurs:', err);
-        if (isMounted) setIndexingProgress(null);
-      }
-    };
-
-    // Petit délai de 200ms après montage initial pour fluidifier le premier rendu de la page
-    const timer = setTimeout(() => {
-      lancerPrecalcul();
-    }, 200);
-
-    return () => {
-      isMounted = false;
-      clearTimeout(timer);
-    };
-  }, []);
-
   // 1. Priorité au Local au démarrage : Si localStorage est vide, chargement initial serveur
   useEffect(() => {
     const localMemo = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
@@ -1318,24 +1267,6 @@ export default function App() {
         isAdmin={isAdmin}
         isAgentActive={isAgentActive}
       />
-
-      {/* Notification de progression de l'indexation sémantique (Tâche 1) */}
-      {indexingProgress !== null && (
-        <div className="fixed top-16 right-4 z-50 flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-gray-900/95 border border-emerald-500/40 text-emerald-300 text-xs font-medium shadow-2xl backdrop-blur-md">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <span>
-            {indexingProgress >= 100
-              ? 'Indexation de la mémoire : 100% (Terminé)'
-              : `Indexation de la mémoire : ${indexingProgress}%`}
-          </span>
-          <div className="w-16 h-1.5 bg-gray-800 rounded-full overflow-hidden ml-1">
-            <div
-              className="h-full bg-emerald-400 transition-all duration-150"
-              style={{ width: `${indexingProgress}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Espace de travail principal */}
       <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
