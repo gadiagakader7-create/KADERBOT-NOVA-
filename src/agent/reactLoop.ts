@@ -214,13 +214,58 @@ export async function runToolLoopWithModel(
 
     // Réponse texte finale
     const content = assistantMsg.content?.trim() || '';
+    if (content) {
+      return {
+        text: content,
+        provider: providerLabel,
+        model,
+        toolTrace,
+      };
+    }
+
+    // Si le modèle n'a pas formulé de texte après l'exécution d'un ou plusieurs outils (ex: memo_lookup, memo_store)
+    if (toolTrace.length > 0) {
+      try {
+        const synthController = new AbortController();
+        const synthTimeoutId = setTimeout(() => synthController.abort(), 12000);
+        messages.push({
+          role: 'user',
+          content: 'À partir des données obtenues par les outils ci-dessus, formule maintenant ta réponse directe, complète et naturelle pour l’utilisateur en français.',
+        });
+        const synthResponse = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey.trim()}`,
+            'Content-Type': 'application/json',
+            ...extraHeaders,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.5,
+            max_tokens: 800,
+          }),
+          signal: synthController.signal,
+        });
+        clearTimeout(synthTimeoutId);
+        if (synthResponse.ok) {
+          const synthData: any = await synthResponse.json();
+          const synthText = synthData.choices?.[0]?.message?.content?.trim();
+          if (synthText) {
+            return {
+              text: synthText,
+              provider: providerLabel,
+              model,
+              toolTrace,
+            };
+          }
+        }
+      } catch (synthErr: any) {
+        console.warn('[REACT LOOP] Échec formulation post-outils:', synthErr.message);
+      }
+    }
+
     lastText = content;
-    return {
-      text: content,
-      provider: providerLabel,
-      model,
-      toolTrace,
-    };
   }
 
   // Si la limite d'itérations ou de temps est atteinte, solliciter une dernière synthèse rapide

@@ -67,7 +67,7 @@ export default function App() {
   // Configuration générale de KADERBOT NOVA
   const NOVA_DEFAULT_SYSTEM_PROMPT =
     'Tu es KADERBOT NOVA, un assistant IA expert et pédagogue. Tu réponds toujours en français.\n' +
-    'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown (sauts de ligne, listes à puces, gras).\n' +
+    'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown propre (sauts de ligne, listes à puces, gras). Si tu génères un tableau, utilise la syntaxe standard GitHub Markdown (| Col 1 | Col 2 | suivi de |---|---|) en laissant une ligne vide avant et après le tableau.\n' +
     'RÈGLE DE LONGUEUR ABSOLUE : Ta réponse ne doit jamais dépasser 120 mots. Sois direct et synthétique. Si un sujet est vaste (comme l\'histoire d\'une invention), donne uniquement les 2 ou 3 points les plus importants, et termine en proposant à l\'utilisateur de préciser sa question pour plus de détails. Ne fais JAMAIS de réponse de plus de 4 paragraphes.';
 
   const [config, setConfig] = useState<AppConfig>(() => {
@@ -454,10 +454,12 @@ export default function App() {
 
   // Ajout d'un message bot sans AUCUN affichage de chiffres, scores ou vecteurs
   const addBotMessage = (text: string, meta?: ChatMessage['meta']) => {
+    const cleanText = (text || '').trim() || 'Je suis à votre écoute.';
+
     const newMsg: ChatMessage = {
       id: `kb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       author: 'KB',
-      text,
+      text: cleanText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       meta,
       isNew: true,
@@ -477,7 +479,7 @@ export default function App() {
 
     if (config.soundEnabled && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
+      const u = new SpeechSynthesisUtterance(cleanText);
       u.lang = 'fr-FR';
       window.speechSynthesis.speak(u);
     }
@@ -628,7 +630,15 @@ export default function App() {
   const handleAgentActionDecision = async (actionId: string, decision: 'approve' | 'reject') => {
     try {
       const result = await decideAgentAction(actionId, decision);
-      addBotMessage(result.text, {
+      let text = (result.text || '').trim();
+      if (!text) {
+        const toolNames =
+          result.toolTrace && result.toolTrace.length > 0
+            ? Array.from(new Set(result.toolTrace.map(t => t.tool))).join(', ')
+            : 'action';
+        text = `✅ Action validée et exécutée : ${toolNames}`;
+      }
+      addBotMessage(text, {
         source: 'systeme',
         toolTrace: result.toolTrace,
       });
@@ -1194,7 +1204,7 @@ export default function App() {
             : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...'
         );
         const agentRes = await sendAgentMessage(text, historyFormatted);
-        responseText = agentRes.text || agentRes.question || '';
+        responseText = (agentRes.text || agentRes.question || '').trim();
 
         botSource =
           agentRes.provider === 'groq-agent'
@@ -1218,6 +1228,11 @@ export default function App() {
           routedTo: agentRes.routedTo,
           pendingAction: agentRes.pendingAction,
         };
+
+        // Si l'agent n'a renvoyé aucun texte malgré la boucle, inviter cordialement à reformuler
+        if (!responseText) {
+          responseText = "Désolé, je n'ai pas pu formuler de réponse complète. Peux-tu reformuler ta question ?";
+        }
 
         if (
           agentRes.provider === 'groq-agent' ||

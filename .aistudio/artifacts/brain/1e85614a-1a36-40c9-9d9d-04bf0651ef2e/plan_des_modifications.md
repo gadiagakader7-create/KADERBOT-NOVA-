@@ -1,36 +1,58 @@
-# Plan des Modifications — Boucle ReAct & Accordéon "Réflexion" (KADERBOT NOVA)
+# Plan des Modifications — Architecture Modulaire & Boucle ReAct (KADERBOT NOVA)
 
-## 1. Objectifs Réalisés
+## 1. Découpage et Modularisation Complète de `server.ts`
 
-### A. Intégration de la Boucle de Raisonnement ReAct (Reasoning + Acting)
-- **Principe ReAct appliqué** :
-  1. **Pensée (Thought)** : Décomposition de la tâche en sous-objectifs, analyse de l'état actuel et formulation de l'hypothèse de travail.
-  2. **Action** : Sélection et appel de l'outil approprié (`memo_lookup`, `search_news`, `search_web`, `open_url`, `memo_store`, `link_concepts`, `ask_user`).
-  3. **Observation** : Analyse rigoureuse des données retournées par l'outil ou constat des incidents (ex: protection 403, timeout).
-  4. **Adaptation de la Stratégie (Reflection)** : Réajustement dynamique de la démarche (pivot vers d'autres URLs en cas de blocage, affinement des mots-clés, synthèse dès que les informations suffisent).
+Pour alléger le code de `server.ts` (qui dépassait initialement 800 lignes) sans casser la logique ni les fonctions déjà opérationnelles, nous avons extrait chaque responsabilité dans un module dédié sous `src/server/` et `src/agent/` :
 
-### B. Extension de la Capacité de Raisonnement à 25 Itérations
-- `MAX_AGENT_ITERATIONS` porté de 8 à **25 itérations** dans `server.ts`.
-- `MAX_LOOP_DURATION_MS` ajusté à **90 secondes** côté serveur pour permettre une exploration en profondeur sans coupure prématurée.
-- Timeout client étendu à **120 secondes** via `AbortController` dans `src/services/apiService.ts`.
+### A. Modules Extraits
 
-### C. Fenêtre / Accordéon Repliable "Réflexion"
-- **Pendant la réflexion (`ThinkingAccordion`)** :
-  - Petite fenêtre repliable sous le nom de KADERBOT NOVA avec mention **"🧠 Réflexion"**, points animés et statut en direct.
-  - Clic interactif permettant de déployer les détails de l'étape en cours, la barre de progression ReAct et les 4 piliers méthodologiques (Pensée, Action, Observation, Adaptation).
-- **Dans la réponse finale (`AgentTraceAccordion`)** :
-  - Accordéon sobre replié par défaut : **"🧠 Réflexion • X étapes de raisonnement (ReAct)"**.
-  - Au clic, déploiement complet de la chronologie étape par étape avec :
-    - 💭 **Pensée & Décomposition (Thought)**
-    - ⚙️ **Action exécutée** (outil, arguments, URL source cliquable)
-    - 👁️ **Observation** (extraits ou constat d'incident)
-    - 🎯 **Adaptation de la stratégie** (comment l'agent a réagi pour poursuivre)
+1. **`src/server/storage.ts` (Gestionnaire de persistance)**
+   - Gestion des chemins de stockage (`DATA_DIR`, `MEMORY_FILE`, `NOTES_FILE`, `ACTION_LOG_FILE`, `EVENTS_FILE`, `BRAVE_USAGE_FILE`).
+   - Typages stricts : `KaderbotNote`, `AgentActionLog`, `KaderbotEvent`, `StorageData`.
+   - Primitives de lecture/écriture résilientes et atomiques : `readStorageFile`, `writeStorageFile`, `readJsonArray`, `writeJsonArray`, `appendActionLog`.
+   - Suivi des quotas journaliers de l'API Brave (`checkAndIncrementBraveQuota`, `loadBraveUsage`).
+
+2. **`src/server/webSearch.ts` (Moteur de recherche Web et protection réseau)**
+   - Filtrage anti-SSRF rigoureux (`isUrlForbidden`) : interdiction des adresses locales, RFC 1918 (10.x, 172.16-31.x, 192.168.x), loopback (127.x), link-local (169.254.x), AWS/GCP metadata, IPv6 privés.
+   - Exécution Brave Search (`executeBraveSearch`) : appels vers Brave Web et Brave News API avec quota et timeout contrôlé.
+
+3. **`src/server/llmProviders.ts` (Cascade de repli multi-fournisseurs)**
+   - Résolution automatique des modèles (`resolveGroqModel`, `resolveOpenRouterModel`).
+   - Cascade de repli sur 4 niveaux : **Groq primary** -> **Groq backup (20b/llama3-70b)** -> **OpenRouter** -> **Gemini Flash**.
+   - Fonctions dédiées : `callGroqWithFallback`, `callOpenRouterWithFallback`, `callGeminiWithFallback`.
+   - Prompt système complet par défaut (`DEFAULT_SYSTEM_PROMPT`).
+
+4. **`src/server/middleware.ts` (Sécurité Express)**
+   - Rate limiting par IP en mémoire glissante (`createAgentRateLimiter`).
+   - Authentification administrateur timing-safe (`createRequireAdmin` avec `crypto.timingSafeEqual`) pour prévenir les attaques temporelles.
+
+5. **`src/agent/intentClassifier.ts` (Routage cognitif rapide)**
+   - Classification d'intention ultra-rapide via Groq 20B (`classifyIntentWithRouter`) : distingue instantanément les salutations/discussions directes (`CHAT`) des requêtes nécessitant des outils et de la recherche (`AGENT`).
+
+6. **`server.ts` (Orchestrateur Principal épuré)**
+   - Réduit à **~140 lignes** de code lisibles et maintenables.
+   - Rôle exclusif d'orchestrateur : instancie Express, applique les middlewares, initialise Vite dev/prod, enregistre les routes via `registerHttpRoutes`, et démarre l'écoute sur le port 3000.
 
 ---
 
-## 2. Fichiers Modifiés
-1. `server.ts` : Passage à 25 itérations, enrichissement du prompt système ReAct, capture des pensées et de l'adaptation de stratégie à chaque étape.
-2. `src/types/kaderbot.ts` : Extension de `ToolExecutionTrace` avec `step`, `thought`, `observation`, `strategy`.
-3. `src/services/apiService.ts` : Ajustement du timeout à 120s pour supporter jusqu'à 25 itérations.
-4. `src/components/ChatTab.tsx` : Création de `ThinkingAccordion` et refonte complète de `AgentTraceAccordion` sous forme d'accordéon ReAct "Réflexion".
-5. `src/App.tsx` : Gestion et transmission des statuts dynamiques ReAct au composant de discussion.
+## 2. Boucle ReAct & Interface "Réflexion" (Rappel des Acquis)
+
+### A. Boucle ReAct (25 Itérations)
+- Cycle méthodique : **Pensée (Thought) -> Action (Tool) -> Observation (Result) -> Adaptation (Strategy)**.
+- Outils disponibles : `memo_lookup`, `search_news`, `search_web`, `open_url` (avec User-Agent réaliste anti-403), `memo_store`, `link_concepts`, `ask_user`.
+- Limites serveur sécurisées : 25 itérations max, 90 secondes de boucle ReAct, 120 secondes de timeout client HTTP.
+
+### B. Interface Utilisateur & Accordéons Repliables
+- **`ThinkingAccordion`** : Accordéon en direct avec points animés affichant la pensée en temps réel sans saturer le chat.
+- **`AgentTraceAccordion`** : Accordéon sobre "🧠 Réflexion • X étapes de raisonnement" replié par défaut au-dessus de la réponse Markdown finale.
+
+---
+
+## 3. Matrice de Vérification et Tests Réalisés
+
+- [x] **Compilation TypeScript (`tsc --noEmit`)** : 0 erreur.
+- [x] **Bundle Vite (`npm run build`)** : Réussi en 1.19s.
+- [x] **Vérification API Health (`GET /api/health`)** : Réponse `200 OK {"ok": true}`.
+- [x] **Test Route Chat (`POST /api/agent`)** : Routage instantané vers Groq conversationnel.
+- [x] **Test Route Agent Web (`POST /api/agent`)** : Exécution de recherche Brave, scraping, et synthèse ReAct complète.
+- [x] **Artefacts à jour** : `kaderbot_code_source_complet.md` (450 KB) et `kaderbot_projet_complet.zip` (215 KB).

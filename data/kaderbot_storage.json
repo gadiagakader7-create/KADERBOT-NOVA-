@@ -10,6 +10,17 @@
         "created": "2026-10-26T17:15:41.776Z",
         "last_used": "2026-10-26T17:15:41.776Z"
       }
+    ],
+    "fruits préférés": [
+      {
+        "def": "mes fruits préférés sont la mangue et l'ananas",
+        "poids": 1,
+        "hits": 1,
+        "source": "agent",
+        "type": "concept",
+        "created": "2026-11-10T16:53:46.941Z",
+        "last_used": "2026-11-10T16:53:46.941Z"
+      }
     ]
   },
   "regles": {},
@@ -18,5 +29,5 @@
   "sessions": [
     "defaut"
   ],
-  "updatedAt": "2026-10-26T17:15:41.776Z"
+  "updatedAt": "2026-11-10T16:53:46.942Z"
 }

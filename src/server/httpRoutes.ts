@@ -563,14 +563,16 @@ app.post('/api/agent', async (req, res) => {
             'openai/gpt-oss-120b',
             history
           );
-          return res.json({
-            text: chatRes.text,
-            provider: 'groq-chat',
-            model: chatRes.actualModel,
-            routedTo: 'chat',
-            toolTrace: [],
-            isFallback: false,
-          });
+          if (chatRes.text && chatRes.text.trim()) {
+            return res.json({
+              text: chatRes.text.trim(),
+              provider: 'groq-chat',
+              model: chatRes.actualModel,
+              routedTo: 'chat',
+              toolTrace: [],
+              isFallback: false,
+            });
+          }
         } catch (chatErr: any) {
           console.warn(`[ROUTER AGENT] Groq chat direct a échoué (${chatErr.message}), bascule sur Gemini...`);
         }

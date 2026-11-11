@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Send,
   Trash2,
@@ -86,10 +87,56 @@ const markdownComponents = {
     <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
   ),
   hr: () => <hr className="my-3 border-gray-800" />,
+  table: ({ children }: any) => (
+    <div className="my-3 w-full overflow-x-auto rounded-xl border border-gray-800 bg-[#080B12]/95 shadow-lg shadow-black/40">
+      <table className="min-w-full divide-y divide-gray-800 text-left text-xs border-collapse">
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children }: any) => (
+    <thead className="bg-[#101726] text-emerald-300 font-semibold border-b border-gray-800">
+      {children}
+    </thead>
+  ),
+  tbody: ({ children }: any) => (
+    <tbody className="divide-y divide-gray-800/70 text-gray-200">
+      {children}
+    </tbody>
+  ),
+  tr: ({ children }: any) => (
+    <tr className="hover:bg-emerald-950/25 transition-colors">
+      {children}
+    </tr>
+  ),
+  th: ({ children }: any) => (
+    <th className="px-3.5 py-2.5 text-[11px] sm:text-xs font-bold tracking-wider text-emerald-400 uppercase bg-[#101726]/90 border-r border-gray-800/60 last:border-r-0">
+      {children}
+    </th>
+  ),
+  td: ({ children }: any) => (
+    <td className="px-3.5 py-2.5 text-xs text-gray-200 border-r border-gray-800/60 last:border-r-0 whitespace-normal leading-relaxed">
+      {children}
+    </td>
+  ),
+  a: ({ href, children }: any) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 inline-flex items-center gap-1 font-medium break-all"
+    >
+      {children}
+      <ExternalLink className="w-3 h-3 inline shrink-0 opacity-70" />
+    </a>
+  ),
+  del: ({ children }: any) => (
+    <del className="line-through text-gray-500">{children}</del>
+  ),
 };
 
 interface BotTypewriterMessageProps {
-  text: string;
+  text?: string;
   onComplete: () => void;
   onTick?: () => void;
 }
@@ -97,45 +144,58 @@ interface BotTypewriterMessageProps {
 /**
  * Composant de message KADERBOT NOVA avec effet machine à écrire (streaming)
  * Uniquement actif pour les nouveaux messages en temps réel (msg.isNew === true).
+ * Sécurisé contre les valeurs nulles, indéfinies ou vides et sans effet de bord dans les updaters de state.
  */
 const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
-  text,
+  text = '',
   onComplete,
   onTick,
 }) => {
+  const safeText = (text || '').trim();
   const [displayedLength, setDisplayedLength] = useState(1);
-  const isTyping = displayedLength < text.length;
+  const isTyping = displayedLength < safeText.length;
+  const onCompleteRef = useRef(onComplete);
+  const onTickRef = useRef(onTick);
 
   useEffect(() => {
-    if (displayedLength >= text.length) {
-      onComplete();
-      return;
+    onCompleteRef.current = onComplete;
+    onTickRef.current = onTick;
+  }, [onComplete, onTick]);
+
+  useEffect(() => {
+    if (safeText.length <= 1) {
+      const timer = setTimeout(() => {
+        onCompleteRef.current?.();
+      }, 50);
+      return () => clearTimeout(timer);
     }
 
+    let current = 1;
     // Vitesse fluide ~20ms par caractère
     const interval = setInterval(() => {
-      setDisplayedLength(prev => {
-        const step = text.length > 350 ? 2 : 1;
-        const next = Math.min(text.length, prev + step);
-        if (next >= text.length) {
-          clearInterval(interval);
-          onComplete();
-        }
-        return next;
-      });
-      onTick?.();
+      const step = safeText.length > 350 ? 2 : 1;
+      current = Math.min(safeText.length, current + step);
+      setDisplayedLength(current);
+      onTickRef.current?.();
+
+      if (current >= safeText.length) {
+        clearInterval(interval);
+        setTimeout(() => {
+          onCompleteRef.current?.();
+        }, 100);
+      }
     }, 20);
 
     return () => clearInterval(interval);
-  }, [text, onComplete, onTick, displayedLength]);
+  }, [safeText]);
 
-  const displayedContent = text.slice(0, displayedLength);
+  const displayedContent = safeText.slice(0, displayedLength);
 
   return (
     <div className="relative">
       <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-        <ReactMarkdown components={markdownComponents}>
-          {displayedContent}
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {displayedContent || safeText}
         </ReactMarkdown>
       </div>
       {isTyping && (
@@ -1141,10 +1201,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               >
                 {/* Main text with Markdown & Typewriter streaming */}
                 {isUser ? (
-                  <div className="whitespace-pre-wrap break-words">{msg.text}</div>
+                  <div className="whitespace-pre-wrap break-words">{msg.text || ''}</div>
                 ) : msg.isNew ? (
                   <BotTypewriterMessage
-                    text={msg.text}
+                    text={msg.text || ''}
                     onComplete={() => {
                       onMessageAnimationComplete?.(msg.id);
                     }}
@@ -1152,14 +1212,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   />
                 ) : (
                   <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-                    <ReactMarkdown components={markdownComponents}>
-                      {msg.text}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {(msg.text && msg.text.trim()) || ''}
                     </ReactMarkdown>
                   </div>
-                )}
-
-                {!isUser && msg.meta?.pendingAction && onAgentActionDecision && (
-                  <AgentActionApproval action={msg.meta.pendingAction} onDecision={onAgentActionDecision} />
                 )}
 
                 {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
@@ -1212,7 +1268,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 {/* Message action bar: Copy & Speech */}
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                   <button
-                    onClick={() => handleCopy(msg.id, msg.text)}
+                    onClick={() => handleCopy(msg.id, msg.text || '')}
                     className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
                     title="Copier le texte"
                   >
@@ -1220,7 +1276,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   </button>
                   {!isUser && (
                     <button
-                      onClick={() => speakText(msg.text)}
+                      onClick={() => speakText(msg.text || '')}
                       className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
                       title="Lire à haute voix"
                     >

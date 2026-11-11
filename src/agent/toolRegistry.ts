@@ -218,7 +218,7 @@ export const AGENT_TOOL_REGISTRY: AgentToolDefinition[] = [
 
 
 
-/** Politique de risque associée à chaque outil agentique. */
+/** Politique de risque associée à chaque outil agentique : l'agent gère les confirmations de manière conversationnelle. */
 export const TOOL_POLICIES: Record<string, ToolPolicy> = {
   search_web: { risk: 'safe', confirmation: false },
   search_news: { risk: 'safe', confirmation: false },
@@ -227,10 +227,10 @@ export const TOOL_POLICIES: Record<string, ToolPolicy> = {
   search_notes: { risk: 'safe', confirmation: false },
   list_events: { risk: 'safe', confirmation: false },
   ask_user: { risk: 'safe', confirmation: false },
-  memo_store: { risk: 'write', confirmation: true },
-  link_concepts: { risk: 'write', confirmation: true },
-  create_note: { risk: 'write', confirmation: true },
-  create_event: { risk: 'write', confirmation: true },
+  memo_store: { risk: 'write', confirmation: false },
+  link_concepts: { risk: 'write', confirmation: false },
+  create_note: { risk: 'write', confirmation: false },
+  create_event: { risk: 'write', confirmation: false },
   send_message: { risk: 'external', confirmation: false },
 };
 

@@ -1,18 +1,33 @@
-# Code Source Complet — KADERBOT NOVA
+# Code Source Complet — KADERBOT NOVA (Architecture Modulaire)
 
-Ce document rassemble l'intégralité du code source de l'application **KADERBOT NOVA**, intégrant la boucle **ReAct (Reasoning + Acting)** étendue à **25 itérations**, la recherche sémantique hybride (`@xenova/transformers` + filtrage mots-clés), les outils de navigation web (Brave API + scraping avec empreinte réaliste anti-403) et l'interface utilisateur épurée dotée des fenêtres accordéons repliables **« Réflexion »**.
+Ce document rassemble l'intégralité du code source de l'application **KADERBOT NOVA** suite à la refonte modulaire complète :
+- **Serveur allégé & découplé** : Orchestrateur épuré, modules dédiés (`httpRoutes`, `storage`, `webSearch`, `llmProviders`, `middleware`, `intentClassifier`).
+- **Boucle ReAct 25 itérations** : Décomposition dynamique Pensée -> Action -> Observation -> Synthèse avec cascade de repli IA (Groq, OpenRouter, Gemini).
+- **Sécurité & Résilience** : Protection anti-SSRF, User-Agent réaliste anti-403, rate limiting IP, timing-safe auth.
+- **Interface épurée** : Accordéons repliables *« Réflexion »*, timeline des étapes et rendu Markdown propre.
 
 ---
 
 ## Sommaire des Fichiers Inclus
-- [`package.json`](#packagejson) — Configuration des dépendances et scripts du projet *(39 lignes)*
+- [`package.json`](#packagejson) — Configuration des dépendances et scripts du projet *(40 lignes)*
 - [`vite.config.ts`](#viteconfigts) — Configuration du bundler Vite, aliases et shims *(26 lignes)*
-- [`server.ts`](#serverts) — Serveur Express & Boucle Agentique ReAct (25 itérations, outils Brave/Web/Mémoire) *(2749 lignes)*
+- [`server.ts`](#serverts) — Orchestrateur Express serveur, initialisation et démarrage *(163 lignes)*
+- [`src/server/httpRoutes.ts`](#srcserverhttpRoutests) — Définition des endpoints REST (/api/agent, /api/chat, /api/memory, etc.) *(1313 lignes)*
+- [`src/server/storage.ts`](#srcserverstoragets) — Gestionnaire de persistance JSON (mémoire, logs, notes, quotas Brave) *(173 lignes)*
+- [`src/server/webSearch.ts`](#srcserverwebSearchts) — Moteur de recherche Brave API et protection anti-SSRF *(113 lignes)*
+- [`src/server/llmProviders.ts`](#srcserverllmProvidersts) — Cascade de repli multi-fournisseurs (Groq, OpenRouter, Gemini) *(319 lignes)*
+- [`src/server/middleware.ts`](#srcservermiddlewarets) — Middlewares de sécurité (Rate limiting & Auth timing-safe) *(42 lignes)*
+- [`src/agent/intentClassifier.ts`](#srcagentintentClassifierts) — Classificateur d'intentions ultra-rapide (Groq 20B) *(90 lignes)*
+- [`src/agent/reactLoop.ts`](#srcagentreactLoopts) — Boucle ReAct 25 itérations (Pensée, Action, Observation, Synthèse) *(319 lignes)*
+- [`src/agent/toolRegistry.ts`](#srcagenttoolRegistryts) — Définition et schémas JSON des outils de l'agent *(237 lignes)*
+- [`src/agent/toolImplementations.ts`](#srcagenttoolImplementationsts) — Implémentations des outils (scraping anti-403, mémoire, calcul, etc.) *(327 lignes)*
+- [`src/agent/toolSecurity.ts`](#srcagenttoolSecurityts) — Garde-fous de sécurité et validation des paramètres d'outils *(81 lignes)*
+- [`src/agent/modelRouter.ts`](#srcagentmodelRouterts) — Routage dynamique des modèles IA selon les tâches *(137 lignes)*
 - [`src/types/kaderbot.ts`](#srctypeskaderbotts) — Typage TypeScript complet (ReAct, Mémoire, Messages, Graphe) *(117 lignes)*
 - [`src/services/apiService.ts`](#srcservicesapiServicets) — Service API client avec appel agent ReAct et timeout 120s *(374 lignes)*
 - [`src/shims/style-to-js.ts`](#srcshimsstyle-to-jsts) — Shim ESM natif pour compatibilité style-to-js / react-markdown *(61 lignes)*
-- [`src/components/ChatTab.tsx`](#srccomponentsChatTabtsx) — Interface Chat avec accordéons Réflexion (live & ReAct breakdown) *(1326 lignes)*
-- [`src/App.tsx`](#srcApptsx) — Composant racine, gestion de session et moteur hybride *(1553 lignes)*
+- [`src/components/ChatTab.tsx`](#srccomponentsChatTabtsx) — Interface Chat avec accordéons Réflexion (live & ReAct breakdown) *(1382 lignes)*
+- [`src/App.tsx`](#srcApptsx) — Composant racine, gestion de session et moteur hybride *(1568 lignes)*
 - [`src/core/cognitiveEngine.ts`](#srccorecognitiveEnginets) — Moteur cognitif, recherche sémantique hybride et déduction logique *(1427 lignes)*
 - [`src/components/Header.tsx`](#srccomponentsHeadertsx) — En-tête de navigation et statut des connexions *(271 lignes)*
 - [`src/components/KnowledgeGraphTab.tsx`](#srccomponentsKnowledgeGraphTabtsx) — Visualisation et gestion du graphe de connaissances *(518 lignes)*
@@ -40,7 +55,7 @@ Ce document rassemble l'intégralité du code source de l'application **KADERBOT
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "tsx server.ts",
-    "preview": "vite preview",
+    "preview": "tsx server.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
@@ -56,6 +71,7 @@ Ce document rassemble l'intégralité du code source de l'application **KADERBOT
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "vite": "^8.3.0"
   },
   "devDependencies": {
@@ -113,17 +129,41 @@ export default defineConfig(() => {
 <a id="serverts"></a>
 ## Fichier : `server.ts`
 
-> **Description** : Serveur Express & Boucle Agentique ReAct (25 itérations, outils Brave/Web/Mémoire)
+> **Description** : Orchestrateur Express serveur, initialisation et démarrage
 
 ```typescript
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { randomUUID, timingSafeEqual } from 'crypto';
-import { GoogleGenAI } from '@google/genai';
 import { AGENT_TOOLS, TOOL_POLICIES } from './src/agent/toolRegistry';
+import { createToolImplementations } from './src/agent/toolImplementations';
+import { createPendingAction, validateToolArguments } from './src/agent/toolSecurity';
+import { runAgentLoop } from './src/agent/modelRouter';
+import { classifyIntentWithRouter } from './src/agent/intentClassifier';
+import { registerHttpRoutes } from './src/server/httpRoutes';
+import {
+  callGeminiWithFallback,
+  callGroqWithFallback,
+  callOpenRouterWithFallback,
+  resolveGroqModel,
+  resolveOpenRouterModel,
+  DEFAULT_SYSTEM_PROMPT,
+} from './src/server/llmProviders';
+import {
+  MEMORY_FILE,
+  NOTES_FILE,
+  ACTION_LOG_FILE,
+  EVENTS_FILE,
+  PROJECT_ROOT,
+  readStorageFile,
+  writeStorageFile,
+  readJsonArray,
+  writeJsonArray,
+  appendActionLog,
+} from './src/server/storage';
+import { executeBraveSearch, isUrlForbidden } from './src/server/webSearch';
+import { createAgentRateLimiter, createRequireAdmin } from './src/server/middleware';
 import type { PendingAgentAction } from './src/types/agent';
 
 dotenv.config();
@@ -132,30 +172,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-
-const portArgIndex = process.argv.indexOf('--port');
-const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? Number(process.argv[portArgIndex + 1]) : NaN;
-const PORT = Number(process.env.PORT) || (!Number.isNaN(cliPort) && cliPort > 0 ? cliPort : 3000);
-
-const hostArgIndex = process.argv.indexOf('--host');
-const cliHost = hostArgIndex !== -1 && process.argv[hostArgIndex + 1] ? process.argv[hostArgIndex + 1] : undefined;
-const HOST = process.env.HOST || cliHost || '0.0.0.0';
+const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 
 app.use(express.json({ limit: '10mb' }));
 
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
-const BRAVE_USAGE_FILE = path.join(DATA_DIR, 'brave_usage.json');
-const NOTES_FILE = path.join(DATA_DIR, 'kaderbot_notes.json');
-const ACTION_LOG_FILE = path.join(DATA_DIR, 'kaderbot_action_logs.json');
-const EVENTS_FILE = path.join(DATA_DIR, 'kaderbot_events.json');
-
-// === 1. CONSTANTES ET SÉCURITÉ DE L'AGENT ===
-const BRAVE_API_KEY = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || '';
+// === 1. CONFIGURATION & SÉCURITÉ ===
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || '';
 const TELEGRAM_ALLOWED_CHAT_IDS = new Set(
   (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
@@ -163,627 +184,189 @@ const TELEGRAM_ALLOWED_CHAT_IDS = new Set(
     .map(value => value.trim())
     .filter(Boolean)
 );
-const MAX_AGENT_ITERATIONS = 4;
-const MAX_BRAVE_CALLS_PER_DAY = 100;
+const MAX_AGENT_ITERATIONS = 25;
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
-const AGENT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const AGENT_RATE_LIMIT_MAX = 10;
-
 
 const pendingAgentActions = new Map<string, PendingAgentAction>();
-const agentRateLimits = new Map<string, { startedAt: number; count: number }>();
+const checkAgentRateLimit = createAgentRateLimiter(60 * 1000, 10);
+const requireAdmin = createRequireAdmin(() => process.env.ADMIN_TOKEN?.trim() || '');
 
-function checkAgentRateLimit(req: express.Request): boolean {
-  const key = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const current = agentRateLimits.get(key);
-  if (!current || now - current.startedAt >= AGENT_RATE_LIMIT_WINDOW_MS) {
-    agentRateLimits.set(key, { startedAt: now, count: 1 });
-    return true;
-  }
-  if (current.count >= AGENT_RATE_LIMIT_MAX) return false;
-  current.count += 1;
-  return true;
+function requestPendingAction(tool: string, args: Record<string, unknown>): PendingAgentAction {
+  return createPendingAction(tool, args, { ttlMs: PENDING_ACTION_TTL_MS, store: pendingAgentActions });
 }
 
-function validateToolArguments(tool: string, args: Record<string, unknown>): string | null {
-  const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
-  const policy = TOOL_POLICIES[tool];
-  if (!policy) return `Outil non autorisé : ${tool}`;
+// === 2. IMPLÉMENTATION DES OUTILS AGENTIQUES ===
+const TOOL_IMPLEMENTATIONS = createToolImplementations({
+  executeBraveSearch,
+  isUrlForbidden,
+  readStorageFile,
+  writeStorageFile,
+  readJsonArray,
+  writeJsonArray,
+  notesFile: NOTES_FILE,
+  eventsFile: EVENTS_FILE,
+  telegramBotToken: TELEGRAM_BOT_TOKEN,
+  telegramAllowedChatIds: TELEGRAM_ALLOWED_CHAT_IDS,
+});
 
-  if (tool === 'search_web' || tool === 'search_news' || tool === 'memo_lookup') {
-    const key = tool === 'memo_lookup' ? 'sujet' : 'query';
-    if (!isNonEmptyString(args[key]) || String(args[key]).length > 500) return `Paramètre ${key} invalide.`;
-  }
-  if (tool === 'search_notes' && (!isNonEmptyString(args.query) || String(args.query).length > 500)) return 'Paramètre query invalide.';
-  if (tool === 'list_events') {
-    if (!isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Période de recherche requise.';
-    if (Number.isNaN(Date.parse(String(args.start_iso))) || Number.isNaN(Date.parse(String(args.end_iso)))) return 'Dates ISO invalides.';
-  }
-  if (tool === 'create_event') {
-    if (!isNonEmptyString(args.title) || !isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Titre et dates requis pour l’événement.';
-    const start = Date.parse(String(args.start_iso));
-    const end = Date.parse(String(args.end_iso));
-    if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 'Période de l’événement invalide.';
-    if (String(args.title).length > 200) return 'Titre d’événement trop long.';
-  }
-  if (tool === 'open_url' && (!isNonEmptyString(args.url) || String(args.url).length > 2048)) return 'Paramètre url invalide.';
-  if (tool === 'memo_store' && (!isNonEmptyString(args.sujet) || !isNonEmptyString(args.definition))) return 'Sujet et définition requis.';
-  if (tool === 'link_concepts' && (!isNonEmptyString(args.source) || !isNonEmptyString(args.cible))) return 'Source et cible requises.';
-  if (tool === 'ask_user' && (!isNonEmptyString(args.question) || String(args.question).length > 500)) return 'Question invalide.';
+// === 3. BOUCLE AGENTIQUE & CASCSADE ===
+const AGENT_SYSTEM_PROMPT =
+  'Tu es KADERBOT NOVA, un agent cognitif d’élite doté d’outils de mémoire, de recherche et d’analyse.\n' +
+  'RÈGLES CRUCIALES DE COMPORTEMENT :\n' +
+  '(1) Vérifie TOUJOURS memo_lookup avant search_web si la question porte sur une information personnelle, un fait appris, une préférence (ex: "Quels fruits j’aime ?") ou une notion locale.\n' +
+  '(2) Recherche sur le web via search_news ou search_web pour tout événement récent ou question factuelle externe.\n' +
+  '(3) Si open_url renvoie une erreur (403, accès protégé, anti-bot ou timeout), ignore immédiatement cette source et passe aux autres sources ou résumés sans bloquer.\n' +
+  '(4) FORMULATION DE LA RÉPONSE FINALE : Après tout appel d’outil (ex: memo_lookup, memo_store, search_web), formule TOUJOURS une vraie réponse textuelle rédigée, naturelle et soignée à l’attention de l’utilisateur :\n' +
+  '    - Si memo_lookup trouve des éléments, énonce-les clairement et chaleureusement (ex: "D’après mes informations en mémoire, tu aimes...").\n' +
+  '    - Si tu as exécuté une tâche (ex: memo_store, create_note), confirme-le avec enthousiasme et précision (ex: "C’est noté ! J’ai bien enregistré que...").\n' +
+  '    - Ne termine JAMAIS un tour par un message vide ou silencieux.\n' +
+  '(5) GESTION ÉLÉGANTE DES CONFIRMATIONS (STYLE CONVERSATIONNEL) :\n' +
+  '    - N’affiche JAMAIS de formulaires ou de boutons rigides. Si tu souhaites proposer une mémorisation, une note ou un envoi, demande-le avec courtoisie et élégance directement dans ton message (ex: "Veux-tu que j’enregistre cela dans ma mémoire ?" ou "Si tu le souhaites, je peux créer une note pour toi."). \n' +
+  '    - Dès que l’utilisateur donne son accord ("oui", "retiens", "enregistre", "fais-le"), exécute l’outil immédiatement sans redemander.\n' +
+  '(6) Pour créer une note, utilise create_note ; pour chercher une note, utilise search_notes.\n' +
+  '(7) Si l’utilisateur demande "Continue" ou "continuer", synthétise directement les informations déjà réunies pour produire la réponse finale.\n' +
+  '(8) Réponds toujours en français structuré avec du Markdown propre (gras, listes à puces, sauts de ligne clairs).';
 
-  if (tool === 'create_note') {
-    if (!isNonEmptyString(args.title) || !isNonEmptyString(args.body)) return 'Titre et contenu requis pour la note.';
-    if (String(args.title).length > 200 || String(args.body).length > 10000) return 'Note trop longue.';
-    if (args.tags !== undefined && (!Array.isArray(args.tags) || args.tags.some(tag => !isNonEmptyString(tag)))) return 'Tags invalides.';
-  }
-
-  if (tool === 'send_message') {
-    if (!['sms', 'telegram', 'whatsapp'].includes(String(args.channel))) return 'Canal de message non autorisé.';
-    if (!isNonEmptyString(args.target) || !isNonEmptyString(args.text)) return 'Destinataire et texte requis.';
-    if (String(args.text).length > 4000) return 'Message trop long.';
-    if ((args.channel === 'sms' || args.channel === 'telegram') && args.confirm !== true) return 'Confirmation explicite requise pour ce canal.';
-  }
-  return null;
-}
-
-function summarizePendingAction(tool: string, args: Record<string, unknown>): string {
-  if (tool === 'memo_store') return `Mémoriser « ${String(args.sujet)} » : ${String(args.definition).slice(0, 180)}`;
-  if (tool === 'link_concepts') return `Créer le lien « ${String(args.source)} » → « ${String(args.cible)} »`;
-  if (tool === 'create_note') return `Créer la note « ${String(args.title)} »`;
-  if (tool === 'send_message') return `Envoyer un message ${String(args.channel)} à ${String(args.target)} : « ${String(args.text).slice(0, 180)} »`;
-  if (tool === 'create_event') return `Créer l’événement « ${String(args.title || 'sans titre')} »`;
-  return `Autoriser l’action ${tool}`;
-}
-
-function createPendingAction(tool: string, args: Record<string, unknown>): PendingAgentAction {
-  const expiresAt = new Date(Date.now() + PENDING_ACTION_TTL_MS).toISOString();
-  const action: PendingAgentAction = {
-    id: randomUUID(),
-    tool,
-    args,
-    summary: summarizePendingAction(tool, args),
-    risk: TOOL_POLICIES[tool]?.risk === 'external' ? 'external' : 'write',
-    expiresAt,
-  };
-  pendingAgentActions.set(action.id, action);
-  return action;
-}
-
-function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction): void {
-  if (!ADMIN_TOKEN) {
-    res.status(503).json({ error: 'Fonction d’administration indisponible : ADMIN_TOKEN n’est pas configuré.' });
-    return;
-  }
-
-  const authorization = req.header('authorization') || '';
-  const bearerToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
-  const providedToken = req.header('x-admin-token')?.trim() || bearerToken;
-  const expected = Buffer.from(ADMIN_TOKEN);
-  const provided = Buffer.from(providedToken);
-
-  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-    res.status(401).json({ error: 'Jeton administrateur invalide ou manquant.' });
-    return;
-  }
-
-  next();
-}
-
-// Compteur d'appels Brave en mémoire (Map avec date du jour), persisté dans data/brave_usage.json
-const braveDailyUsage = new Map<string, number>();
-
-function getTodayString(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function loadBraveUsage(): void {
-  const today = getTodayString();
-  try {
-    if (fs.existsSync(BRAVE_USAGE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(BRAVE_USAGE_FILE, 'utf-8'));
-      if (data && data.date === today && typeof data.count === 'number') {
-        braveDailyUsage.set(today, data.count);
-        return;
-      }
-    }
-  } catch (err) {
-    console.warn('Erreur lecture brave_usage.json:', err);
-  }
-  braveDailyUsage.set(today, 0);
-}
-
-function checkAndIncrementBraveQuota(): boolean {
-  const today = getTodayString();
-  if (!braveDailyUsage.has(today)) {
-    loadBraveUsage();
-  }
-  const currentCount = braveDailyUsage.get(today) || 0;
-  if (currentCount >= MAX_BRAVE_CALLS_PER_DAY) {
-    return false; // Quota de recherche atteint pour aujourd'hui
-  }
-  const newCount = currentCount + 1;
-  braveDailyUsage.set(today, newCount);
-  try {
-    fs.writeFileSync(
-      BRAVE_USAGE_FILE,
-      JSON.stringify({ date: today, count: newCount, updatedAt: new Date().toISOString() }, null, 2),
-      'utf-8'
-    );
-  } catch (err) {
-    console.warn('Erreur persistance brave_usage.json:', err);
-  }
-  return true;
-}
-
-// Initialisation au chargement
-loadBraveUsage();
-
-// Sécurité open_url : Liste blanche de domaines interdits (localhost, 127.0.0.1, adresses IP nues, *.internal, *.render.com)
-function isUrlForbidden(urlStr: string): { forbidden: boolean; reason?: string } {
-  try {
-    const parsed = new URL(urlStr);
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Protocole http ou https obligatoire
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return { forbidden: true, reason: 'Protocole non autorisé (seuls http et https sont acceptés).' };
-    }
-
-    // Localhost
-    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
-      return { forbidden: true, reason: 'Accès refusé : domaine localhost interdit.' };
-    }
-
-    // 127.0.0.1 ou boucle locale
-    if (hostname === '127.0.0.1' || hostname === '0.0.0.0') {
-      return { forbidden: true, reason: 'Accès refusé : adresse de bouclage locale interdite.' };
-    }
-
-    // Adresses IP nues (IPv4 standard ou IPv6)
-    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    if (ipv4Regex.test(hostname)) {
-      return { forbidden: true, reason: 'Accès refusé : adresses IP directes non autorisées.' };
-    }
-    if (hostname.startsWith('[') && hostname.endsWith(']')) {
-      return { forbidden: true, reason: 'Accès refusé : adresses IPv6 directes non autorisées.' };
-    }
-
-    // *.internal
-    if (hostname === 'internal' || hostname.endsWith('.internal')) {
-      return { forbidden: true, reason: 'Accès refusé : réseaux internes (*.internal) non autorisés.' };
-    }
-
-    // *.render.com
-    if (hostname === 'render.com' || hostname.endsWith('.render.com')) {
-      return { forbidden: true, reason: 'Accès refusé : domaine de plateforme d’hébergement (*.render.com) interdit.' };
-    }
-
-    return { forbidden: false };
-  } catch (err: any) {
-    return { forbidden: true, reason: `URL invalide : ${err.message}` };
-  }
-}
-
-// Helpers de stockage mémoire cognitive locale
-function readStorageFile(): {
-  memoire: Record<string, any[]>;
-  regles: Record<string, any[]>;
-  liens: Record<string, string[]>;
-  synonymes: Record<string, any>;
-  sessions: string[];
-} {
-  if (fs.existsSync(MEMORY_FILE)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
-      return {
-        memoire: parsed.memoire || {},
-        regles: parsed.regles || {},
-        liens: parsed.liens || {},
-        synonymes: parsed.synonymes || {},
-        sessions: Array.isArray(parsed.sessions) ? parsed.sessions : ['defaut'],
-      };
-    } catch (e) {
-      console.warn('Erreur lecture kaderbot_storage.json:', e);
-    }
-  }
-  return { memoire: {}, regles: {}, liens: {}, synonymes: {}, sessions: ['defaut'] };
-}
-
-function writeStorageFile(data: any): void {
-  try {
-    fs.writeFileSync(
-      MEMORY_FILE,
-      JSON.stringify(
-        {
-          memoire: data.memoire || {},
-          regles: data.regles || {},
-          liens: data.liens || {},
-          synonymes: data.synonymes || {},
-          sessions: Array.isArray(data.sessions) ? data.sessions : ['defaut'],
-          updatedAt: new Date().toISOString(),
-        },
-        null,
-        2
-      ),
-      'utf-8'
-    );
-  } catch (err) {
-    console.error('Erreur écriture kaderbot_storage.json:', err);
-  }
-}
-
-type KaderbotNote = {
-  id: string;
-  title: string;
-  body: string;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
+const reactLoopDeps = {
+  agentTools: AGENT_TOOLS,
+  toolPolicies: TOOL_POLICIES,
+  toolImplementations: TOOL_IMPLEMENTATIONS,
+  validateToolArguments,
+  requestPendingAction,
+  defaultSystemPrompt: AGENT_SYSTEM_PROMPT,
+  maxAgentIterations: MAX_AGENT_ITERATIONS,
+  maxLoopDurationMs: 90000,
 };
 
-type AgentActionLog = {
-  id: string;
-  tool: string;
-  args?: Record<string, unknown>;
-  status: 'success' | 'error' | 'rejected' | 'expired';
-  message?: string;
-  createdAt: string;
+const modelRouterDeps = {
+  groqApiKey: process.env.GROQ_API_KEY,
+  openRouterApiKey: process.env.OPENROUTER_API_KEY,
+  defaultSystemPrompt: AGENT_SYSTEM_PROMPT,
+  reactLoopDeps,
+  callGeminiWithFallback,
 };
 
-type KaderbotEvent = {
-  id: string;
-  title: string;
-  startIso: string;
-  endIso: string;
-  location?: string;
-  description?: string;
-  createdAt: string;
-};
+// === 4. ENREGISTREMENT DES ROUTES HTTP API ===
+registerHttpRoutes(app, {
+  callGeminiWithFallback,
+  callGroqWithFallback,
+  callOpenRouterWithFallback,
+  resolveGroqModel,
+  resolveOpenRouterModel,
+  defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+  agentSystemPrompt: AGENT_SYSTEM_PROMPT,
+  requireAdmin,
+  checkAgentRateLimit,
+  classifyIntentWithRouter,
+  runAgentLoop,
+  modelRouterDeps,
+  memoryFile: MEMORY_FILE,
+  notesFile: NOTES_FILE,
+  actionLogFile: ACTION_LOG_FILE,
+  eventsFile: EVENTS_FILE,
+  projectRoot: PROJECT_ROOT,
+  readStorageFile,
+  readJsonArray,
+  appendActionLog,
+  pendingAgentActions,
+  toolImplementations: TOOL_IMPLEMENTATIONS,
+  validateToolArguments,
+});
 
-function readJsonArray<T>(filePath: string): T[] {
-  try {
-    if (!fs.existsSync(filePath)) return [];
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn(`Erreur lecture ${filePath}:`, err);
-    return [];
+// === 5. SERVEUR DEV VITE / PRODUCTION ===
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
   }
-}
 
-function writeJsonArray<T>(filePath: string, data: T[]): void {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-function appendActionLog(entry: Omit<AgentActionLog, 'id' | 'createdAt'>): void {
-  try {
-    const logs = readJsonArray<AgentActionLog>(ACTION_LOG_FILE);
-    logs.push({ ...entry, id: randomUUID(), createdAt: new Date().toISOString() });
-    writeJsonArray(ACTION_LOG_FILE, logs.slice(-500));
-  } catch (err) {
-    console.warn('Erreur écriture journal agentique:', err);
-  }
-}
-
-// Helper to get GoogleGenAI client with explicit API Key (prevents Application Default Credentials lookup)
-function createGeminiClient(apiKey: string): GoogleGenAI {
-  return new GoogleGenAI({
-    apiKey: apiKey.trim(),
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Serveur KADERBOT NOVA opérationnel sur http://localhost:${PORT}`);
   });
 }
 
-const DEFAULT_SYSTEM_PROMPT =
-  'Tu es KADERBOT NOVA, un assistant IA expert et pédagogue. Tu réponds toujours en français.\n' +
-  'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown (sauts de ligne, listes à puces, gras).\n' +
-  'RÈGLE DE LONGUEUR ABSOLUE : Ta réponse ne doit jamais dépasser 120 mots. Sois direct et synthétique. Si un sujet est vaste (comme l\'histoire d\'une invention), donne uniquement les 2 ou 3 points les plus importants, et termine en proposant à l\'utilisateur de préciser sa question pour plus de détails. Ne fais JAMAIS de réponse de plus de 4 paragraphes.';
+startServer();
+```
 
-// Helper to normalize and resolve Groq model IDs accurately (Catalogue Octobre 2026)
-export function resolveGroqModel(requestedModel?: string): string {
-  if (!requestedModel) return 'openai/gpt-oss-120b';
-  const clean = requestedModel.trim().toLowerCase();
+---
 
-  // Si demande de 120b
-  if (
-    clean === 'openai/gpt-oss-120b' ||
-    clean.includes('gpt-oss-120b') ||
-    clean.includes('120b')
-  ) {
-    return 'openai/gpt-oss-120b';
-  }
+<a id="srcserverhttpRoutests"></a>
+## Fichier : `src/server/httpRoutes.ts`
 
-  // Si demande de 20b
-  if (
-    clean === 'openai/gpt-oss-20b' ||
-    clean.includes('gpt-oss-20b') ||
-    clean.includes('20b')
-  ) {
-    return 'openai/gpt-oss-20b';
-  }
+> **Description** : Définition des endpoints REST (/api/agent, /api/chat, /api/memory, etc.)
 
-  // Toute demande de modèle inconnu ou déprécié → 'openai/gpt-oss-20b'
-  return 'openai/gpt-oss-20b';
+```typescript
+import path from 'path';
+import fs from 'fs';
+import type { Express, RequestHandler } from 'express';
+import type { PendingAgentAction } from '../types/agent';
+import type { ModelRouterDeps } from '../agent/modelRouter';
+
+type AgentActionLog = Record<string, unknown>;
+type KaderbotEvent = Record<string, unknown>;
+type KaderbotNote = Record<string, unknown>;
+
+export interface HttpRouteDependencies {
+  callGeminiWithFallback: (...args: any[]) => Promise<{ text: string; model: string }>;
+  callGroqWithFallback: (...args: any[]) => Promise<{ text: string; actualModel: string }>;
+  callOpenRouterWithFallback: (...args: any[]) => Promise<{ text: string; actualModel: string }>;
+  resolveGroqModel: (model: string) => string;
+  resolveOpenRouterModel: (model: string) => string;
+  defaultSystemPrompt: string;
+  agentSystemPrompt: string;
+  requireAdmin: RequestHandler;
+  checkAgentRateLimit: (req: any) => boolean;
+  classifyIntentWithRouter: (...args: any[]) => Promise<'CHAT' | 'AGENT'>;
+  runAgentLoop: (...args: any[]) => Promise<any>;
+  modelRouterDeps: ModelRouterDeps;
+  memoryFile: string;
+  notesFile: string;
+  actionLogFile: string;
+  eventsFile: string;
+  projectRoot: string;
+  readStorageFile: () => any;
+  readJsonArray: <T>(file: string) => T[];
+  appendActionLog: (...args: any[]) => void;
+  pendingAgentActions: Map<string, PendingAgentAction>;
+  toolImplementations: Record<string, (args: any) => Promise<string>>;
+  validateToolArguments: (tool: string, args: Record<string, unknown>) => string | null;
 }
 
-// Helper to call Groq with candidate fallback and clean error management
-async function callGroqWithFallback(
-  prompt: string,
-  systemPrompt: string,
-  apiKey: string,
-  requestedModel = 'openai/gpt-oss-120b',
-  history: Array<{ role: string; content: string }> = []
-): Promise<{ text: string; actualModel: string }> {
-  const primaryModel = resolveGroqModel(requestedModel);
-
-  // Candidate models sur Groq : ces deux-là uniquement (Catalogue Octobre 2026)
-  const candidateModels = Array.from(
-    new Set([
-      primaryModel,
-      'openai/gpt-oss-120b',
-      'openai/gpt-oss-20b',
-    ])
-  );
-
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: prompt },
-  ];
-
-  let lastError = '';
-
-  for (let idx = 0; idx < candidateModels.length; idx++) {
-    const modelToTry = candidateModels[idx];
-    const nextModel = candidateModels[idx + 1];
-
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: modelToTry,
-          messages,
-          temperature: 0.7,
-          max_tokens: 800,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content?.trim() || '';
-        return { text: content, actualModel: modelToTry };
-      }
-
-      const errData = await response.json().catch(() => null);
-      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
-      lastError = errMsg;
-
-      if (nextModel) {
-        console.warn(`[BASCULE GROQ] Modèle "${modelToTry}" a échoué (cause: ${errMsg}). Bascule vers "${nextModel}"...`);
-      } else {
-        console.warn(`[BASCULE GROQ] Modèle "${modelToTry}" a échoué (cause: ${errMsg}). Aucun autre modèle Groq disponible.`);
-      }
-
-      // Si HTTP 401 (clé API invalide), inutile de réessayer les autres modèles avec la même clé
-      if (response.status === 401) {
-        break;
-      }
-    } catch (e: any) {
-      lastError = e.message;
-      if (nextModel) {
-        console.warn(`[BASCULE GROQ] Exception sur "${modelToTry}" (cause: ${e.message}). Bascule vers "${nextModel}"...`);
-      }
-    }
-  }
-
-  throw new Error(`Groq: ${lastError}`);
-}
-
-// Helper to normalize and resolve OpenRouter model IDs accurately
-export function resolveOpenRouterModel(requestedModel?: string): string {
-  const defaultModel = 'meta-llama/llama-3.3-70b-instruct:free';
-  if (!requestedModel) return defaultModel;
-  let clean = requestedModel.trim();
-  const lower = clean.toLowerCase();
-
-  // Ne JAMAIS utiliser openai/gpt-oss-120b sur OpenRouter (réservé à Groq)
-  if (lower.includes('gpt-oss') || lower.includes('gpt') || lower.includes('oss')) {
-    return defaultModel;
-  }
-
-  // Normalisation des modèles
-  if (lower.includes('llama-3.3-70b') || lower.includes('llama') || lower.includes('70b')) {
-    return defaultModel;
-  }
-  if (lower.includes('qwen')) {
-    return 'qwen/qwen3-coder:free';
-  }
-  if (lower.includes('deepseek') || lower.includes('r1')) {
-    return 'deepseek/deepseek-r1:free';
-  }
-
-  // Le suffixe :free est obligatoire pour utiliser le quota gratuit
-  if (!clean.endsWith(':free')) {
-    clean = `${clean}:free`;
-  }
-
-  return clean;
-}
-
-// Helper to call OpenRouter with candidate fallback and clean quota management
-async function callOpenRouterWithFallback(
-  prompt: string,
-  systemPrompt: string,
-  apiKey: string,
-  requestedModel = 'meta-llama/llama-3.3-70b-instruct:free',
-  history: Array<{ role: string; content: string }> = []
-): Promise<{ text: string; actualModel: string }> {
-  const primaryModel = resolveOpenRouterModel(requestedModel);
-
-  // Modèles candidats dans l'ordre strict demandé (sans jamais gpt-oss-120b)
-  const candidateModels = Array.from(
-    new Set([
-      primaryModel,
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'qwen/qwen3-coder:free',
-      'deepseek/deepseek-r1:free',
-    ])
-  );
-
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: prompt },
-  ];
-
-  let lastError = '';
-
-  for (const modelToTry of candidateModels) {
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://kaderbot.app',
-          'X-Title': 'KADERBOT NOVA',
-        },
-        body: JSON.stringify({
-          model: modelToTry,
-          messages,
-          temperature: 0.7,
-          max_tokens: 800,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content?.trim() || '';
-        return { text: content, actualModel: modelToTry };
-      }
-
-      const errData = await response.json().catch(() => null);
-      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
-      lastError = errMsg;
-
-      // Si HTTP 429 (quota épuisé) ou 401 (clé invalide), NE PAS retenter avec un autre modèle :
-      // lancer immédiatement l'erreur pour déclencher le fallback vers Gemini/Groq
-      if (response.status === 429 || response.status === 401) {
-        throw new Error('OpenRouter: quota épuisé ou clé invalide');
-      }
-
-      // Si HTTP 404 (modèle introuvable), passer au modèle suivant
-      if (response.status === 404) {
-        console.warn(`Modèle OpenRouter "${modelToTry}" non accessible (404), tentative avec modèle suivant...`);
-        continue;
-      }
-
-      console.warn(`Erreur OpenRouter sur "${modelToTry}" (${response.status}: ${errMsg}), tentative avec modèle suivant...`);
-    } catch (e: any) {
-      if (e.message === 'OpenRouter: quota épuisé ou clé invalide') {
-        throw e;
-      }
-      lastError = e.message;
-    }
-  }
-
-  throw new Error(`OpenRouter: ${lastError || 'indisponible'}`);
-}
-
-// Helper to call Gemini with explicit API Key and direct REST fallback (Never uses Application Default Credentials)
-async function callGeminiWithFallback(
-  fullPrompt: string,
-  systemInstruction?: string
-): Promise<{ text: string; model: string }> {
-  const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!geminiKey) {
-    throw new Error('Variable GEMINI_API_KEY non configurée sur le serveur. Veuillez définir votre clé API Gemini.');
-  }
-
-  const modelsToTry = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
-  let lastError: any = null;
-
-  // 1. Try with explicit GoogleGenAI client (with explicit apiKey)
-  try {
-    const aiClient = createGeminiClient(geminiKey);
-    for (let i = 0; i < modelsToTry.length; i++) {
-      const m = modelsToTry[i];
-      const nextM = modelsToTry[i + 1];
-      try {
-        const response = await aiClient.models.generateContent({
-          model: m,
-          contents: fullPrompt,
-          config: systemInstruction ? { systemInstruction } : undefined,
-        });
-        const text = response.text?.trim();
-        if (text) {
-          return { text, model: m };
-        }
-      } catch (err: any) {
-        if (nextM) {
-          console.warn(`[BASCULE GEMINI SDK] Modèle "${m}" a échoué (cause: ${err.message}). Bascule vers "${nextM}"...`);
-        } else {
-          console.warn(`[BASCULE GEMINI SDK] Modèle "${m}" a échoué (cause: ${err.message}). Bascule sur REST direct...`);
-        }
-        lastError = err;
-      }
-    }
-  } catch (sdkInitErr: any) {
-    console.warn('Erreur initialisation SDK Gemini, bascule sur REST direct:', sdkInitErr.message);
-    lastError = sdkInitErr;
-  }
-
-  // 2. Direct REST Fallback (Simple API Key only, zero Google Cloud ADC or metadata)
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const m = modelsToTry[i];
-    const nextM = modelsToTry[i + 1];
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: fullPrompt }] }],
-            systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-          }),
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (text) {
-          return { text, model: m };
-        }
-      } else {
-        const errJson = await response.json().catch(() => null);
-        const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
-        lastError = new Error(errMsg);
-        if (nextM) {
-          console.warn(`[BASCULE GEMINI REST] Modèle "${m}" a échoué (cause: ${errMsg}). Bascule vers "${nextM}"...`);
-        } else {
-          console.warn(`[BASCULE GEMINI REST] Modèle "${m}" a échoué (cause: ${errMsg}).`);
-        }
-      }
-    } catch (restErr: any) {
-      lastError = restErr;
-      if (nextM) {
-        console.warn(`[BASCULE GEMINI REST] Exception sur "${m}" (cause: ${restErr.message}). Bascule vers "${nextM}"...`);
-      }
-    }
-  }
-
-  throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
-}
+export function registerHttpRoutes(app: Express, deps: HttpRouteDependencies): void {
+  const {
+    callGeminiWithFallback,
+    callGroqWithFallback,
+    callOpenRouterWithFallback,
+    resolveGroqModel,
+    resolveOpenRouterModel,
+    defaultSystemPrompt,
+    agentSystemPrompt,
+    requireAdmin,
+    checkAgentRateLimit,
+    classifyIntentWithRouter,
+    runAgentLoop,
+    modelRouterDeps,
+    memoryFile,
+    notesFile,
+    actionLogFile,
+    eventsFile,
+    projectRoot,
+    readStorageFile,
+    readJsonArray,
+    appendActionLog,
+    pendingAgentActions,
+    toolImplementations,
+    validateToolArguments,
+  } = deps;
 
 // 0. Gemini Connection Tester Endpoint (Uses process.env.GEMINI_API_KEY explicitly)
 app.post('/api/gemini/test', async (req, res) => {
@@ -932,7 +515,7 @@ app.post('/api/chat', async (req, res) => {
       provider = 'gemini',
       groqModel = 'openai/gpt-oss-120b',
       openrouterModel = 'meta-llama/llama-3.3-70b-instruct:free',
-      systemPrompt = DEFAULT_SYSTEM_PROMPT,
+      systemPrompt = defaultSystemPrompt,
     } = req.body;
 
     if (!prompt) {
@@ -1199,8 +782,8 @@ app.post('/api/resume', async (req, res) => {
 // 6. Memory Persistence (Load & Save to JSON disk file)
 app.get('/api/memory', requireAdmin, (req, res) => {
   try {
-    if (fs.existsSync(MEMORY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
+    if (fs.existsSync(memoryFile)) {
+      const data = JSON.parse(fs.readFileSync(memoryFile, 'utf-8'));
       return res.json(data);
     }
     return res.json({ memoire: {}, regles: {}, liens: {}, synonymes: {}, sessions: ['defaut'] });
@@ -1214,7 +797,7 @@ app.post('/api/memory/save', requireAdmin, (req, res) => {
   try {
     const { memoire, regles, liens, synonymes, sessions } = req.body;
     fs.writeFileSync(
-      MEMORY_FILE,
+      memoryFile,
       JSON.stringify({ memoire, regles, liens, synonymes, sessions, updatedAt: new Date().toISOString() }, null, 2),
       'utf-8'
     );
@@ -1251,814 +834,16 @@ app.get('/api/memory/refresh', requireAdmin, (req, res) => {
 });
 
 app.get('/api/notes', requireAdmin, (_req, res) => {
-  return res.json({ notes: readJsonArray<KaderbotNote>(NOTES_FILE) });
+  return res.json({ notes: readJsonArray<KaderbotNote>(notesFile) });
 });
 
 app.get('/api/agent/logs', requireAdmin, (_req, res) => {
-  return res.json({ logs: readJsonArray<AgentActionLog>(ACTION_LOG_FILE).slice(-200).reverse() });
+  return res.json({ logs: readJsonArray<AgentActionLog>(actionLogFile).slice(-200).reverse() });
 });
 
 app.get('/api/calendar/events', requireAdmin, (_req, res) => {
-  return res.json({ events: readJsonArray<KaderbotEvent>(EVENTS_FILE).slice(-500).reverse() });
+  return res.json({ events: readJsonArray<KaderbotEvent>(eventsFile).slice(-500).reverse() });
 });
-
-// === 2. REGISTRE CENTRAL DES OUTILS ===
-// Helper pour exécuter une recherche sur l'API Brave (Search ou News)
-async function executeBraveSearch(query: string, isNews: boolean): Promise<string> {
-  const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim() || BRAVE_API_KEY;
-  if (!apiKey) {
-    return "Clé BRAVE_SEARCH_API_KEY non configurée sur le serveur. Impossible d'effectuer la recherche web.";
-  }
-
-  if (!checkAndIncrementBraveQuota()) {
-    return "Quota de recherche atteint pour aujourd'hui.";
-  }
-
-  const endpoint = isNews
-    ? 'https://api.search.brave.com/res/v1/news/search'
-    : 'https://api.search.brave.com/res/v1/web/search';
-
-  const url = `${endpoint}?q=${encodeURIComponent(query)}&count=5&country=fr&search_lang=fr`;
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const resp = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'X-Subscription-Token': apiKey,
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!resp.ok) {
-      if (resp.status === 429) {
-        return "Quota de recherche atteint pour aujourd'hui.";
-      }
-      return `Erreur Brave Search (HTTP ${resp.status} : ${resp.statusText}).`;
-    }
-
-    const data: any = await resp.json();
-    const results = isNews ? (data.results || []) : (data.web?.results || []);
-
-    if (!Array.isArray(results) || results.length === 0) {
-      return `Aucun résultat ${isNews ? 'd’actualité' : 'web'} trouvé pour la requête : "${query}".`;
-    }
-
-    return results
-      .slice(0, 5)
-      .map((item: any, idx: number) => {
-        const title = item.title || 'Sans titre';
-        const itemUrl = item.url || '';
-        const snippet = item.description || item.snippet || 'Pas de description';
-        return `[${idx + 1}] ${title}\nURL: ${itemUrl}\nRésumé: ${snippet}`;
-      })
-      .join('\n\n');
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
-      return "Erreur Délai d'attente dépassé (timeout 6s) pour la recherche Brave.";
-    }
-    return `Erreur réseau lors de la recherche Brave : ${err.message}`;
-  }
-}
-
-// === 4. IMPLÉMENTATION DES OUTILS ===
-const TOOL_IMPLEMENTATIONS: Record<string, (args: any) => Promise<string>> = {
-  search_web: async ({ query }: { query?: string }) => {
-    if (!query?.trim()) return 'Requête de recherche vide.';
-    return await executeBraveSearch(query.trim(), false);
-  },
-
-  search_news: async ({ query }: { query?: string }) => {
-    if (!query?.trim()) return 'Requête d’actualité vide.';
-    return await executeBraveSearch(query.trim(), true);
-  },
-
-  open_url: async ({ url }: { url?: string }) => {
-    if (!url?.trim()) return 'URL manquante.';
-    const cleanUrl = url.trim();
-    const check = isUrlForbidden(cleanUrl);
-    if (check.forbidden) {
-      return `Accès refusé : ${check.reason || 'Domaine interdit'}`;
-    }
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-      const resp = await fetch(cleanUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-          'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Cache-Control': 'no-cache',
-          Pragma: 'no-cache',
-          'Sec-Ch-Ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
-          'Upgrade-Insecure-Requests': '1',
-        },
-      });
-      clearTimeout(timeoutId);
-
-      if (!resp.ok) {
-        if (resp.status === 403 || resp.status === 401) {
-          return `Erreur HTTP ${resp.status} (Accès refusé / Anti-bot) : Le site bloque l'accès automatique. Ignore cette URL et poursuis avec les autres sources disponibles.`;
-        }
-        return `Erreur HTTP ${resp.status} (${resp.statusText}) lors de l'accès à la page. Ignore cette URL et passe aux autres sources.`;
-      }
-
-      let html = await resp.text();
-
-      // Détection de protection Cloudflare / Captcha
-      if (
-        html.includes('cf-browser-verification') ||
-        html.includes('Cloudflare Ray ID') ||
-        html.includes('Attention Required! | Cloudflare') ||
-        html.includes('Just a moment...')
-      ) {
-        return `Erreur HTTP 403 (Challenge Cloudflare / Anti-bot) : Cette page nécessite une vérification interactive de navigateur. Ignore cette source et passe à une autre.`;
-      }
-
-      // Retirer les balises script, style, nav, footer, header et leur contenu
-      html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ');
-      html = html.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ');
-      html = html.replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ');
-      html = html.replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ');
-      html = html.replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ');
-
-      let text = html.replace(/<[^>]+>/g, ' ');
-      text = text
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-      text = text.replace(/\s+/g, ' ').trim();
-
-      if (!text || text.length < 50) {
-        return 'La page web ne contient aucun contenu textuel exploitable. Passe à une autre source.';
-      }
-      return text.slice(0, 5000);
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return "Délai d'attente dépassé (timeout 6s) pour ouvrir la page web. Ignore cette URL et passe aux autres.";
-      }
-      return `Erreur lors de la lecture de la page (${err.message}). Ignore cette source.`;
-    }
-  },
-
-  memo_lookup: async ({ sujet }: { sujet?: string }) => {
-    if (!sujet?.trim()) return 'Sujet manquant pour memo_lookup.';
-    const storage = readStorageFile();
-    const q = sujet.trim().toLowerCase();
-
-    // 1. Chercher dans memoire
-    let directMatches: any[] = [];
-    if (storage.memoire[q]) {
-      directMatches = storage.memoire[q];
-    } else {
-      const matchingKey = Object.keys(storage.memoire).find(
-        k => k.toLowerCase() === q || k.toLowerCase().includes(q) || q.includes(k.toLowerCase())
-      );
-      if (matchingKey) {
-        directMatches = storage.memoire[matchingKey];
-      }
-    }
-
-    // 2. Chercher les liens
-    const links = storage.liens[q] || [];
-
-    // 3. Chercher les règles
-    const rules = storage.regles[q] || [];
-
-    if (directMatches.length === 0 && links.length === 0 && rules.length === 0) {
-      return `Aucune information trouvée dans la mémoire locale pour le sujet "${sujet}".`;
-    }
-
-    let out = `Informations mémoire locale pour "${sujet}" :\n`;
-    if (directMatches.length > 0) {
-      out += directMatches.map((m: any, idx: number) => `- Définition/Fait [${idx + 1}] : ${m.def || m}`).join('\n') + '\n';
-    }
-    if (links.length > 0) {
-      out += `- Héritage / Liens : ${links.join(', ')}\n`;
-    }
-    if (rules.length > 0) {
-      out += `- Règles logiques : ${rules.map((r: any) => `${r.quant} sont ${r.prop}`).join('; ')}\n`;
-    }
-    return out.trim();
-  },
-
-  search_notes: async ({ query, limit = 10 }: { query?: string; limit?: number }) => {
-    if (!query?.trim()) return 'Requête de notes vide.';
-    const q = query.trim().toLowerCase();
-    const notes = readJsonArray<KaderbotNote>(NOTES_FILE)
-      .filter(note => `${note.title} ${note.body} ${note.tags.join(' ')}`.toLowerCase().includes(q))
-      .slice(-(Math.min(Math.max(Number(limit) || 10, 1), 20)));
-    if (notes.length === 0) return `Aucune note trouvée pour « ${query.trim()} ».`;
-    return notes
-      .map(note => `- ${note.title}${note.tags.length ? ` [${note.tags.join(', ')}]` : ''}\n  ${note.body.slice(0, 500)} (id: ${note.id})`)
-      .join('\n');
-  },
-
-  list_events: async ({ start_iso, end_iso, limit = 20 }: { start_iso?: string; end_iso?: string; limit?: number }) => {
-    const start = Date.parse(String(start_iso || ''));
-    const end = Date.parse(String(end_iso || ''));
-    if (Number.isNaN(start) || Number.isNaN(end)) return 'Dates ISO invalides.';
-    const events = readJsonArray<KaderbotEvent>(EVENTS_FILE)
-      .filter(event => Date.parse(event.startIso) < end && Date.parse(event.endIso) > start)
-      .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))
-      .slice(0, Math.min(Math.max(Number(limit) || 20, 1), 50));
-    if (events.length === 0) return 'Aucun événement trouvé dans cette période.';
-    return events
-      .map(event => `- ${event.title} : ${event.startIso} → ${event.endIso}${event.location ? ` | ${event.location}` : ''}`)
-      .join('\n');
-  },
-
-  create_event: async ({ title, start_iso, end_iso, location, description }: { title?: string; start_iso?: string; end_iso?: string; location?: string; description?: string }) => {
-    if (!title?.trim() || !start_iso || !end_iso) return 'Titre et dates requis pour l’événement.';
-    const event: KaderbotEvent = {
-      id: randomUUID(),
-      title: title.trim(),
-      startIso: new Date(start_iso).toISOString(),
-      endIso: new Date(end_iso).toISOString(),
-      location: location?.trim() || undefined,
-      description: description?.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    };
-    const events = readJsonArray<KaderbotEvent>(EVENTS_FILE);
-    events.push(event);
-    writeJsonArray(EVENTS_FILE, events.slice(-1000));
-
-    const toCalendarDate = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-    const calendarUrl = new URL('https://calendar.google.com/calendar/render');
-    calendarUrl.searchParams.set('action', 'TEMPLATE');
-    calendarUrl.searchParams.set('text', event.title);
-    calendarUrl.searchParams.set('dates', `${toCalendarDate(event.startIso)}/${toCalendarDate(event.endIso)}`);
-    if (event.location) calendarUrl.searchParams.set('location', event.location);
-    if (event.description) calendarUrl.searchParams.set('details', event.description);
-    return `Événement « ${event.title} » créé. Ajoute-le à ton agenda Google ici : ${calendarUrl.toString()}`;
-  },
-
-  create_note: async ({ title, body, tags = [] }: { title?: string; body?: string; tags?: string[] }) => {
-    if (!title?.trim() || !body?.trim()) return 'Titre et contenu requis pour créer une note.';
-    const now = new Date().toISOString();
-    const note: KaderbotNote = {
-      id: randomUUID(),
-      title: title.trim(),
-      body: body.trim(),
-      tags: Array.isArray(tags) ? tags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 20) : [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    const notes = readJsonArray<KaderbotNote>(NOTES_FILE);
-    notes.push(note);
-    writeJsonArray(NOTES_FILE, notes.slice(-1000));
-    return `Note « ${note.title} » créée avec succès.`;
-  },
-
-  send_message: async ({ channel, target, text }: { channel?: string; target?: string; text?: string }) => {
-    if (!channel || !target?.trim() || !text?.trim()) return 'Canal, destinataire et texte requis.';
-    if (channel === 'whatsapp') {
-      const shareUrl = `https://wa.me/?text=${encodeURIComponent(text.trim())}`;
-      return `Message WhatsApp préparé pour ${target.trim()} (aucun envoi automatique). Ouvre ce lien puis appuie sur Envoyer : ${shareUrl}`;
-    }
-    if (channel === 'telegram') {
-      if (!TELEGRAM_BOT_TOKEN) return 'TELEGRAM_BOT_TOKEN n’est pas configuré sur Render.';
-      if (!TELEGRAM_ALLOWED_CHAT_IDS.has(target.trim())) return `Le chat Telegram ${target.trim()} n’est pas autorisé par l’allowlist.`;
-      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: target.trim(), text: text.trim() }),
-      });
-      const payload: any = await response.json().catch(() => null);
-      if (!response.ok || !payload?.ok) return `Échec Telegram : ${payload?.description || `HTTP ${response.status}`}`;
-      return `Message Telegram envoyé à ${target.trim()}.`;
-    }
-    return 'L’envoi SMS n’est pas disponible depuis la Web App. Utilise un lien sms: ou un compagnon Android.';
-  },
-
-  memo_store: async ({ sujet, definition }: { sujet?: string; definition?: string }) => {
-    if (!sujet?.trim() || !definition?.trim()) {
-      return 'Sujet ou définition manquant pour memo_store.';
-    }
-    const storage = readStorageFile();
-    const key = sujet.trim().toLowerCase();
-    if (!storage.memoire[key]) {
-      storage.memoire[key] = [];
-    }
-
-    const now = new Date().toISOString();
-    storage.memoire[key].push({
-      def: definition.trim(),
-      poids: 1.0,
-      hits: 1,
-      source: 'agent',
-      type: 'concept',
-      created: now,
-      last_used: now,
-    });
-
-    writeStorageFile(storage);
-    return `Le fait "${sujet}" a été mémorisé avec succès dans la mémoire cognitive locale.`;
-  },
-
-  link_concepts: async ({ source, cible }: { source?: string; cible?: string }) => {
-    if (!source?.trim() || !cible?.trim()) {
-      return 'Source ou cible manquante pour link_concepts.';
-    }
-    const storage = readStorageFile();
-    const sKey = source.trim().toLowerCase();
-    const cKey = cible.trim().toLowerCase();
-
-    if (!storage.liens[sKey]) {
-      storage.liens[sKey] = [];
-    }
-
-    if (!storage.liens[sKey].includes(cKey)) {
-      storage.liens[sKey].push(cKey);
-      writeStorageFile(storage);
-      return `Lien d'héritage enregistré : "${source}" est un/une "${cible}".`;
-    }
-    return `Le lien d'héritage "${source}" -> "${cible}" existait déjà.`;
-  },
-
-  ask_user: async ({ question }: { question?: string }) => {
-    return `Question posée à l'utilisateur : ${question || 'Pouvez-vous préciser votre demande ?'}`;
-  },
-};
-
-// === 3. LA BOUCLE AGENTIQUE ===
-const AGENT_SYSTEM_PROMPT =
-  'Tu es KADERBOT, un agent cognitif d’élite doté d’outils de recherche et d’analyse.\n' +
-  'RÈGLES CRUCIALES :\n' +
-  '(1) Vérifie toujours memo_lookup avant search_web si le sujet peut déjà être connu localement.\n' +
-  '(2) Recherche sur le web via search_news ou search_web pour tout fait récent ou d’actualité.\n' +
-  '(3) Si open_url renvoie une erreur (403, accès protégé, anti-bot ou timeout), ignore immédiatement cette source et passe aux autres URLs trouvées ou utilise les résumés de recherche.\n' +
-  '(4) Si l’utilisateur demande "Continue" ou "continuer", utilise directement les informations déjà réunies pour produire la synthèse finale sans relancer de boucle superflue.\n' +
-  '(5) Pour créer une note, utilise create_note ; pour chercher une note, utilise search_notes.\n' +
-  '(6) Pour Telegram, utilise send_message avec channel=telegram et confirm=true ; une confirmation utilisateur sera demandée avant l’envoi.\n' +
-  '(7) Pour WhatsApp, utilise send_message avec channel=whatsapp : cela prépare seulement un lien, sans envoi automatique.\n' +
-  '(8) Pour l’agenda, utilise create_event ou list_events. Demande toujours des dates ISO 8601 avec fuseau horaire si elles sont ambiguës.\n' +
-  '(9) Réponds toujours dans la langue de l’utilisateur, de façon concise et sans inventer.';
-
-// Helper exécutant la boucle d'outils agentique pour un endpoint/modèle donné (Groq ou OpenRouter)
-async function runToolLoopWithModel(
-  endpoint: string,
-  apiKey: string,
-  model: string,
-  providerLabel: string,
-  userPrompt: string,
-  history: Array<{ role: string; content: string }> = [],
-  systemPrompt?: string,
-  extraHeaders: Record<string, string> = {}
-): Promise<{
-  text?: string;
-  provider: string;
-  model: string;
-  toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }>;
-  awaitingUser?: boolean;
-  question?: string;
-  pendingAction?: PendingAgentAction;
-}> {
-  const isContinuePrompt = ['continue', 'continuer', 'poursuis', 'vas-y', 'go on', 'suite'].includes(userPrompt.trim().toLowerCase());
-  const effectiveUserPrompt = isContinuePrompt
-    ? "Poursuis l'analyse ou la recherche précédente et produis la synthèse finale claire et structurée en français."
-    : userPrompt;
-
-  const messages: any[] = [
-    { role: 'system', content: systemPrompt || AGENT_SYSTEM_PROMPT },
-    ...history,
-    { role: 'user', content: effectiveUserPrompt },
-  ];
-
-  const toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }> = [];
-  let lastText = '';
-  const loopStartTime = Date.now();
-  const MAX_LOOP_DURATION_MS = 25000; // 25s max pour éviter tout blocage réseau
-
-  for (let i = 0; i < MAX_AGENT_ITERATIONS; i++) {
-    // Si le temps limite est presque atteint, forcer la synthèse directe sans nouvel appel d'outil
-    const elapsed = Date.now() - loopStartTime;
-    if (elapsed > MAX_LOOP_DURATION_MS) {
-      console.warn(`[AGENT TIMEOUT PREVENT] Limite de temps atteinte (${elapsed}ms), synthèse immédiate...`);
-      break;
-    }
-
-    const fetchController = new AbortController();
-    const fetchTimeoutId = setTimeout(() => fetchController.abort(), 14000);
-
-    let response: Response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
-          ...extraHeaders,
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          tools: AGENT_TOOLS,
-          tool_choice: 'auto',
-          temperature: 0.5,
-        }),
-        signal: fetchController.signal,
-      });
-    } catch (fetchErr: any) {
-      clearTimeout(fetchTimeoutId);
-      if (fetchErr.name === 'AbortError') {
-        throw new Error(`[${model}] Délai d'attente API dépassé (14s)`);
-      }
-      throw fetchErr;
-    }
-    clearTimeout(fetchTimeoutId);
-
-    if (!response.ok) {
-      const errJson = await response.json().catch(() => null);
-      const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
-      throw new Error(`[${model}] ${errMsg}`);
-    }
-
-    const data: any = await response.json();
-    const assistantMsg = data.choices?.[0]?.message;
-
-    if (!assistantMsg) {
-      throw new Error(`[${model}] Réponse vide reçue`);
-    }
-
-    // Si la réponse contient des appels d'outils (tool_calls)
-    if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-      messages.push(assistantMsg);
-
-      for (const toolCall of assistantMsg.tool_calls) {
-        const fnName = toolCall.function?.name;
-        let parsedArgs: any = {};
-        try {
-          parsedArgs = JSON.parse(toolCall.function?.arguments || '{}');
-        } catch (e: any) {
-          console.warn(`Arguments d'outil invalides pour ${fnName}:`, toolCall.function?.arguments);
-          parsedArgs = {};
-        }
-
-        const validationError = validateToolArguments(fnName, parsedArgs);
-        if (validationError) {
-          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: validationError });
-          messages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: `Erreur de validation : ${validationError}`,
-          });
-          continue;
-        }
-
-        // Cas ask_user : interruption de la boucle et retour direct
-        if (fnName === 'ask_user') {
-          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'success' });
-          return {
-            awaitingUser: true,
-            question: parsedArgs.question || 'Pouvez-vous préciser votre demande ?',
-            provider: providerLabel,
-            model,
-            toolTrace,
-          };
-        }
-
-        const policy = TOOL_POLICIES[fnName];
-        const requiresConfirmation =
-          policy?.confirmation === true ||
-          (fnName === 'send_message' && parsedArgs.channel !== 'whatsapp');
-        if (requiresConfirmation) {
-          const pendingAction = createPendingAction(fnName, parsedArgs);
-          toolTrace.push({
-            tool: fnName,
-            args: parsedArgs,
-            status: 'success',
-            resultSnippet: 'En attente de confirmation utilisateur',
-          });
-          return {
-            awaitingUser: true,
-            pendingAction,
-            question: `Confirmation requise : ${pendingAction.summary}`,
-            provider: providerLabel,
-            model,
-            toolTrace,
-          };
-        }
-
-        let toolResultStr = '';
-        let isError = false;
-        let errorDetail = '';
-
-        try {
-          const handler = TOOL_IMPLEMENTATIONS[fnName];
-          if (typeof handler === 'function') {
-            toolResultStr = await handler(parsedArgs);
-            if (
-              toolResultStr.startsWith('Erreur') ||
-              toolResultStr.startsWith('Impossible') ||
-              toolResultStr.startsWith('Accès refusé') ||
-              toolResultStr.includes('403') ||
-              toolResultStr.includes("Délai d'attente dépassé")
-            ) {
-              isError = true;
-              errorDetail = toolResultStr.slice(0, 160);
-            }
-          } else {
-            toolResultStr = `Outil inconnu : ${fnName}`;
-            isError = true;
-            errorDetail = toolResultStr;
-          }
-        } catch (err: any) {
-          toolResultStr = `Erreur lors de l'exécution de l'outil ${fnName} : ${err.message || 'Erreur inconnue'}`;
-          isError = true;
-          errorDetail = err.message || 'Erreur inconnue';
-        }
-
-        const snippet = toolResultStr.replace(/\s+/g, ' ').trim().slice(0, 120);
-
-        toolTrace.push({
-          tool: fnName,
-          args: parsedArgs,
-          status: isError ? 'error' : 'success',
-          errorMsg: isError ? errorDetail : undefined,
-          resultSnippet: snippet,
-        });
-
-        // Tronquer le résultat d'un outil pour l'injecter proprement dans la conversation
-        let safeContent = (typeof toolResultStr === 'string' ? toolResultStr : JSON.stringify(toolResultStr)).slice(0, 5000);
-        if (isError && fnName === 'open_url') {
-          safeContent += ' [Note agent : Cette page est inaccessible ou protégée. Poursuis l’analyse avec une autre source ou résume avec les données déjà disponibles.]';
-        }
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: safeContent,
-        });
-      }
-
-      continue;
-    }
-
-    // Réponse texte finale
-    const content = assistantMsg.content?.trim() || '';
-    lastText = content;
-    return {
-      text: content,
-      provider: providerLabel,
-      model,
-      toolTrace,
-    };
-  }
-
-  // Si la limite d'itérations ou de temps est atteinte, solliciter une dernière synthèse rapide
-  if (!lastText && messages.length > 2) {
-    try {
-      const finalController = new AbortController();
-      const finalTimeoutId = setTimeout(() => finalController.abort(), 9000);
-      messages.push({
-        role: 'user',
-        content: 'Synthétise maintenant en 2 à 4 paragraphes clairs les informations recueillies jusqu’ici, sans appel d’outil supplémentaire.',
-      });
-      const synthResponse = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
-          ...extraHeaders,
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: 0.5,
-          max_tokens: 800,
-        }),
-        signal: finalController.signal,
-      });
-      clearTimeout(finalTimeoutId);
-      if (synthResponse.ok) {
-        const synthData: any = await synthResponse.json();
-        const synthText = synthData.choices?.[0]?.message?.content?.trim();
-        if (synthText) {
-          return {
-            text: synthText,
-            provider: providerLabel,
-            model,
-            toolTrace,
-          };
-        }
-      }
-    } catch (e: any) {
-      console.warn('Synthèse de secours non disponible:', e.message);
-    }
-  }
-
-  return {
-    text: lastText || 'Voici les informations réunies sur votre demande.',
-    provider: providerLabel,
-    model,
-    toolTrace,
-  };
-}
-
-// Cascade agentique complète : Groq 120B → Groq 20B → Gemini (sans tools) → OpenRouter Nemotron (avec tools)
-async function runAgentLoop(
-  userPrompt: string,
-  history: Array<{ role: string; content: string }> = [],
-  systemPrompt?: string
-): Promise<{
-  text?: string;
-  provider: string;
-  model?: string;
-  toolTrace: Array<{ tool: string; args?: any }>;
-  awaitingUser?: boolean;
-  question?: string;
-  isFallback?: boolean;
-  fallbackReason?: string;
-}> {
-  const groqApiKey = process.env.GROQ_API_KEY?.trim();
-  const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
-
-  // === MAILLON 1 : Groq openai/gpt-oss-120b (avec tools) ===
-  if (groqApiKey) {
-    try {
-      const res = await runToolLoopWithModel(
-        'https://api.groq.com/openai/v1/chat/completions',
-        groqApiKey,
-        'openai/gpt-oss-120b',
-        'groq-agent',
-        userPrompt,
-        history,
-        systemPrompt
-      );
-      return res;
-    } catch (err120: any) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 1 (Groq openai/gpt-oss-120b) a échoué (cause: ${err120.message}). Bascule vers Maillon 2 (Groq openai/gpt-oss-20b)...`
-      );
-    }
-
-    // === MAILLON 2 : Groq openai/gpt-oss-20b (avec tools) ===
-    try {
-      const res = await runToolLoopWithModel(
-        'https://api.groq.com/openai/v1/chat/completions',
-        groqApiKey,
-        'openai/gpt-oss-20b',
-        'groq-agent',
-        userPrompt,
-        history,
-        systemPrompt
-      );
-      return {
-        ...res,
-        isFallback: true,
-        fallbackReason: 'Groq openai/gpt-oss-120b a échoué, bascule sur openai/gpt-oss-20b',
-      };
-    } catch (err20: any) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 2 (Groq openai/gpt-oss-20b) a échoué (cause: ${err20.message}). Bascule vers Maillon 3 (Gemini sans tools)...`
-      );
-    }
-  } else {
-    console.warn(
-      '[BASCULE AGENT] Aucune variable GROQ_API_KEY configurée. Bascule vers Maillon 3 (Gemini sans tools)...'
-    );
-  }
-
-  // === MAILLON 3 : Gemini (sans tools) ===
-  try {
-    const formattedHistory = history
-      .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
-      .join('\n');
-    const fullPrompt = `${systemPrompt || AGENT_SYSTEM_PROMPT}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${userPrompt}\nKADERBOT:`;
-
-    const geminiRes = await callGeminiWithFallback(fullPrompt, systemPrompt || AGENT_SYSTEM_PROMPT);
-    return {
-      text: geminiRes.text,
-      provider: 'gemini',
-      model: geminiRes.model,
-      toolTrace: [],
-      isFallback: true,
-      fallbackReason: 'Groq 120B et 20B indisponibles, bascule sur Gemini (sans tools)',
-    };
-  } catch (geminiErr: any) {
-    if (openRouterApiKey) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 3 (Gemini) a échoué (cause: ${geminiErr.message}). Bascule vers Maillon 4 (OpenRouter nvidia/nemotron-3.5-lightning:free)...`
-      );
-    } else {
-      console.warn(
-        `[BASCULE AGENT] Maillon 3 (Gemini) a échoué (cause: ${geminiErr.message}). Aucun maillon OpenRouter configuré.`
-      );
-    }
-  }
-
-  // === MAILLON 4 : OpenRouter 'nvidia/nemotron-3.5-lightning:free' (avec tools) ===
-  if (openRouterApiKey) {
-    try {
-      const res = await runToolLoopWithModel(
-        'https://openrouter.ai/api/v1/chat/completions',
-        openRouterApiKey,
-        'nvidia/nemotron-3.5-lightning:free',
-        'openrouter-agent',
-        userPrompt,
-        history,
-        systemPrompt,
-        {
-          'HTTP-Referer': 'https://kaderbot.app',
-          'X-Title': 'KADERBOT NOVA',
-        }
-      );
-      return {
-        ...res,
-        isFallback: true,
-        fallbackReason: 'Groq et Gemini indisponibles, bascule sur OpenRouter nvidia/nemotron-3.5-lightning:free',
-      };
-    } catch (openRouterErr: any) {
-      console.warn(
-        `[BASCULE AGENT] Maillon 4 (OpenRouter nvidia/nemotron-3.5-lightning:free) a échoué (cause: ${openRouterErr.message}). Tous les maillons ont échoué.`
-      );
-    }
-  }
-
-  throw new Error('Tous les maillons de l’agent ont échoué (Groq gpt-oss-120b, Groq gpt-oss-20b, Gemini, OpenRouter Nemotron).');
-}
-
-// === ROUTER INTENTION (CHAT vs AGENT) ===
-async function classifyIntentWithRouter(
-  userPrompt: string,
-  _history: Array<{ role: string; content: string }> = []
-): Promise<'CHAT' | 'AGENT'> {
-  const clean = userPrompt.trim().toLowerCase();
-  // Si l'utilisateur demande de continuer ou poursuivre, c'est immédiatement une tâche AGENT
-  if (['continue', 'continuer', 'poursuis', 'vas-y', 'go on', 'suite'].includes(clean)) {
-    return 'AGENT';
-  }
-
-  const groqKey = process.env.GROQ_API_KEY?.trim();
-  if (!groqKey) {
-    // Si pas de clé Groq, basculer par défaut sur AGENT pour préserver la cascade
-    return 'AGENT';
-  }
-
-  try {
-    const classificationPrompt = `Réponds uniquement CHAT ou AGENT. AGENT si le message demande une recherche web, une info actuelle ou factuelle hors mémoire, ou apprendre/mémoriser un fait. CHAT sinon (salutations, conversation, opinions, création).
-
-Message: "${userPrompt.replace(/"/g, '\\"')}"
-Classification:`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${groqKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-oss-20b',
-        messages: [{ role: 'user', content: classificationPrompt }],
-        max_tokens: 150,
-        temperature: 0,
-        reasoning_format: 'parsed',
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      console.warn(`[ROUTER AGENT] Classification HTTP ${response.status}, défaut = AGENT`);
-      return 'AGENT';
-    }
-
-    const data: any = await response.json();
-    const msgObj = data.choices?.[0]?.message;
-    const content = (msgObj?.content || '').trim().toUpperCase();
-    const reasoning = (msgObj?.reasoning || '').trim().toUpperCase();
-
-    if (content.includes('CHAT') || (!content && reasoning.slice(-80).includes('CHAT'))) {
-      return 'CHAT';
-    }
-    return 'AGENT';
-  } catch (err: any) {
-    console.warn(`[ROUTER AGENT] Erreur classification (${err.message}), défaut = AGENT`);
-    return 'AGENT';
-  }
-}
 
 // === 5. ENDPOINT /api/agent ===
 app.post('/api/agent', async (req, res) => {
@@ -2080,19 +865,21 @@ app.post('/api/agent', async (req, res) => {
         try {
           const chatRes = await callGroqWithFallback(
             prompt,
-            systemPrompt || AGENT_SYSTEM_PROMPT,
+            systemPrompt || agentSystemPrompt,
             serverGroqKey,
             'openai/gpt-oss-120b',
             history
           );
-          return res.json({
-            text: chatRes.text,
-            provider: 'groq-chat',
-            model: chatRes.actualModel,
-            routedTo: 'chat',
-            toolTrace: [],
-            isFallback: false,
-          });
+          if (chatRes.text && chatRes.text.trim()) {
+            return res.json({
+              text: chatRes.text.trim(),
+              provider: 'groq-chat',
+              model: chatRes.actualModel,
+              routedTo: 'chat',
+              toolTrace: [],
+              isFallback: false,
+            });
+          }
         } catch (chatErr: any) {
           console.warn(`[ROUTER AGENT] Groq chat direct a échoué (${chatErr.message}), bascule sur Gemini...`);
         }
@@ -2103,8 +890,8 @@ app.post('/api/agent', async (req, res) => {
         const formattedHistory = history
           .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
           .join('\n');
-        const fullPrompt = `${systemPrompt || AGENT_SYSTEM_PROMPT}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
-        const geminiRes = await callGeminiWithFallback(fullPrompt, systemPrompt || AGENT_SYSTEM_PROMPT);
+        const fullPrompt = `${systemPrompt || agentSystemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
+        const geminiRes = await callGeminiWithFallback(fullPrompt, systemPrompt || agentSystemPrompt);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -2120,7 +907,7 @@ app.post('/api/agent', async (req, res) => {
     }
 
     // 2. Si intention AGENT (ou échec de CHAT) : Exécute la cascade agentique complète
-    const agentResult = await runAgentLoop(prompt, history, systemPrompt);
+    const agentResult = await runAgentLoop(prompt, history, modelRouterDeps, systemPrompt);
     return res.json({
       ...agentResult,
       routedTo: 'agent',
@@ -2157,7 +944,7 @@ app.post('/api/agent/action', async (req, res) => {
   }
 
   try {
-    const handler = TOOL_IMPLEMENTATIONS[action.tool];
+    const handler = toolImplementations[action.tool];
     if (typeof handler !== 'function') {
       return res.status(409).json({ error: `L’outil ${action.tool} n’est pas encore disponible.` });
     }
@@ -2180,7 +967,7 @@ app.post('/api/agent/action', async (req, res) => {
 // Route de téléchargement de l’archive ZIP complète du projet web
 app.get('/api/export-project-zip', (req, res) => {
   try {
-    const zipPath = path.resolve(__dirname, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_projet_complet.zip');
+    const zipPath = path.resolve(projectRoot, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_projet_complet.zip');
     if (fs.existsSync(zipPath)) {
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', 'attachment; filename="kaderbot-projet-web-complet.zip"');
@@ -2829,42 +1616,1946 @@ if __name__ == "__main__":
   }
 });
 
-// Vite middleware in dev or static files in production
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    });
+
+}
+```
+
+---
+
+<a id="srcserverstoragets"></a>
+## Fichier : `src/server/storage.ts`
+
+> **Description** : Gestionnaire de persistance JSON (mémoire, logs, notes, quotas Brave)
+
+```typescript
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Chemin racine du projet : deux niveaux au-dessus de src/server
+export const PROJECT_ROOT = path.resolve(__dirname, '../../');
+export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
+
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+export const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
+export const BRAVE_USAGE_FILE = path.join(DATA_DIR, 'brave_usage.json');
+export const NOTES_FILE = path.join(DATA_DIR, 'kaderbot_notes.json');
+export const ACTION_LOG_FILE = path.join(DATA_DIR, 'kaderbot_action_logs.json');
+export const EVENTS_FILE = path.join(DATA_DIR, 'kaderbot_events.json');
+
+export type KaderbotNote = {
+  id: string;
+  title: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentActionLog = {
+  id: string;
+  tool: string;
+  args?: Record<string, unknown>;
+  status: 'success' | 'error' | 'rejected' | 'expired';
+  message?: string;
+  createdAt: string;
+};
+
+export type KaderbotEvent = {
+  id: string;
+  title: string;
+  startIso: string;
+  endIso: string;
+  location?: string;
+  description?: string;
+  createdAt: string;
+};
+
+export interface StorageData {
+  memoire: Record<string, any[]>;
+  regles: Record<string, any[]>;
+  liens: Record<string, string[]>;
+  synonymes: Record<string, any>;
+  sessions: string[];
+  updatedAt?: string;
+}
+
+export function readStorageFile(): StorageData {
+  if (fs.existsSync(MEMORY_FILE)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
+      return {
+        memoire: parsed.memoire || {},
+        regles: parsed.regles || {},
+        liens: parsed.liens || {},
+        synonymes: parsed.synonymes || {},
+        sessions: Array.isArray(parsed.sessions) ? parsed.sessions : ['defaut'],
+      };
+    } catch (e) {
+      console.warn('Erreur lecture kaderbot_storage.json:', e);
+    }
+  }
+  return { memoire: {}, regles: {}, liens: {}, synonymes: {}, sessions: ['defaut'] };
+}
+
+export function writeStorageFile(data: any): void {
+  try {
+    fs.writeFileSync(
+      MEMORY_FILE,
+      JSON.stringify(
+        {
+          memoire: data.memoire || {},
+          regles: data.regles || {},
+          liens: data.liens || {},
+          synonymes: data.synonymes || {},
+          sessions: Array.isArray(data.sessions) ? data.sessions : ['defaut'],
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+  } catch (err) {
+    console.error('Erreur écriture kaderbot_storage.json:', err);
+  }
+}
+
+export function readJsonArray<T>(filePath: string): T[] {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn(`Erreur lecture ${filePath}:`, err);
+    return [];
+  }
+}
+
+export function writeJsonArray<T>(filePath: string, data: T[]): void {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+export function appendActionLog(entry: Omit<AgentActionLog, 'id' | 'createdAt'>): void {
+  try {
+    const logs = readJsonArray<AgentActionLog>(ACTION_LOG_FILE);
+    logs.push({ ...entry, id: randomUUID(), createdAt: new Date().toISOString() });
+    writeJsonArray(ACTION_LOG_FILE, logs.slice(-500));
+  } catch (err) {
+    console.warn('Erreur écriture journal agentique:', err);
+  }
+}
+
+// Compteur d'appels Brave en mémoire (Map avec date du jour), persisté dans data/brave_usage.json
+const braveDailyUsage = new Map<string, number>();
+
+export function getTodayString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function loadBraveUsage(): void {
+  const today = getTodayString();
+  try {
+    if (fs.existsSync(BRAVE_USAGE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(BRAVE_USAGE_FILE, 'utf-8'));
+      if (data && data.date === today && typeof data.count === 'number') {
+        braveDailyUsage.set(today, data.count);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('Erreur lecture brave_usage.json:', err);
+  }
+  braveDailyUsage.set(today, 0);
+}
+
+export function checkAndIncrementBraveQuota(maxCallsPerDay = 100): boolean {
+  const today = getTodayString();
+  if (!braveDailyUsage.has(today)) {
+    loadBraveUsage();
+  }
+  const currentCount = braveDailyUsage.get(today) || 0;
+  if (currentCount >= maxCallsPerDay) {
+    return false; // Quota de recherche atteint pour aujourd'hui
+  }
+  const newCount = currentCount + 1;
+  braveDailyUsage.set(today, newCount);
+  try {
+    fs.writeFileSync(
+      BRAVE_USAGE_FILE,
+      JSON.stringify({ date: today, count: newCount, updatedAt: new Date().toISOString() }, null, 2),
+      'utf-8'
+    );
+  } catch (err) {
+    console.warn('Erreur persistance brave_usage.json:', err);
+  }
+  return true;
+}
+
+// Initialisation au chargement
+loadBraveUsage();
+```
+
+---
+
+<a id="srcserverwebSearchts"></a>
+## Fichier : `src/server/webSearch.ts`
+
+> **Description** : Moteur de recherche Brave API et protection anti-SSRF
+
+```typescript
+import { checkAndIncrementBraveQuota } from './storage';
+
+// Sécurité open_url : Liste de domaines et réseaux interdits (localhost, 127.0.0.1, adresses IP nues, *.internal, *.render.com)
+export function isUrlForbidden(urlStr: string): { forbidden: boolean; reason?: string } {
+  try {
+    const parsed = new URL(urlStr);
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Protocole http ou https obligatoire
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { forbidden: true, reason: 'Protocole non autorisé (seuls http et https sont acceptés).' };
+    }
+
+    // Localhost
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return { forbidden: true, reason: 'Accès refusé : domaine localhost interdit.' };
+    }
+
+    // 127.0.0.1 ou boucle locale
+    if (hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+      return { forbidden: true, reason: 'Accès refusé : adresse de bouclage locale interdite.' };
+    }
+
+    // Adresses IP nues (IPv4 standard ou IPv6)
+    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (ipv4Regex.test(hostname)) {
+      return { forbidden: true, reason: 'Accès refusé : adresses IP directes non autorisées.' };
+    }
+    if (hostname.startsWith('[') && hostname.endsWith(']')) {
+      return { forbidden: true, reason: 'Accès refusé : adresses IPv6 directes non autorisées.' };
+    }
+
+    // *.internal
+    if (hostname === 'internal' || hostname.endsWith('.internal')) {
+      return { forbidden: true, reason: 'Accès refusé : réseaux internes (*.internal) non autorisés.' };
+    }
+
+    // *.render.com
+    if (hostname === 'render.com' || hostname.endsWith('.render.com')) {
+      return { forbidden: true, reason: 'Accès refusé : domaine de plateforme d’hébergement (*.render.com) interdit.' };
+    }
+
+    return { forbidden: false };
+  } catch (err: any) {
+    return { forbidden: true, reason: `URL invalide : ${err.message}` };
+  }
+}
+
+// Helper pour exécuter une recherche sur l'API Brave (Search ou News)
+export async function executeBraveSearch(
+  query: string,
+  isNews: boolean,
+  customApiKey?: string
+): Promise<string> {
+  const apiKey = (customApiKey || process.env.BRAVE_SEARCH_API_KEY || '').trim();
+  if (!apiKey) {
+    return "Clé BRAVE_SEARCH_API_KEY non configurée sur le serveur. Impossible d'effectuer la recherche web.";
   }
 
-  const server = app.listen(PORT, HOST, () => {
-    console.log(`🚀 Serveur KADERBOT NOVA opérationnel sur http://${HOST}:${PORT}`);
-  });
+  if (!checkAndIncrementBraveQuota(100)) {
+    return "Quota de recherche atteint pour aujourd'hui.";
+  }
 
-  server.on('error', (err: any) => {
-    console.error('Erreur serveur HTTP:', err);
+  const endpoint = isNews
+    ? 'https://api.search.brave.com/res/v1/news/search'
+    : 'https://api.search.brave.com/res/v1/web/search';
+
+  const url = `${endpoint}?q=${encodeURIComponent(query)}&count=5&country=fr&search_lang=fr`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'X-Subscription-Token': apiKey,
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      if (resp.status === 429) {
+        return "Quota de recherche atteint pour aujourd'hui.";
+      }
+      return `Erreur Brave Search (HTTP ${resp.status} : ${resp.statusText}).`;
+    }
+
+    const data: any = await resp.json();
+    const results = isNews ? (data.results || []) : (data.web?.results || []);
+
+    if (!Array.isArray(results) || results.length === 0) {
+      return `Aucun résultat ${isNews ? 'd’actualité' : 'web'} trouvé pour la requête : "${query}".`;
+    }
+
+    return results
+      .slice(0, 5)
+      .map((item: any, idx: number) => {
+        const title = item.title || 'Sans titre';
+        const itemUrl = item.url || '';
+        const snippet = item.description || item.snippet || 'Pas de description';
+        return `[${idx + 1}] ${title}\nURL: ${itemUrl}\nRésumé: ${snippet}`;
+      })
+      .join('\n\n');
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return "Erreur Délai d'attente dépassé (timeout 6s) pour la recherche Brave.";
+    }
+    return `Erreur réseau lors de la recherche Brave : ${err.message}`;
+  }
+}
+```
+
+---
+
+<a id="srcserverllmProvidersts"></a>
+## Fichier : `src/server/llmProviders.ts`
+
+> **Description** : Cascade de repli multi-fournisseurs (Groq, OpenRouter, Gemini)
+
+```typescript
+import { GoogleGenAI } from '@google/genai';
+
+export const DEFAULT_SYSTEM_PROMPT =
+  'Tu es KADERBOT NOVA, un assistant IA expert et pédagogue. Tu réponds toujours en français.\n' +
+  'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown propre (sauts de ligne, listes à puces, gras). Si tu génères un tableau, utilise la syntaxe standard GitHub Markdown (| Col 1 | Col 2 | suivi de |---|---|) en laissant une ligne vide avant et après le tableau.\n' +
+  'RÈGLE DE LONGUEUR ABSOLUE : Ta réponse ne doit jamais dépasser 120 mots. Sois direct et synthétique. Si un sujet est vaste (comme l\'histoire d\'une invention), donne uniquement les 2 ou 3 points les plus importants, et termine en proposant à l\'utilisateur de préciser sa question pour plus de détails. Ne fais JAMAIS de réponse de plus de 4 paragraphes.';
+
+// Helper pour instancier GoogleGenAI avec clé explicite (évite les recherches ADC / Cloud GCP)
+export function createGeminiClient(apiKey: string): GoogleGenAI {
+  return new GoogleGenAI({
+    apiKey: apiKey.trim(),
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
   });
 }
 
-process.on('unhandledRejection', (reason) => {
-  console.warn('Unhandled Rejection at:', reason);
-});
+// Helper pour normaliser et résoudre les identifiants de modèles Groq (Catalogue Octobre 2026)
+export function resolveGroqModel(requestedModel?: string): string {
+  if (!requestedModel) return 'openai/gpt-oss-120b';
+  const clean = requestedModel.trim().toLowerCase();
 
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception thrown:', err);
-});
+  // Si demande de 120b
+  if (
+    clean === 'openai/gpt-oss-120b' ||
+    clean.includes('gpt-oss-120b') ||
+    clean.includes('120b')
+  ) {
+    return 'openai/gpt-oss-120b';
+  }
 
-startServer().catch((err) => {
-  console.error('Erreur démarrage serveur:', err);
-});
+  // Si demande de 20b
+  if (
+    clean === 'openai/gpt-oss-20b' ||
+    clean.includes('gpt-oss-20b') ||
+    clean.includes('20b')
+  ) {
+    return 'openai/gpt-oss-20b';
+  }
+
+  // Toute demande de modèle inconnu ou déprécié → 'openai/gpt-oss-20b'
+  return 'openai/gpt-oss-20b';
+}
+
+// Appel Groq avec cascade de repli entre candidats (120b → 20b)
+export async function callGroqWithFallback(
+  prompt: string,
+  systemPrompt: string,
+  apiKey: string,
+  requestedModel = 'openai/gpt-oss-120b',
+  history: Array<{ role: string; content: string }> = []
+): Promise<{ text: string; actualModel: string }> {
+  const primaryModel = resolveGroqModel(requestedModel);
+
+  const candidateModels = Array.from(
+    new Set([
+      primaryModel,
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+    ])
+  );
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: prompt },
+  ];
+
+  let lastError = '';
+
+  for (let idx = 0; idx < candidateModels.length; idx++) {
+    const modelToTry = candidateModels[idx];
+    const nextModel = candidateModels[idx + 1];
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: modelToTry,
+          messages,
+          temperature: 0.7,
+          max_tokens: 800,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const msg = data.choices?.[0]?.message;
+        const content = (msg?.content || '').trim() || (msg?.reasoning || '').trim();
+        if (content) {
+          return { text: content, actualModel: modelToTry };
+        }
+        console.warn(`[GROQ] Modèle "${modelToTry}" a renvoyé un contenu vide, tentative avec le modèle suivant...`);
+      }
+
+      const errData = await response.json().catch(() => null);
+      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+      lastError = errMsg;
+
+      if (nextModel) {
+        console.warn(`[BASCULE GROQ] Modèle "${modelToTry}" a échoué (cause: ${errMsg}). Bascule vers "${nextModel}"...`);
+      } else {
+        console.warn(`[BASCULE GROQ] Modèle "${modelToTry}" a échoué (cause: ${errMsg}). Aucun autre modèle Groq disponible.`);
+      }
+
+      // Si HTTP 401 (clé API invalide), inutile de réessayer les autres modèles avec la même clé
+      if (response.status === 401) {
+        break;
+      }
+    } catch (e: any) {
+      lastError = e.message;
+      if (nextModel) {
+        console.warn(`[BASCULE GROQ] Exception sur "${modelToTry}" (cause: ${e.message}). Bascule vers "${nextModel}"...`);
+      }
+    }
+  }
+
+  throw new Error(`Groq: ${lastError}`);
+}
+
+// Normalisation des modèles OpenRouter
+export function resolveOpenRouterModel(requestedModel?: string): string {
+  const defaultModel = 'meta-llama/llama-3.3-70b-instruct:free';
+  if (!requestedModel) return defaultModel;
+  let clean = requestedModel.trim();
+  const lower = clean.toLowerCase();
+
+  // Ne JAMAIS utiliser openai/gpt-oss-120b sur OpenRouter (réservé à Groq)
+  if (lower.includes('gpt-oss') || lower.includes('gpt') || lower.includes('oss')) {
+    return defaultModel;
+  }
+
+  // Normalisation des modèles
+  if (lower.includes('llama-3.3-70b') || lower.includes('llama') || lower.includes('70b')) {
+    return defaultModel;
+  }
+  if (lower.includes('qwen')) {
+    return 'qwen/qwen3-coder:free';
+  }
+  if (lower.includes('deepseek') || lower.includes('r1')) {
+    return 'deepseek/deepseek-r1:free';
+  }
+
+  // Le suffixe :free est obligatoire pour utiliser le quota gratuit
+  if (!clean.endsWith(':free')) {
+    clean = `${clean}:free`;
+  }
+
+  return clean;
+}
+
+// Appel OpenRouter avec cascade de modèles gratuits
+export async function callOpenRouterWithFallback(
+  prompt: string,
+  systemPrompt: string,
+  apiKey: string,
+  requestedModel = 'meta-llama/llama-3.3-70b-instruct:free',
+  history: Array<{ role: string; content: string }> = []
+): Promise<{ text: string; actualModel: string }> {
+  const primaryModel = resolveOpenRouterModel(requestedModel);
+
+  const candidateModels = Array.from(
+    new Set([
+      primaryModel,
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'qwen/qwen3-coder:free',
+      'deepseek/deepseek-r1:free',
+    ])
+  );
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: prompt },
+  ];
+
+  let lastError = '';
+
+  for (const modelToTry of candidateModels) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://kaderbot.app',
+          'X-Title': 'KADERBOT NOVA',
+        },
+        body: JSON.stringify({
+          model: modelToTry,
+          messages,
+          temperature: 0.7,
+          max_tokens: 800,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content?.trim() || '';
+        return { text: content, actualModel: modelToTry };
+      }
+
+      const errData = await response.json().catch(() => null);
+      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+      lastError = errMsg;
+
+      if (response.status === 429 || response.status === 401) {
+        throw new Error('OpenRouter: quota épuisé ou clé invalide');
+      }
+
+      if (response.status === 404) {
+        console.warn(`Modèle OpenRouter "${modelToTry}" non accessible (404), tentative avec modèle suivant...`);
+        continue;
+      }
+
+      console.warn(`Erreur OpenRouter sur "${modelToTry}" (${response.status}: ${errMsg}), tentative avec modèle suivant...`);
+    } catch (e: any) {
+      if (e.message === 'OpenRouter: quota épuisé ou clé invalide') {
+        throw e;
+      }
+      lastError = e.message;
+    }
+  }
+
+  throw new Error(`OpenRouter: ${lastError || 'indisponible'}`);
+}
+
+// Appel Gemini avec SDK officiel et fallback REST direct (clé d'API explicite)
+export async function callGeminiWithFallback(
+  fullPrompt: string,
+  systemInstruction?: string
+): Promise<{ text: string; model: string }> {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!geminiKey) {
+    throw new Error('Variable GEMINI_API_KEY non configurée sur le serveur. Veuillez définir votre clé API Gemini.');
+  }
+
+  const modelsToTry = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+  let lastError: any = null;
+
+  // 1. Essai avec le client GoogleGenAI
+  try {
+    const aiClient = createGeminiClient(geminiKey);
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const m = modelsToTry[i];
+      const nextM = modelsToTry[i + 1];
+      try {
+        const response = await aiClient.models.generateContent({
+          model: m,
+          contents: fullPrompt,
+          config: systemInstruction ? { systemInstruction } : undefined,
+        });
+        const text = response.text?.trim();
+        if (text) {
+          return { text, model: m };
+        }
+      } catch (err: any) {
+        if (nextM) {
+          console.warn(`[BASCULE GEMINI SDK] Modèle "${m}" a échoué (cause: ${err.message}). Bascule vers "${nextM}"...`);
+        } else {
+          console.warn(`[BASCULE GEMINI SDK] Modèle "${m}" a échoué (cause: ${err.message}). Bascule sur REST direct...`);
+        }
+        lastError = err;
+      }
+    }
+  } catch (sdkInitErr: any) {
+    console.warn('Erreur initialisation SDK Gemini, bascule sur REST direct:', sdkInitErr.message);
+    lastError = sdkInitErr;
+  }
+
+  // 2. Fallback REST direct
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const m = modelsToTry[i];
+    const nextM = modelsToTry[i + 1];
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: fullPrompt }] }],
+            systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (text) {
+          return { text, model: m };
+        }
+      } else {
+        const errJson = await response.json().catch(() => null);
+        const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+        lastError = new Error(errMsg);
+        if (nextM) {
+          console.warn(`[BASCULE GEMINI REST] Modèle "${m}" a échoué (cause: ${errMsg}). Bascule vers "${nextM}"...`);
+        } else {
+          console.warn(`[BASCULE GEMINI REST] Modèle "${m}" a échoué (cause: ${errMsg}).`);
+        }
+      }
+    } catch (restErr: any) {
+      lastError = restErr;
+      if (nextM) {
+        console.warn(`[BASCULE GEMINI REST] Exception sur "${m}" (cause: ${restErr.message}). Bascule vers "${nextM}"...`);
+      }
+    }
+  }
+
+  throw lastError || new Error('Les modèles Gemini sont temporairement indisponibles.');
+}
+```
+
+---
+
+<a id="srcservermiddlewarets"></a>
+## Fichier : `src/server/middleware.ts`
+
+> **Description** : Middlewares de sécurité (Rate limiting & Auth timing-safe)
+
+```typescript
+import type { Request, Response, NextFunction } from 'express';
+import { timingSafeEqual } from 'crypto';
+
+export function createAgentRateLimiter(windowMs = 60 * 1000, maxRequests = 10) {
+  const agentRateLimits = new Map<string, { startedAt: number; count: number }>();
+
+  return function checkAgentRateLimit(req: Request): boolean {
+    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const current = agentRateLimits.get(key);
+    if (!current || now - current.startedAt >= windowMs) {
+      agentRateLimits.set(key, { startedAt: now, count: 1 });
+      return true;
+    }
+    if (current.count >= maxRequests) return false;
+    current.count += 1;
+    return true;
+  };
+}
+
+export function createRequireAdmin(getAdminToken: () => string) {
+  return function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+    const adminToken = getAdminToken();
+    if (!adminToken) {
+      res.status(503).json({ error: 'Fonction d’administration indisponible : ADMIN_TOKEN n’est pas configuré.' });
+      return;
+    }
+
+    const authorization = req.header('authorization') || '';
+    const bearerToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    const providedToken = req.header('x-admin-token')?.trim() || bearerToken;
+    const expected = Buffer.from(adminToken);
+    const provided = Buffer.from(providedToken);
+
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+      res.status(401).json({ error: 'Jeton administrateur invalide ou manquant.' });
+      return;
+    }
+
+    next();
+  };
+}
+```
+
+---
+
+<a id="srcagentintentClassifierts"></a>
+## Fichier : `src/agent/intentClassifier.ts`
+
+> **Description** : Classificateur d'intentions ultra-rapide (Groq 20B)
+
+```typescript
+/**
+ * Routeur d'intention rapide (CHAT vs AGENT)
+ * Utilise openai/gpt-oss-20b sur Groq avec fallback transparent vers AGENT en cas de doute ou d'échec.
+ */
+export async function classifyIntentWithRouter(
+  userPrompt: string,
+  _history: Array<{ role: string; content: string }> = [],
+  customGroqApiKey?: string
+): Promise<'CHAT' | 'AGENT'> {
+  const clean = userPrompt.trim().toLowerCase();
+  // Si l'utilisateur demande de continuer ou poursuivre, c'est immédiatement une tâche AGENT
+  if (['continue', 'continuer', 'poursuis', 'vas-y', 'go on', 'suite'].includes(clean)) {
+    return 'AGENT';
+  }
+
+  // Détection directe des requêtes mémoire, préférences, notes et outils
+  if (
+    clean.includes('mémoire') ||
+    clean.includes('memoire') ||
+    clean.includes('retiens') ||
+    clean.includes('mémorise') ||
+    clean.includes('memorise') ||
+    clean.includes('rappelle') ||
+    clean.includes('note') ||
+    clean.includes('agenda') ||
+    clean.includes('événement') ||
+    clean.includes('evenement') ||
+    clean.includes('fruits') ||
+    clean.includes("j'aime") ||
+    clean.includes('jaime') ||
+    clean.includes('préfère') ||
+    clean.includes('prefere') ||
+    clean.includes('qui suis-je')
+  ) {
+    return 'AGENT';
+  }
+
+  const groqKey = (customGroqApiKey || process.env.GROQ_API_KEY || '').trim();
+  if (!groqKey) {
+    // Si pas de clé Groq, basculer par défaut sur AGENT pour préserver la cascade
+    return 'AGENT';
+  }
+
+  try {
+    const classificationPrompt = `Réponds uniquement CHAT ou AGENT.
+AGENT si le message demande une information en mémoire ou personnelle (ex: "Quels fruits j'aime ?"), une recherche web, une actualité, ou d'apprendre/noter un fait.
+CHAT uniquement pour les salutations simples ("bonjour", "coucou") ou de la pure discussion informelle.
+
+Message: "${userPrompt.replace(/"/g, '\\"')}"
+Classification:`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${groqKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-20b',
+        messages: [{ role: 'user', content: classificationPrompt }],
+        max_tokens: 150,
+        temperature: 0,
+        reasoning_format: 'parsed',
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.warn(`[ROUTER AGENT] Classification HTTP ${response.status}, défaut = AGENT`);
+      return 'AGENT';
+    }
+
+    const data: any = await response.json();
+    const msgObj = data.choices?.[0]?.message;
+    const content = (msgObj?.content || '').trim().toUpperCase();
+    const reasoning = (msgObj?.reasoning || '').trim().toUpperCase();
+
+    if (content.includes('CHAT') || (!content && reasoning.slice(-80).includes('CHAT'))) {
+      return 'CHAT';
+    }
+    return 'AGENT';
+  } catch (err: any) {
+    console.warn(`[ROUTER AGENT] Erreur classification (${err.message}), défaut = AGENT`);
+    return 'AGENT';
+  }
+}
+```
+
+---
+
+<a id="srcagentreactLoopts"></a>
+## Fichier : `src/agent/reactLoop.ts`
+
+> **Description** : Boucle ReAct 25 itérations (Pensée, Action, Observation, Synthèse)
+
+```typescript
+import type { AgentToolDefinition, PendingAgentAction, ToolExecutionTrace, ToolPolicy } from '../types/agent';
+import type { ToolImplementation } from './toolImplementations';
+
+export interface ReactLoopDeps {
+  agentTools: AgentToolDefinition[];
+  toolPolicies: Record<string, ToolPolicy>;
+  toolImplementations: Record<string, ToolImplementation>;
+  validateToolArguments: (tool: string, args: Record<string, unknown>) => string | null;
+  requestPendingAction: (tool: string, args: Record<string, unknown>) => PendingAgentAction;
+  defaultSystemPrompt: string;
+  maxAgentIterations: number;
+  maxLoopDurationMs: number;
+}
+
+export async function runToolLoopWithModel(
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  providerLabel: string,
+  userPrompt: string,
+  history: Array<{ role: string; content: string }> = [],
+  deps: ReactLoopDeps,
+  systemPrompt?: string,
+  extraHeaders: Record<string, string> = {}
+): Promise<{
+  text?: string;
+  provider: string;
+  model: string;
+  toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }>;
+  awaitingUser?: boolean;
+  question?: string;
+  pendingAction?: PendingAgentAction;
+}> {
+  const isContinuePrompt = ['continue', 'continuer', 'poursuis', 'vas-y', 'go on', 'suite'].includes(userPrompt.trim().toLowerCase());
+  const effectiveUserPrompt = isContinuePrompt
+    ? "Poursuis l'analyse ou la recherche précédente et produis la synthèse finale claire et structurée en français."
+    : userPrompt;
+
+  const messages: any[] = [
+    { role: 'system', content: systemPrompt || deps.defaultSystemPrompt },
+    ...history,
+    { role: 'user', content: effectiveUserPrompt },
+  ];
+
+  const toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }> = [];
+  let lastText = '';
+  const loopStartTime = Date.now();
+  const MAX_LOOP_DURATION_MS = deps.maxLoopDurationMs; // 25s max pour éviter tout blocage réseau
+
+  for (let i = 0; i < deps.maxAgentIterations; i++) {
+    // Si le temps limite est presque atteint, forcer la synthèse directe sans nouvel appel d'outil
+    const elapsed = Date.now() - loopStartTime;
+    if (elapsed > MAX_LOOP_DURATION_MS) {
+      console.warn(`[AGENT TIMEOUT PREVENT] Limite de temps atteinte (${elapsed}ms), synthèse immédiate...`);
+      break;
+    }
+
+    const fetchController = new AbortController();
+    const fetchTimeoutId = setTimeout(() => fetchController.abort(), 14000);
+
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+          ...extraHeaders,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          tools: deps.agentTools,
+          tool_choice: 'auto',
+          temperature: 0.5,
+        }),
+        signal: fetchController.signal,
+      });
+    } catch (fetchErr: any) {
+      clearTimeout(fetchTimeoutId);
+      if (fetchErr.name === 'AbortError') {
+        throw new Error(`[${model}] Délai d'attente API dépassé (14s)`);
+      }
+      throw fetchErr;
+    }
+    clearTimeout(fetchTimeoutId);
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+      throw new Error(`[${model}] ${errMsg}`);
+    }
+
+    const data: any = await response.json();
+    const assistantMsg = data.choices?.[0]?.message;
+
+    if (!assistantMsg) {
+      throw new Error(`[${model}] Réponse vide reçue`);
+    }
+
+    // Si la réponse contient des appels d'outils (tool_calls)
+    if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
+      messages.push(assistantMsg);
+
+      for (const toolCall of assistantMsg.tool_calls) {
+        const fnName = toolCall.function?.name;
+        let parsedArgs: any = {};
+        try {
+          parsedArgs = JSON.parse(toolCall.function?.arguments || '{}');
+        } catch (e: any) {
+          console.warn(`Arguments d'outil invalides pour ${fnName}:`, toolCall.function?.arguments);
+          parsedArgs = {};
+        }
+
+        const validationError = deps.validateToolArguments(fnName, parsedArgs);
+        if (validationError) {
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: validationError });
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `Erreur de validation : ${validationError}`,
+          });
+          continue;
+        }
+
+        // Cas ask_user : interruption de la boucle et retour direct
+        if (fnName === 'ask_user') {
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'success' });
+          return {
+            awaitingUser: true,
+            question: parsedArgs.question || 'Pouvez-vous préciser votre demande ?',
+            provider: providerLabel,
+            model,
+            toolTrace,
+          };
+        }
+
+        const policy = deps.toolPolicies[fnName];
+        const requiresConfirmation =
+          policy?.confirmation === true ||
+          (fnName === 'send_message' && parsedArgs.channel !== 'whatsapp');
+        if (requiresConfirmation) {
+          const pendingAction = deps.requestPendingAction(fnName, parsedArgs);
+          toolTrace.push({
+            tool: fnName,
+            args: parsedArgs,
+            status: 'success',
+            resultSnippet: 'En attente de confirmation utilisateur',
+          });
+          return {
+            awaitingUser: true,
+            pendingAction,
+            question: `Confirmation requise : ${pendingAction.summary}`,
+            provider: providerLabel,
+            model,
+            toolTrace,
+          };
+        }
+
+        let toolResultStr = '';
+        let isError = false;
+        let errorDetail = '';
+
+        try {
+          const handler = deps.toolImplementations[fnName];
+          if (typeof handler === 'function') {
+            toolResultStr = await handler(parsedArgs);
+            if (
+              toolResultStr.startsWith('Erreur') ||
+              toolResultStr.startsWith('Impossible') ||
+              toolResultStr.startsWith('Accès refusé') ||
+              toolResultStr.includes('403') ||
+              toolResultStr.includes("Délai d'attente dépassé")
+            ) {
+              isError = true;
+              errorDetail = toolResultStr.slice(0, 160);
+            }
+          } else {
+            toolResultStr = `Outil inconnu : ${fnName}`;
+            isError = true;
+            errorDetail = toolResultStr;
+          }
+        } catch (err: any) {
+          toolResultStr = `Erreur lors de l'exécution de l'outil ${fnName} : ${err.message || 'Erreur inconnue'}`;
+          isError = true;
+          errorDetail = err.message || 'Erreur inconnue';
+        }
+
+        const snippet = toolResultStr.replace(/\s+/g, ' ').trim().slice(0, 120);
+
+        toolTrace.push({
+          tool: fnName,
+          args: parsedArgs,
+          status: isError ? 'error' : 'success',
+          errorMsg: isError ? errorDetail : undefined,
+          resultSnippet: snippet,
+        });
+
+        // Tronquer le résultat d'un outil pour l'injecter proprement dans la conversation
+        let safeContent = (typeof toolResultStr === 'string' ? toolResultStr : JSON.stringify(toolResultStr)).slice(0, 5000);
+        if (isError && fnName === 'open_url') {
+          safeContent += ' [Note agent : Cette page est inaccessible ou protégée. Poursuis l’analyse avec une autre source ou résume avec les données déjà disponibles.]';
+        }
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: safeContent,
+        });
+      }
+
+      continue;
+    }
+
+    // Réponse texte finale
+    const content = assistantMsg.content?.trim() || '';
+    if (content) {
+      return {
+        text: content,
+        provider: providerLabel,
+        model,
+        toolTrace,
+      };
+    }
+
+    // Si le modèle n'a pas formulé de texte après l'exécution d'un ou plusieurs outils (ex: memo_lookup, memo_store)
+    if (toolTrace.length > 0) {
+      try {
+        const synthController = new AbortController();
+        const synthTimeoutId = setTimeout(() => synthController.abort(), 12000);
+        messages.push({
+          role: 'user',
+          content: 'À partir des données obtenues par les outils ci-dessus, formule maintenant ta réponse directe, complète et naturelle pour l’utilisateur en français.',
+        });
+        const synthResponse = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey.trim()}`,
+            'Content-Type': 'application/json',
+            ...extraHeaders,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.5,
+            max_tokens: 800,
+          }),
+          signal: synthController.signal,
+        });
+        clearTimeout(synthTimeoutId);
+        if (synthResponse.ok) {
+          const synthData: any = await synthResponse.json();
+          const synthText = synthData.choices?.[0]?.message?.content?.trim();
+          if (synthText) {
+            return {
+              text: synthText,
+              provider: providerLabel,
+              model,
+              toolTrace,
+            };
+          }
+        }
+      } catch (synthErr: any) {
+        console.warn('[REACT LOOP] Échec formulation post-outils:', synthErr.message);
+      }
+    }
+
+    lastText = content;
+  }
+
+  // Si la limite d'itérations ou de temps est atteinte, solliciter une dernière synthèse rapide
+  if (!lastText && messages.length > 2) {
+    try {
+      const finalController = new AbortController();
+      const finalTimeoutId = setTimeout(() => finalController.abort(), 9000);
+      messages.push({
+        role: 'user',
+        content: 'Synthétise maintenant en 2 à 4 paragraphes clairs les informations recueillies jusqu’ici, sans appel d’outil supplémentaire.',
+      });
+      const synthResponse = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+          ...extraHeaders,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.5,
+          max_tokens: 800,
+        }),
+        signal: finalController.signal,
+      });
+      clearTimeout(finalTimeoutId);
+      if (synthResponse.ok) {
+        const synthData: any = await synthResponse.json();
+        const synthText = synthData.choices?.[0]?.message?.content?.trim();
+        if (synthText) {
+          return {
+            text: synthText,
+            provider: providerLabel,
+            model,
+            toolTrace,
+          };
+        }
+      }
+    } catch (e: any) {
+      console.warn('Synthèse de secours non disponible:', e.message);
+    }
+  }
+
+  return {
+    text: lastText || 'Voici les informations réunies sur votre demande.',
+    provider: providerLabel,
+    model,
+    toolTrace,
+  };
+}
+```
+
+---
+
+<a id="srcagenttoolRegistryts"></a>
+## Fichier : `src/agent/toolRegistry.ts`
+
+> **Description** : Définition et schémas JSON des outils de l'agent
+
+```typescript
+import type { AgentToolDefinition, ToolPolicy } from '../types/agent';
+
+/**
+ * Registre unique des outils exposés au modèle agentique.
+ * Les schémas restent compatibles OpenAI/Groq/OpenRouter.
+ */
+export const AGENT_TOOL_REGISTRY: AgentToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_web',
+      description: 'Recherche générale sur le web via Brave. À utiliser pour toute question factuelle, actuelle, ou inconnue.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Requête textuelle de recherche.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_url',
+      description: 'Ouvre une URL et renvoie le texte principal de la page. Utilise après search_web pour approfondir un résultat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'L’URL absolue de la page web à explorer.',
+          },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_news',
+      description: "Recherche d'actualités récentes via Brave News. Utiliser pour les événements récents.",
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Requête pour actualités récentes.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memo_lookup',
+      description: 'Consulte la mémoire cognitive locale de KADERBOT (faits, définitions, Q&R appris) avant de chercher sur le web. Toujours appeler AVANT search_web si la question peut être connue.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sujet: {
+            type: 'string',
+            description: 'Le concept, mot ou sujet à vérifier dans la mémoire locale.',
+          },
+        },
+        required: ['sujet'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memo_store',
+      description: "Enregistre un fait ou une définition validé par l'utilisateur dans la mémoire cognitive. À n'utiliser que si l'utilisateur dit explicitement 'retiens' ou demande de mémoriser. JAMAIS automatiquement depuis le web.",
+      parameters: {
+        type: 'object',
+        properties: {
+          sujet: {
+            type: 'string',
+            description: 'Le sujet ou concept clé du fait.',
+          },
+          definition: {
+            type: 'string',
+            description: 'La définition ou le fait validé par l’utilisateur.',
+          },
+        },
+        required: ['sujet', 'definition'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'link_concepts',
+      description: "Crée un lien d'héritage (source est-un cible) dans le graphe de connaissances.",
+      parameters: {
+        type: 'object',
+        properties: {
+          source: {
+            type: 'string',
+            description: 'Le concept source / sous-concept (ex: "chat").',
+          },
+          cible: {
+            type: 'string',
+            description: 'Le concept parent / catégorie (ex: "félin").',
+          },
+        },
+        required: ['source', 'cible'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_event',
+      description: 'Crée un événement dans l’agenda KADERBOT après confirmation et fournit un lien Google Calendar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          start_iso: { type: 'string', description: 'Date ISO 8601 avec fuseau horaire.' },
+          end_iso: { type: 'string', description: 'Date ISO 8601 avec fuseau horaire.' },
+          location: { type: 'string' },
+          description: { type: 'string' },
+        },
+        required: ['title', 'start_iso', 'end_iso'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_events',
+      description: 'Liste les événements KADERBOT compris dans une période donnée.',
+      parameters: {
+        type: 'object',
+        properties: {
+          start_iso: { type: 'string' },
+          end_iso: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 50 },
+        },
+        required: ['start_iso', 'end_iso'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_note',
+      description: 'Crée une note locale persistante après confirmation de l’utilisateur.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          body: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['title', 'body'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_notes',
+      description: 'Recherche dans les notes locales par titre, contenu ou tags.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 20 },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_message',
+      description: 'Envoie un message Telegram après confirmation ou prépare un partage WhatsApp sans envoi automatique.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', enum: ['telegram', 'whatsapp', 'sms'] },
+          target: { type: 'string' },
+          text: { type: 'string' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['channel', 'target', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ask_user',
+      description: "Pose une question courte à l'utilisateur quand la demande est ambiguë et que tu ne peux pas deviner. Une seule fois par conversation maximum.",
+      parameters: {
+        type: 'object',
+        properties: {
+          question: {
+            type: 'string',
+            description: 'La question courte et ciblée à poser à l’utilisateur.',
+          },
+        },
+        required: ['question'],
+      },
+    },
+  },
+];
+
+
+
+/** Politique de risque associée à chaque outil agentique : l'agent gère les confirmations de manière conversationnelle. */
+export const TOOL_POLICIES: Record<string, ToolPolicy> = {
+  search_web: { risk: 'safe', confirmation: false },
+  search_news: { risk: 'safe', confirmation: false },
+  open_url: { risk: 'safe', confirmation: false },
+  memo_lookup: { risk: 'safe', confirmation: false },
+  search_notes: { risk: 'safe', confirmation: false },
+  list_events: { risk: 'safe', confirmation: false },
+  ask_user: { risk: 'safe', confirmation: false },
+  memo_store: { risk: 'write', confirmation: false },
+  link_concepts: { risk: 'write', confirmation: false },
+  create_note: { risk: 'write', confirmation: false },
+  create_event: { risk: 'write', confirmation: false },
+  send_message: { risk: 'external', confirmation: false },
+};
+
+export const AGENT_TOOLS = AGENT_TOOL_REGISTRY;
+```
+
+---
+
+<a id="srcagenttoolImplementationsts"></a>
+## Fichier : `src/agent/toolImplementations.ts`
+
+> **Description** : Implémentations des outils (scraping anti-403, mémoire, calcul, etc.)
+
+```typescript
+import { randomUUID } from 'crypto';
+
+export type ToolImplementation = (args: Record<string, any>) => Promise<string>;
+
+export interface ToolImplementationDeps {
+  executeBraveSearch: (query: string, isNews: boolean) => Promise<string>;
+  isUrlForbidden: (url: string) => { forbidden: boolean; reason?: string };
+  readStorageFile: () => any;
+  writeStorageFile: (data: any) => void;
+  readJsonArray: <T>(filePath: string) => T[];
+  writeJsonArray: <T>(filePath: string, data: T[]) => void;
+  notesFile: string;
+  eventsFile: string;
+  telegramBotToken: string;
+  telegramAllowedChatIds: Set<string>;
+}
+
+interface KaderbotEvent {
+  id: string;
+  title: string;
+  startIso: string;
+  endIso: string;
+  location?: string;
+  description?: string;
+  createdAt: string;
+}
+
+interface KaderbotNote {
+  id: string;
+  title: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Implémentations concrètes des outils agentiques.
+ * Les dépendances sont injectées pour garder la boucle ReAct indépendante du stockage et des APIs externes.
+ */
+export function createToolImplementations(deps: ToolImplementationDeps): Record<string, ToolImplementation> {
+  const {
+    executeBraveSearch,
+    isUrlForbidden,
+    readStorageFile,
+    writeStorageFile,
+    readJsonArray,
+    writeJsonArray,
+    notesFile,
+    eventsFile,
+    telegramBotToken,
+    telegramAllowedChatIds,
+  } = deps;
+
+return {
+  search_web: async ({ query }: { query?: string }) => {
+    if (!query?.trim()) return 'Requête de recherche vide.';
+    return await executeBraveSearch(query.trim(), false);
+  },
+
+  search_news: async ({ query }: { query?: string }) => {
+    if (!query?.trim()) return 'Requête d’actualité vide.';
+    return await executeBraveSearch(query.trim(), true);
+  },
+
+  open_url: async ({ url }: { url?: string }) => {
+    if (!url?.trim()) return 'URL manquante.';
+    const cleanUrl = url.trim();
+    const check = isUrlForbidden(cleanUrl);
+    if (check.forbidden) {
+      return `Accès refusé : ${check.reason || 'Domaine interdit'}`;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+      const resp = await fetch(cleanUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+          'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+          'Sec-Ch-Ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1',
+        },
+      });
+      clearTimeout(timeoutId);
+
+      if (!resp.ok) {
+        if (resp.status === 403 || resp.status === 401) {
+          return `Erreur HTTP ${resp.status} (Accès refusé / Anti-bot) : Le site bloque l'accès automatique. Ignore cette URL et poursuis avec les autres sources disponibles.`;
+        }
+        return `Erreur HTTP ${resp.status} (${resp.statusText}) lors de l'accès à la page. Ignore cette URL et passe aux autres sources.`;
+      }
+
+      let html = await resp.text();
+
+      // Détection de protection Cloudflare / Captcha
+      if (
+        html.includes('cf-browser-verification') ||
+        html.includes('Cloudflare Ray ID') ||
+        html.includes('Attention Required! | Cloudflare') ||
+        html.includes('Just a moment...')
+      ) {
+        return `Erreur HTTP 403 (Challenge Cloudflare / Anti-bot) : Cette page nécessite une vérification interactive de navigateur. Ignore cette source et passe à une autre.`;
+      }
+
+      // Retirer les balises script, style, nav, footer, header et leur contenu
+      html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ');
+      html = html.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ');
+      html = html.replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ');
+      html = html.replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ');
+      html = html.replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ');
+
+      let text = html.replace(/<[^>]+>/g, ' ');
+      text = text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      text = text.replace(/\s+/g, ' ').trim();
+
+      if (!text || text.length < 50) {
+        return 'La page web ne contient aucun contenu textuel exploitable. Passe à une autre source.';
+      }
+      return text.slice(0, 5000);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return "Délai d'attente dépassé (timeout 6s) pour ouvrir la page web. Ignore cette URL et passe aux autres.";
+      }
+      return `Erreur lors de la lecture de la page (${err.message}). Ignore cette source.`;
+    }
+  },
+
+  memo_lookup: async ({ sujet }: { sujet?: string }) => {
+    if (!sujet?.trim()) return 'Sujet manquant pour memo_lookup.';
+    const storage = readStorageFile();
+    const q = sujet.trim().toLowerCase();
+
+    // 1. Chercher dans memoire
+    let directMatches: any[] = [];
+    if (storage.memoire[q]) {
+      directMatches = storage.memoire[q];
+    } else {
+      const matchingKey = Object.keys(storage.memoire).find(
+        k => k.toLowerCase() === q || k.toLowerCase().includes(q) || q.includes(k.toLowerCase())
+      );
+      if (matchingKey) {
+        directMatches = storage.memoire[matchingKey];
+      }
+    }
+
+    // 2. Chercher les liens
+    const links = storage.liens[q] || [];
+
+    // 3. Chercher les règles
+    const rules = storage.regles[q] || [];
+
+    if (directMatches.length === 0 && links.length === 0 && rules.length === 0) {
+      return `Aucune information trouvée dans la mémoire locale pour le sujet "${sujet}".`;
+    }
+
+    let out = `Informations mémoire locale pour "${sujet}" :\n`;
+    if (directMatches.length > 0) {
+      out += directMatches.map((m: any, idx: number) => `- Définition/Fait [${idx + 1}] : ${m.def || m}`).join('\n') + '\n';
+    }
+    if (links.length > 0) {
+      out += `- Héritage / Liens : ${links.join(', ')}\n`;
+    }
+    if (rules.length > 0) {
+      out += `- Règles logiques : ${rules.map((r: any) => `${r.quant} sont ${r.prop}`).join('; ')}\n`;
+    }
+    return out.trim();
+  },
+
+  search_notes: async ({ query, limit = 10 }: { query?: string; limit?: number }) => {
+    if (!query?.trim()) return 'Requête de notes vide.';
+    const q = query.trim().toLowerCase();
+    const notes = readJsonArray<KaderbotNote>(notesFile)
+      .filter(note => `${note.title} ${note.body} ${note.tags.join(' ')}`.toLowerCase().includes(q))
+      .slice(-(Math.min(Math.max(Number(limit) || 10, 1), 20)));
+    if (notes.length === 0) return `Aucune note trouvée pour « ${query.trim()} ».`;
+    return notes
+      .map(note => `- ${note.title}${note.tags.length ? ` [${note.tags.join(', ')}]` : ''}\n  ${note.body.slice(0, 500)} (id: ${note.id})`)
+      .join('\n');
+  },
+
+  list_events: async ({ start_iso, end_iso, limit = 20 }: { start_iso?: string; end_iso?: string; limit?: number }) => {
+    const start = Date.parse(String(start_iso || ''));
+    const end = Date.parse(String(end_iso || ''));
+    if (Number.isNaN(start) || Number.isNaN(end)) return 'Dates ISO invalides.';
+    const events = readJsonArray<KaderbotEvent>(eventsFile)
+      .filter(event => Date.parse(event.startIso) < end && Date.parse(event.endIso) > start)
+      .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))
+      .slice(0, Math.min(Math.max(Number(limit) || 20, 1), 50));
+    if (events.length === 0) return 'Aucun événement trouvé dans cette période.';
+    return events
+      .map(event => `- ${event.title} : ${event.startIso} → ${event.endIso}${event.location ? ` | ${event.location}` : ''}`)
+      .join('\n');
+  },
+
+  create_event: async ({ title, start_iso, end_iso, location, description }: { title?: string; start_iso?: string; end_iso?: string; location?: string; description?: string }) => {
+    if (!title?.trim() || !start_iso || !end_iso) return 'Titre et dates requis pour l’événement.';
+    const event: KaderbotEvent = {
+      id: randomUUID(),
+      title: title.trim(),
+      startIso: new Date(start_iso).toISOString(),
+      endIso: new Date(end_iso).toISOString(),
+      location: location?.trim() || undefined,
+      description: description?.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    const events = readJsonArray<KaderbotEvent>(eventsFile);
+    events.push(event);
+    writeJsonArray(eventsFile, events.slice(-1000));
+
+    const toCalendarDate = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const calendarUrl = new URL('https://calendar.google.com/calendar/render');
+    calendarUrl.searchParams.set('action', 'TEMPLATE');
+    calendarUrl.searchParams.set('text', event.title);
+    calendarUrl.searchParams.set('dates', `${toCalendarDate(event.startIso)}/${toCalendarDate(event.endIso)}`);
+    if (event.location) calendarUrl.searchParams.set('location', event.location);
+    if (event.description) calendarUrl.searchParams.set('details', event.description);
+    return `Événement « ${event.title} » créé. Ajoute-le à ton agenda Google ici : ${calendarUrl.toString()}`;
+  },
+
+  create_note: async ({ title, body, tags = [] }: { title?: string; body?: string; tags?: string[] }) => {
+    if (!title?.trim() || !body?.trim()) return 'Titre et contenu requis pour créer une note.';
+    const now = new Date().toISOString();
+    const note: KaderbotNote = {
+      id: randomUUID(),
+      title: title.trim(),
+      body: body.trim(),
+      tags: Array.isArray(tags) ? tags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 20) : [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const notes = readJsonArray<KaderbotNote>(notesFile);
+    notes.push(note);
+    writeJsonArray(notesFile, notes.slice(-1000));
+    return `Note « ${note.title} » créée avec succès.`;
+  },
+
+  send_message: async ({ channel, target, text }: { channel?: string; target?: string; text?: string }) => {
+    if (!channel || !target?.trim() || !text?.trim()) return 'Canal, destinataire et texte requis.';
+    if (channel === 'whatsapp') {
+      const shareUrl = `https://wa.me/?text=${encodeURIComponent(text.trim())}`;
+      return `Message WhatsApp préparé pour ${target.trim()} (aucun envoi automatique). Ouvre ce lien puis appuie sur Envoyer : ${shareUrl}`;
+    }
+    if (channel === 'telegram') {
+      if (!telegramBotToken) return 'TELEGRAM_BOT_TOKEN n’est pas configuré sur Render.';
+      if (!telegramAllowedChatIds.has(target.trim())) return `Le chat Telegram ${target.trim()} n’est pas autorisé par l’allowlist.`;
+      const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: target.trim(), text: text.trim() }),
+      });
+      const payload: any = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) return `Échec Telegram : ${payload?.description || `HTTP ${response.status}`}`;
+      return `Message Telegram envoyé à ${target.trim()}.`;
+    }
+    return 'L’envoi SMS n’est pas disponible depuis la Web App. Utilise un lien sms: ou un compagnon Android.';
+  },
+
+  memo_store: async ({ sujet, definition }: { sujet?: string; definition?: string }) => {
+    if (!sujet?.trim() || !definition?.trim()) {
+      return 'Sujet ou définition manquant pour memo_store.';
+    }
+    const storage = readStorageFile();
+    const key = sujet.trim().toLowerCase();
+    if (!storage.memoire[key]) {
+      storage.memoire[key] = [];
+    }
+
+    const now = new Date().toISOString();
+    storage.memoire[key].push({
+      def: definition.trim(),
+      poids: 1.0,
+      hits: 1,
+      source: 'agent',
+      type: 'concept',
+      created: now,
+      last_used: now,
+    });
+
+    writeStorageFile(storage);
+    return `Le fait "${sujet}" a été mémorisé avec succès dans la mémoire cognitive locale.`;
+  },
+
+  link_concepts: async ({ source, cible }: { source?: string; cible?: string }) => {
+    if (!source?.trim() || !cible?.trim()) {
+      return 'Source ou cible manquante pour link_concepts.';
+    }
+    const storage = readStorageFile();
+    const sKey = source.trim().toLowerCase();
+    const cKey = cible.trim().toLowerCase();
+
+    if (!storage.liens[sKey]) {
+      storage.liens[sKey] = [];
+    }
+
+    if (!storage.liens[sKey].includes(cKey)) {
+      storage.liens[sKey].push(cKey);
+      writeStorageFile(storage);
+      return `Lien d'héritage enregistré : "${source}" est un/une "${cible}".`;
+    }
+    return `Le lien d'héritage "${source}" -> "${cible}" existait déjà.`;
+  },
+
+  ask_user: async ({ question }: { question?: string }) => {
+    return `Question posée à l'utilisateur : ${question || 'Pouvez-vous préciser votre demande ?'}`;
+  },
+};
+}
+```
+
+---
+
+<a id="srcagenttoolSecurityts"></a>
+## Fichier : `src/agent/toolSecurity.ts`
+
+> **Description** : Garde-fous de sécurité et validation des paramètres d'outils
+
+```typescript
+import { randomUUID } from 'crypto';
+import { TOOL_POLICIES } from './toolRegistry';
+import type { PendingAgentAction } from '../types/agent';
+
+export type PendingActionStore = Pick<Map<string, PendingAgentAction>, 'set'>;
+
+export interface PendingActionOptions {
+  ttlMs: number;
+  store: PendingActionStore;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** Valide les arguments avant toute exécution d’outil, y compris après approbation. */
+export function validateToolArguments(tool: string, args: Record<string, unknown>): string | null {
+  const policy = TOOL_POLICIES[tool];
+  if (!policy) return `Outil non autorisé : ${tool}`;
+
+  if (tool === 'search_web' || tool === 'search_news' || tool === 'memo_lookup') {
+    const key = tool === 'memo_lookup' ? 'sujet' : 'query';
+    if (!isNonEmptyString(args[key]) || String(args[key]).length > 500) return `Paramètre ${key} invalide.`;
+  }
+  if (tool === 'search_notes' && (!isNonEmptyString(args.query) || String(args.query).length > 500)) return 'Paramètre query invalide.';
+  if (tool === 'list_events') {
+    if (!isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Période de recherche requise.';
+    if (Number.isNaN(Date.parse(String(args.start_iso))) || Number.isNaN(Date.parse(String(args.end_iso)))) return 'Dates ISO invalides.';
+  }
+  if (tool === 'create_event') {
+    if (!isNonEmptyString(args.title) || !isNonEmptyString(args.start_iso) || !isNonEmptyString(args.end_iso)) return 'Titre et dates requis pour l’événement.';
+    const start = Date.parse(String(args.start_iso));
+    const end = Date.parse(String(args.end_iso));
+    if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 'Période de l’événement invalide.';
+    if (String(args.title).length > 200) return 'Titre d’événement trop long.';
+  }
+  if (tool === 'open_url' && (!isNonEmptyString(args.url) || String(args.url).length > 2048)) return 'Paramètre url invalide.';
+  if (tool === 'memo_store' && (!isNonEmptyString(args.sujet) || !isNonEmptyString(args.definition))) return 'Sujet et définition requis.';
+  if (tool === 'link_concepts' && (!isNonEmptyString(args.source) || !isNonEmptyString(args.cible))) return 'Source et cible requises.';
+  if (tool === 'ask_user' && (!isNonEmptyString(args.question) || String(args.question).length > 500)) return 'Question invalide.';
+
+  if (tool === 'create_note') {
+    if (!isNonEmptyString(args.title) || !isNonEmptyString(args.body)) return 'Titre et contenu requis pour la note.';
+    if (String(args.title).length > 200 || String(args.body).length > 10000) return 'Note trop longue.';
+    if (args.tags !== undefined && (!Array.isArray(args.tags) || args.tags.some(tag => !isNonEmptyString(tag)))) return 'Tags invalides.';
+  }
+
+  if (tool === 'send_message') {
+    if (!['sms', 'telegram', 'whatsapp'].includes(String(args.channel))) return 'Canal de message non autorisé.';
+    if (!isNonEmptyString(args.target) || !isNonEmptyString(args.text)) return 'Destinataire et texte requis.';
+    if (String(args.text).length > 4000) return 'Message trop long.';
+    if ((args.channel === 'sms' || args.channel === 'telegram') && args.confirm !== true) return 'Confirmation explicite requise pour ce canal.';
+  }
+  return null;
+}
+
+export function summarizePendingAction(tool: string, args: Record<string, unknown>): string {
+  if (tool === 'memo_store') return `Mémoriser « ${String(args.sujet)} » : ${String(args.definition).slice(0, 180)}`;
+  if (tool === 'link_concepts') return `Créer le lien « ${String(args.source)} » → « ${String(args.cible)} »`;
+  if (tool === 'create_note') return `Créer la note « ${String(args.title)} »`;
+  if (tool === 'send_message') return `Envoyer un message ${String(args.channel)} à ${String(args.target)} : « ${String(args.text).slice(0, 180)} »`;
+  if (tool === 'create_event') return `Créer l’événement « ${String(args.title || 'sans titre')} »`;
+  return `Autoriser l’action ${tool}`;
+}
+
+export function createPendingAction(
+  tool: string,
+  args: Record<string, unknown>,
+  options: PendingActionOptions
+): PendingAgentAction {
+  const action: PendingAgentAction = {
+    id: randomUUID(),
+    tool,
+    args,
+    summary: summarizePendingAction(tool, args),
+    risk: TOOL_POLICIES[tool]?.risk === 'external' ? 'external' : 'write',
+    expiresAt: new Date(Date.now() + options.ttlMs).toISOString(),
+  };
+  options.store.set(action.id, action);
+  return action;
+}
+```
+
+---
+
+<a id="srcagentmodelRouterts"></a>
+## Fichier : `src/agent/modelRouter.ts`
+
+> **Description** : Routage dynamique des modèles IA selon les tâches
+
+```typescript
+import { runToolLoopWithModel } from './reactLoop';
+import type { ReactLoopDeps } from './reactLoop';
+
+export interface ModelRouterDeps {
+  groqApiKey?: string;
+  openRouterApiKey?: string;
+  defaultSystemPrompt: string;
+  reactLoopDeps: ReactLoopDeps;
+  callGeminiWithFallback: (prompt: string, systemPrompt?: string) => Promise<{ text: string; model: string }>;
+}
+
+/** Cascade des modèles utilisée par l’agent : Groq → Gemini → OpenRouter. */
+export async function runAgentLoop(
+  userPrompt: string,
+  history: Array<{ role: string; content: string }> = [],
+  deps: ModelRouterDeps,
+  systemPrompt?: string
+): Promise<{
+  text?: string;
+  provider: string;
+  model?: string;
+  toolTrace: Array<{ tool: string; args?: any }>;
+  awaitingUser?: boolean;
+  question?: string;
+  isFallback?: boolean;
+  fallbackReason?: string;
+}> {
+  const groqApiKey = deps.groqApiKey?.trim();
+  const openRouterApiKey = deps.openRouterApiKey?.trim();
+
+  // === MAILLON 1 : Groq openai/gpt-oss-120b (avec tools) ===
+  if (groqApiKey) {
+    try {
+      const res = await runToolLoopWithModel(
+        'https://api.groq.com/openai/v1/chat/completions',
+        groqApiKey,
+        'openai/gpt-oss-120b',
+        'groq-agent',
+        userPrompt,
+        history,
+        deps.reactLoopDeps,
+        systemPrompt
+      );
+      return res;
+    } catch (err120: any) {
+      console.warn(
+        `[BASCULE AGENT] Maillon 1 (Groq openai/gpt-oss-120b) a échoué (cause: ${err120.message}). Bascule vers Maillon 2 (Groq openai/gpt-oss-20b)...`
+      );
+    }
+
+    // === MAILLON 2 : Groq openai/gpt-oss-20b (avec tools) ===
+    try {
+      const res = await runToolLoopWithModel(
+        'https://api.groq.com/openai/v1/chat/completions',
+        groqApiKey,
+        'openai/gpt-oss-20b',
+        'groq-agent',
+        userPrompt,
+        history,
+        deps.reactLoopDeps,
+        systemPrompt
+      );
+      return {
+        ...res,
+        isFallback: true,
+        fallbackReason: 'Groq openai/gpt-oss-120b a échoué, bascule sur openai/gpt-oss-20b',
+      };
+    } catch (err20: any) {
+      console.warn(
+        `[BASCULE AGENT] Maillon 2 (Groq openai/gpt-oss-20b) a échoué (cause: ${err20.message}). Bascule vers Maillon 3 (Gemini sans tools)...`
+      );
+    }
+  } else {
+    console.warn(
+      '[BASCULE AGENT] Aucune variable GROQ_API_KEY configurée. Bascule vers Maillon 3 (Gemini sans tools)...'
+    );
+  }
+
+  // === MAILLON 3 : Gemini (sans tools) ===
+  try {
+    const formattedHistory = history
+      .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
+      .join('\n');
+    const fullPrompt = `${systemPrompt || deps.defaultSystemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${userPrompt}\nKADERBOT:`;
+
+    const geminiRes = await deps.callGeminiWithFallback(fullPrompt, systemPrompt || deps.defaultSystemPrompt);
+    return {
+      text: geminiRes.text,
+      provider: 'gemini',
+      model: geminiRes.model,
+      toolTrace: [],
+      isFallback: true,
+      fallbackReason: 'Groq 120B et 20B indisponibles, bascule sur Gemini (sans tools)',
+    };
+  } catch (geminiErr: any) {
+    if (openRouterApiKey) {
+      console.warn(
+        `[BASCULE AGENT] Maillon 3 (Gemini) a échoué (cause: ${geminiErr.message}). Bascule vers Maillon 4 (OpenRouter nvidia/nemotron-3.5-lightning:free)...`
+      );
+    } else {
+      console.warn(
+        `[BASCULE AGENT] Maillon 3 (Gemini) a échoué (cause: ${geminiErr.message}). Aucun maillon OpenRouter configuré.`
+      );
+    }
+  }
+
+  // === MAILLON 4 : OpenRouter 'nvidia/nemotron-3.5-lightning:free' (avec tools) ===
+  if (openRouterApiKey) {
+    try {
+      const res = await runToolLoopWithModel(
+        'https://openrouter.ai/api/v1/chat/completions',
+        openRouterApiKey,
+        'nvidia/nemotron-3.5-lightning:free',
+        'openrouter-agent',
+        userPrompt,
+        history,
+        deps.reactLoopDeps,
+        systemPrompt,
+        {
+          'HTTP-Referer': 'https://kaderbot.app',
+          'X-Title': 'KADERBOT NOVA',
+        }
+      );
+      return {
+        ...res,
+        isFallback: true,
+        fallbackReason: 'Groq et Gemini indisponibles, bascule sur OpenRouter nvidia/nemotron-3.5-lightning:free',
+      };
+    } catch (openRouterErr: any) {
+      console.warn(
+        `[BASCULE AGENT] Maillon 4 (OpenRouter nvidia/nemotron-3.5-lightning:free) a échoué (cause: ${openRouterErr.message}). Tous les maillons ont échoué.`
+      );
+    }
+  }
+
+  throw new Error('Tous les maillons de l’agent ont échoué (Groq gpt-oss-120b, Groq gpt-oss-20b, Gemini, OpenRouter Nemotron).');
+}
 ```
 
 ---
@@ -3459,6 +4150,7 @@ export default StyleToJS;
 ```tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Send,
   Trash2,
@@ -3545,10 +4237,56 @@ const markdownComponents = {
     <h3 className="text-xs font-bold text-cyan-300 mb-1">{children}</h3>
   ),
   hr: () => <hr className="my-3 border-gray-800" />,
+  table: ({ children }: any) => (
+    <div className="my-3 w-full overflow-x-auto rounded-xl border border-gray-800 bg-[#080B12]/95 shadow-lg shadow-black/40">
+      <table className="min-w-full divide-y divide-gray-800 text-left text-xs border-collapse">
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children }: any) => (
+    <thead className="bg-[#101726] text-emerald-300 font-semibold border-b border-gray-800">
+      {children}
+    </thead>
+  ),
+  tbody: ({ children }: any) => (
+    <tbody className="divide-y divide-gray-800/70 text-gray-200">
+      {children}
+    </tbody>
+  ),
+  tr: ({ children }: any) => (
+    <tr className="hover:bg-emerald-950/25 transition-colors">
+      {children}
+    </tr>
+  ),
+  th: ({ children }: any) => (
+    <th className="px-3.5 py-2.5 text-[11px] sm:text-xs font-bold tracking-wider text-emerald-400 uppercase bg-[#101726]/90 border-r border-gray-800/60 last:border-r-0">
+      {children}
+    </th>
+  ),
+  td: ({ children }: any) => (
+    <td className="px-3.5 py-2.5 text-xs text-gray-200 border-r border-gray-800/60 last:border-r-0 whitespace-normal leading-relaxed">
+      {children}
+    </td>
+  ),
+  a: ({ href, children }: any) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 inline-flex items-center gap-1 font-medium break-all"
+    >
+      {children}
+      <ExternalLink className="w-3 h-3 inline shrink-0 opacity-70" />
+    </a>
+  ),
+  del: ({ children }: any) => (
+    <del className="line-through text-gray-500">{children}</del>
+  ),
 };
 
 interface BotTypewriterMessageProps {
-  text: string;
+  text?: string;
   onComplete: () => void;
   onTick?: () => void;
 }
@@ -3556,45 +4294,58 @@ interface BotTypewriterMessageProps {
 /**
  * Composant de message KADERBOT NOVA avec effet machine à écrire (streaming)
  * Uniquement actif pour les nouveaux messages en temps réel (msg.isNew === true).
+ * Sécurisé contre les valeurs nulles, indéfinies ou vides et sans effet de bord dans les updaters de state.
  */
 const BotTypewriterMessage: React.FC<BotTypewriterMessageProps> = ({
-  text,
+  text = '',
   onComplete,
   onTick,
 }) => {
+  const safeText = (text || '').trim();
   const [displayedLength, setDisplayedLength] = useState(1);
-  const isTyping = displayedLength < text.length;
+  const isTyping = displayedLength < safeText.length;
+  const onCompleteRef = useRef(onComplete);
+  const onTickRef = useRef(onTick);
 
   useEffect(() => {
-    if (displayedLength >= text.length) {
-      onComplete();
-      return;
+    onCompleteRef.current = onComplete;
+    onTickRef.current = onTick;
+  }, [onComplete, onTick]);
+
+  useEffect(() => {
+    if (safeText.length <= 1) {
+      const timer = setTimeout(() => {
+        onCompleteRef.current?.();
+      }, 50);
+      return () => clearTimeout(timer);
     }
 
+    let current = 1;
     // Vitesse fluide ~20ms par caractère
     const interval = setInterval(() => {
-      setDisplayedLength(prev => {
-        const step = text.length > 350 ? 2 : 1;
-        const next = Math.min(text.length, prev + step);
-        if (next >= text.length) {
-          clearInterval(interval);
-          onComplete();
-        }
-        return next;
-      });
-      onTick?.();
+      const step = safeText.length > 350 ? 2 : 1;
+      current = Math.min(safeText.length, current + step);
+      setDisplayedLength(current);
+      onTickRef.current?.();
+
+      if (current >= safeText.length) {
+        clearInterval(interval);
+        setTimeout(() => {
+          onCompleteRef.current?.();
+        }, 100);
+      }
     }, 20);
 
     return () => clearInterval(interval);
-  }, [text, onComplete, onTick, displayedLength]);
+  }, [safeText]);
 
-  const displayedContent = text.slice(0, displayedLength);
+  const displayedContent = safeText.slice(0, displayedLength);
 
   return (
     <div className="relative">
       <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-        <ReactMarkdown components={markdownComponents}>
-          {displayedContent}
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {displayedContent || safeText}
         </ReactMarkdown>
       </div>
       {isTyping && (
@@ -4600,10 +5351,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               >
                 {/* Main text with Markdown & Typewriter streaming */}
                 {isUser ? (
-                  <div className="whitespace-pre-wrap break-words">{msg.text}</div>
+                  <div className="whitespace-pre-wrap break-words">{msg.text || ''}</div>
                 ) : msg.isNew ? (
                   <BotTypewriterMessage
-                    text={msg.text}
+                    text={msg.text || ''}
                     onComplete={() => {
                       onMessageAnimationComplete?.(msg.id);
                     }}
@@ -4611,14 +5362,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   />
                 ) : (
                   <div className="text-gray-100 text-xs sm:text-sm leading-relaxed">
-                    <ReactMarkdown components={markdownComponents}>
-                      {msg.text}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {(msg.text && msg.text.trim()) || ''}
                     </ReactMarkdown>
                   </div>
-                )}
-
-                {!isUser && msg.meta?.pendingAction && onAgentActionDecision && (
-                  <AgentActionApproval action={msg.meta.pendingAction} onDecision={onAgentActionDecision} />
                 )}
 
                 {/* Traces d'exécution de l'agent repliées par défaut sous forme d'accordéon propre */}
@@ -4671,7 +5418,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 {/* Message action bar: Copy & Speech */}
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                   <button
-                    onClick={() => handleCopy(msg.id, msg.text)}
+                    onClick={() => handleCopy(msg.id, msg.text || '')}
                     className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
                     title="Copier le texte"
                   >
@@ -4679,7 +5426,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   </button>
                   {!isUser && (
                     <button
-                      onClick={() => speakText(msg.text)}
+                      onClick={() => speakText(msg.text || '')}
                       className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-white text-[10px]"
                       title="Lire à haute voix"
                     >
@@ -4862,7 +5609,7 @@ export default function App() {
   // Configuration générale de KADERBOT NOVA
   const NOVA_DEFAULT_SYSTEM_PROMPT =
     'Tu es KADERBOT NOVA, un assistant IA expert et pédagogue. Tu réponds toujours en français.\n' +
-    'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown (sauts de ligne, listes à puces, gras).\n' +
+    'RÈGLES DE FORMATAGE : Structure tes réponses avec du Markdown propre (sauts de ligne, listes à puces, gras). Si tu génères un tableau, utilise la syntaxe standard GitHub Markdown (| Col 1 | Col 2 | suivi de |---|---|) en laissant une ligne vide avant et après le tableau.\n' +
     'RÈGLE DE LONGUEUR ABSOLUE : Ta réponse ne doit jamais dépasser 120 mots. Sois direct et synthétique. Si un sujet est vaste (comme l\'histoire d\'une invention), donne uniquement les 2 ou 3 points les plus importants, et termine en proposant à l\'utilisateur de préciser sa question pour plus de détails. Ne fais JAMAIS de réponse de plus de 4 paragraphes.';
 
   const [config, setConfig] = useState<AppConfig>(() => {
@@ -4898,16 +5645,16 @@ export default function App() {
     };
   });
 
-  // Authentification serveur du mode admin sur l’URL et lors des changements de configuration.
+  // Le mode admin exige explicitement ?admin=true puis une validation serveur.
+  // La présence d’un jeton dans localStorage ne doit jamais transformer le lien public en lien admin.
   useEffect(() => {
     let cancelled = false;
 
     const checkAdmin = async () => {
       const params = new URLSearchParams(window.location.search);
       const hasAdminParam = params.get('admin') === 'true';
-      const hasConfigToken = Boolean(config.adminToken?.trim());
 
-      if (!hasAdminParam && !hasConfigToken) {
+      if (!hasAdminParam) {
         if (!cancelled) setIsAdmin(false);
         return;
       }
@@ -5249,10 +5996,12 @@ export default function App() {
 
   // Ajout d'un message bot sans AUCUN affichage de chiffres, scores ou vecteurs
   const addBotMessage = (text: string, meta?: ChatMessage['meta']) => {
+    const cleanText = (text || '').trim() || 'Je suis à votre écoute.';
+
     const newMsg: ChatMessage = {
       id: `kb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       author: 'KB',
-      text,
+      text: cleanText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       meta,
       isNew: true,
@@ -5272,7 +6021,7 @@ export default function App() {
 
     if (config.soundEnabled && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
+      const u = new SpeechSynthesisUtterance(cleanText);
       u.lang = 'fr-FR';
       window.speechSynthesis.speak(u);
     }
@@ -5423,7 +6172,15 @@ export default function App() {
   const handleAgentActionDecision = async (actionId: string, decision: 'approve' | 'reject') => {
     try {
       const result = await decideAgentAction(actionId, decision);
-      addBotMessage(result.text, {
+      let text = (result.text || '').trim();
+      if (!text) {
+        const toolNames =
+          result.toolTrace && result.toolTrace.length > 0
+            ? Array.from(new Set(result.toolTrace.map(t => t.tool))).join(', ')
+            : 'action';
+        text = `✅ Action validée et exécutée : ${toolNames}`;
+      }
+      addBotMessage(text, {
         source: 'systeme',
         toolTrace: result.toolTrace,
       });
@@ -5989,7 +6746,7 @@ export default function App() {
             : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...'
         );
         const agentRes = await sendAgentMessage(text, historyFormatted);
-        responseText = agentRes.text || agentRes.question || '';
+        responseText = (agentRes.text || agentRes.question || '').trim();
 
         botSource =
           agentRes.provider === 'groq-agent'
@@ -6013,6 +6770,11 @@ export default function App() {
           routedTo: agentRes.routedTo,
           pendingAction: agentRes.pendingAction,
         };
+
+        // Si l'agent n'a renvoyé aucun texte malgré la boucle, inviter cordialement à reformuler
+        if (!responseText) {
+          responseText = "Désolé, je n'ai pas pu formuler de réponse complète. Peux-tu reformuler ta question ?";
+        }
 
         if (
           agentRes.provider === 'groq-agent' ||
