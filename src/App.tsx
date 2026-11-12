@@ -111,13 +111,21 @@ export default function App() {
       const hasAdminParam = params.get('admin') === 'true';
 
       if (!hasAdminParam) {
-        if (!cancelled) setIsAdmin(false);
+        if (!cancelled) {
+          setIsAdmin(false);
+          setMessages(prev => prev.length === 1 && prev[0]?.id === 'welcome' ? [] : prev);
+        }
         return;
       }
 
       const authenticated = await apiService.verifyAdminSession();
       if (!cancelled) {
         setIsAdmin(authenticated);
+        if (authenticated) {
+          setMessages(prev => prev.length === 0 ? [getWelcomeMessage()] : prev);
+        } else {
+          setMessages(prev => prev.length === 1 && prev[0]?.id === 'welcome' ? [] : prev);
+        }
         if (!authenticated && hasAdminParam) setActiveTab('chat');
       }
     };
@@ -446,14 +454,14 @@ export default function App() {
     setMessages(
       target.messages && target.messages.length > 0
         ? target.messages.map(m => ({ ...m, isNew: false }))
-        : []
+        : (isAdmin ? [getWelcomeMessage()] : [])
     );
   };
 
   const handleNewThread = () => {
     activeThreadIdRef.current = null;
     setActiveThreadId(null);
-    setMessages([]);
+    setMessages(isAdmin ? [getWelcomeMessage()] : []);
   };
 
   const handleDeleteThread = (threadId: string) => {

@@ -911,6 +911,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         { label: 'Recherche une information', text: 'Recherche une information sur ' },
       ];
 
+  const activeThread = (threads || []).find(t => t.id === activeThreadId);
   const hasMessages = messages.length > 0;
 
   const formatThreadDate = (isoStr: string) => {
@@ -940,8 +941,42 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   return (
     <div className={`flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] ${isAdmin ? 'cyber-bg' : 'public-bg'}`}>
-      {/* Header compact : navigation à gauche, session cognitive, action contextuelle à droite. */}
+      {/* Header public modernisé ; le header admin reste volontairement inchangé. */}
       <div className="shrink-0 flex-shrink-0 px-3 sm:px-4 py-2.5 bg-[#090B10]/95 border-b border-gray-800/80 flex items-center justify-between gap-2 z-10">
+      {isAdmin ? (
+        <>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setIsHistoryOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-emerald-500/40 text-xs font-semibold text-gray-200 transition active:scale-95 shrink-0 shadow-xs"
+              title="Ouvrir l'historique des discussions"
+            >
+              <History className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Historique</span>
+              {(threads?.length || 0) > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono">
+                  {threads?.length}
+                </span>
+              )}
+            </button>
+            <div className="min-w-0 flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="hidden sm:inline text-gray-700">|</span>
+              <span className="truncate font-medium text-gray-300 max-w-[130px] sm:max-w-[280px]">
+                {activeThread ? activeThread.title : 'Nouvelle discussion'}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onNewThread}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition active:scale-95 shrink-0 shadow-xs"
+            title="Démarrer une nouvelle discussion vierge"
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Nouvelle discussion</span>
+          </button>
+        </>
+      ) : (
+      <>
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={() => setIsHistoryOpen(true)}
@@ -966,6 +1001,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             <MessageSquarePlus className="w-4 h-4" />
           </button>
         )}
+      </>
+      )}
       </div>
 
       {/* Slide-over History Drawer (ChatGPT style side panel) */}
@@ -1195,7 +1232,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         className="flex-1 overflow-y-auto min-h-0 px-4 py-4 sm:px-6 sm:py-6 overscroll-contain [overflow-anchor:none]"
       >
         <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col">
-          {!hasMessages ? (
+          {!isAdmin && !hasMessages ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-4 pb-10 sm:pb-16">
               <div className="relative mb-6">
                 <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-2xl animate-pulse-glow" />
@@ -1210,6 +1247,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             </div>
           ) : (
           <>
+          {isAdmin && (
+            <div className="flex justify-center mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
+              </div>
+            </div>
+          )}
           {/* Message bubbles */}
           <div className="space-y-4 sm:space-y-6">
           {messages.map(msg => {
@@ -1339,7 +1384,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                     )}
 
                     {/* Barre d’outils discrète sous la réponse : audio, copie, feedback et régénération. */}
-                    <div className="mt-2 flex items-center gap-1 text-gray-500 opacity-60 hover:opacity-100 transition-opacity">
+                    <div className={`mt-2 flex items-center gap-1 text-gray-500 opacity-60 hover:opacity-100 transition-opacity ${isAdmin ? 'hidden' : ''}`}>
                       <button
                         onClick={() => handleCopy(msg.id, msg.text || '')}
                         className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition"
@@ -1383,6 +1428,25 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                         </button>
                       )}
                     </div>
+                    {isAdmin && (
+                      <div className="mt-2 flex items-center gap-2 text-gray-500 opacity-60 hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => handleCopy(msg.id, msg.text || '')}
+                          className="px-2 py-1 rounded bg-gray-900/80 hover:bg-gray-800 border border-gray-800 text-gray-400 hover:text-white text-[11px] flex items-center gap-1.5 transition"
+                          title="Copier le texte"
+                        >
+                          {copiedId === msg.id ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Copié</span></> : <><Copy className="w-3 h-3" /><span>Copier</span></>}
+                        </button>
+                        <button
+                          onClick={() => speakText(msg.text || '')}
+                          className="px-2 py-1 rounded bg-gray-900/80 hover:bg-gray-800 border border-gray-800 text-gray-400 hover:text-white text-[11px] flex items-center gap-1.5 transition"
+                          title="Lire à haute voix"
+                        >
+                          <Volume2 className="w-3 h-3" />
+                          <span>Écouter</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1434,6 +1498,49 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
       {/* Input Form Bar - Permanently fixed at bottom of chat */}
       <div className="shrink-0 flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20">
+        {isAdmin ? (
+        <form onSubmit={handleFormSubmit} className="max-w-7xl mx-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleToggleVoice}
+            className={`p-2.5 rounded-xl border transition-all ${
+              isRecording
+                ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
+                : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white hover:border-gray-700'
+            }`}
+            title={isRecording ? 'Arrêter dictée' : 'Dicter vocalement en français'}
+          >
+            {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </button>
+          <div className="relative flex-1">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              placeholder="Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..."
+              className="w-full max-h-32 min-h-[42px] resize-none overflow-y-auto bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!inputText.trim() || isThinking}
+            className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs sm:text-sm font-bold shadow-md shadow-emerald-950/40 transition active:scale-95"
+          >
+            {isThinking ? <Loader2 className="w-4 h-4 animate-spin text-emerald-200" /> : <Send className="w-4 h-4" />}
+            <span className="hidden sm:inline">{isThinking ? 'Réflexion...' : 'Envoyer'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNewThread || onClearMessages}
+            className="p-2.5 sm:p-3 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 hover:text-emerald-400 hover:border-emerald-500/40 transition active:scale-95"
+            title="Démarrer une nouvelle discussion"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </form>
+        ) : (
         <form onSubmit={handleFormSubmit} className="max-w-4xl mx-auto">
           <div className="flex items-end gap-2 rounded-2xl bg-[#161822] border border-gray-800 px-2 py-2 shadow-inner focus-within:border-emerald-500/50 transition">
             <textarea
@@ -1469,6 +1576,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             )}
           </div>
         </form>
+        )}
       </div>
     </div>
   );
