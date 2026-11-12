@@ -716,6 +716,7 @@ interface ChatTabProps {
   onRenameThread?: (threadId: string, newTitle: string) => void;
   onMessageAnimationComplete?: (id: string) => void;
   onAgentActionDecision?: (actionId: string, decision: 'approve' | 'reject') => Promise<void>;
+  onRegenerateMessage?: (text: string) => void;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -739,6 +740,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onRenameThread,
   onMessageAnimationComplete,
   onAgentActionDecision,
+  onRegenerateMessage,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -868,7 +870,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     if (isThinking) return;
     const lastUserMessage = [...messages].reverse().find(message => message.author === 'Toi');
     if (lastUserMessage?.text?.trim()) {
-      onSendMessage(lastUserMessage.text.trim());
+      if (onRegenerateMessage) {
+        onRegenerateMessage(lastUserMessage.text.trim());
+      } else {
+        onSendMessage(lastUserMessage.text.trim());
+      }
     }
   };
 

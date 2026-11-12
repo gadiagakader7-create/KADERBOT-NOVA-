@@ -604,9 +604,20 @@ export default function App() {
     }
   };
 
-  const handleProcessUserMessage = async (rawMessage: string) => {
+  const handleProcessUserMessage = async (
+    rawMessage: string,
+    options: { regenerate?: boolean } = {}
+  ) => {
     const text = rawMessage.trim();
     if (!text) return;
+
+    const isRegeneration = options.regenerate === true;
+    const lastUserIndex = isRegeneration
+      ? messages.map(message => message.author).lastIndexOf('Toi')
+      : -1;
+    const conversationMessages = lastUserIndex >= 0
+      ? messages.slice(0, lastUserIndex + 1)
+      : messages;
 
     // Ajout du message utilisateur
     const userMsg: ChatMessage = {
@@ -617,7 +628,16 @@ export default function App() {
     };
 
     let currentThreadId = activeThreadIdRef.current;
-    if (!currentThreadId) {
+    if (isRegeneration) {
+      setMessages(conversationMessages);
+      if (currentThreadId) {
+        setThreads(prev => prev.map(thread =>
+          thread.id === currentThreadId
+            ? { ...thread, updatedAt: new Date().toISOString(), messages: thread.messages.slice(0, thread.messages.map(message => message.author).lastIndexOf('Toi') + 1) }
+            : thread
+        ));
+      }
+    } else if (!currentThreadId) {
       const newId = `thread_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       activeThreadIdRef.current = newId;
       setActiveThreadId(newId);
@@ -642,7 +662,9 @@ export default function App() {
       );
     }
 
-    setMessages(prev => [...prev, userMsg]);
+    if (!isRegeneration) {
+      setMessages(prev => [...prev, userMsg]);
+    }
 
     const msgLower = text.toLowerCase();
     const msgClean = sansAccent(msgLower);
@@ -694,7 +716,7 @@ export default function App() {
       try {
         const res = await apiService.chat({
           prompt: q,
-          history: messages.slice(-5).map(m => ({
+          history: conversationMessages.slice(-5).map(m => ({
             role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
             content: m.text,
           })),
@@ -928,7 +950,7 @@ export default function App() {
     setIsThinking(true);
     try {
       // 1. Résolution des pronoms ("il", "elle", "ça") avec les 5 derniers messages
-      const questionResolue = resoudrePronomsAvecHistorique(text, messages.slice(-5));
+      const questionResolue = resoudrePronomsAvecHistorique(text, conversationMessages.slice(-5));
 
       // 2. Recherche Hybride (Filtrage rapide par mots-clés + Comparaison vectorielle cosinus > 0.82)
       const matchHybride = await rechercheHybride(questionResolue, memoire);
@@ -1144,7 +1166,7 @@ export default function App() {
       // =========================================================================
       // ÉTAPE 3 : AGENT AVEC OUTILS & ROUTEUR COGNITIF (AVEC FALLBACK /api/chat)
       // =========================================================================
-      const historyFormatted = messages.slice(-10).map(m => ({
+      const historyFormatted = conversationMessages.slice(-10).map(m => ({
         role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
         content: m.text,
       }));
@@ -1257,10 +1279,14 @@ export default function App() {
     }
   };
 
+  const handleRegenerateMessage = (text: string) => {
+    void handleProcessUserMessage(text, { regenerate: true });
+  };
+
   return (
     <div className="fixed inset-0 h-full w-full max-h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
-      {/* En-tête principal */}
-      <Header
+      {/* En-tête technique réservé à l’interface admin. Le public commence directement par ChatTab. */}
+      {isAdmin && <Header
         config={config}
         onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
         sessions={sessions}
@@ -1275,7 +1301,7 @@ export default function App() {
         rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
         isAdmin={isAdmin}
         isAgentActive={isAgentActive}
-      />
+      />}
 
       {/* Espace de travail principal */}
       <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
@@ -1303,6 +1329,7 @@ export default function App() {
             onRenameThread={handleRenameThread}
             onMessageAnimationComplete={handleMessageAnimationComplete}
             onAgentActionDecision={handleAgentActionDecision}
+            onRegenerateMessage={isAdmin ? undefined : handleRegenerateMessage}
           />
         )}
 
