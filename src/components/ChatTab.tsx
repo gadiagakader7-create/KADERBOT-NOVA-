@@ -180,6 +180,17 @@ function formatMarkdownMath(content: string): string {
   const lines = formatted.split('\n');
   const processed = lines.map(line => {
     const trimmed = line.trim();
+    if (
+      !trimmed ||
+      trimmed.startsWith('```') ||
+      trimmed.startsWith('>') ||
+      /^[-*+]\s/.test(trimmed) ||
+      /^\d+[.)]\s/.test(trimmed) ||
+      trimmed.includes('$')
+    ) {
+      return line;
+    }
+
     if (trimmed.startsWith('\\displaystyle') && !trimmed.includes('$')) {
       return `$$\n${trimmed}\n$$`;
     }
@@ -190,6 +201,18 @@ function formatMarkdownMath(content: string): string {
     ) {
       return `$$\n${trimmed}\n$$`;
     }
+
+    // Certains modèles renvoient directement « f(x)=... » avec des commandes
+    // LaTeX, sans aucun délimiteur. On ne convertit que les lignes contenant
+    // des marqueurs mathématiques explicites afin de préserver le Markdown.
+    const contientCommandeLatex = /\\(?:frac|sqrt|sum|prod|int|lim|cdot|times|div|pm|leq|geq|neq|approx|infty|alpha|beta|gamma|delta|Delta|theta|lambda|mu|pi|sigma|omega|bigl|bigr|left|right)\b/.test(trimmed);
+    const contientStructureMath = /[A-Za-z0-9)\]}]\s*[_^]\s*[A-Za-z0-9({[]/.test(trimmed);
+    const contientEgalite = /[A-Za-z0-9)\]}]\s*=\s*[^=]/.test(trimmed);
+    if ((contientCommandeLatex || contientStructureMath) && contientEgalite) {
+      const indentation = line.match(/^\s*/)?.[0] || '';
+      return `${indentation}$${trimmed}$`;
+    }
+
     return line;
   });
 
