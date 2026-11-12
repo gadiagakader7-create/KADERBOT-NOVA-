@@ -241,7 +241,7 @@ export default function App() {
   const activeThreadIdRef = useRef<string | null>(null);
 
   // Messages de la discussion courante
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [getWelcomeMessage()]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
@@ -446,14 +446,14 @@ export default function App() {
     setMessages(
       target.messages && target.messages.length > 0
         ? target.messages.map(m => ({ ...m, isNew: false }))
-        : [getWelcomeMessage()]
+        : []
     );
   };
 
   const handleNewThread = () => {
     activeThreadIdRef.current = null;
     setActiveThreadId(null);
-    setMessages([getWelcomeMessage()]);
+    setMessages([]);
   };
 
   const handleDeleteThread = (threadId: string) => {
