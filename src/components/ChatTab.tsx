@@ -268,10 +268,10 @@ interface ThinkingAccordionProps {
   thinkingStatus?: string;
 }
 
-const ReflectionLine: React.FC<{ complete?: boolean }> = ({ complete = false }) => (
+const ReflectionLine: React.FC<{ complete?: boolean; status?: string }> = ({ complete = false, status }) => (
   <div className="flex items-center gap-2 px-1 py-1.5 text-sm text-gray-500 animate-in fade-in">
     <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 ${complete ? '' : 'animate-pulse'}`} />
-    <span>{complete ? 'Réflexion terminée' : 'Réfléchis'}</span>
+    <span>{complete ? 'Réflexion terminée' : status || 'Réfléchis'}</span>
   </div>
 );
 
@@ -1471,7 +1471,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           {isThinking && (
             isAdmin
               ? <ThinkingAccordion thinkingStatus={thinkingStatus} />
-              : <ReflectionLine />
+              : <ReflectionLine status={thinkingStatus} />
           )}
           </div>
           </>

@@ -668,6 +668,9 @@ export default function App() {
 
     const msgLower = text.toLowerCase();
     const msgClean = sansAccent(msgLower);
+    const setPublicThinkingStatus = (status: string) => {
+      if (!isAdmin) setThinkingStatus(status);
+    };
 
     // 1. Commandes de contexte explicites
     if (msgLower === 'reset contexte' || msgLower === 'vider contexte') {
@@ -713,6 +716,7 @@ export default function App() {
         return;
       }
       setIsThinking(true);
+      setPublicThinkingStatus('Exécute le moteur Groq...');
       try {
         const res = await apiService.chat({
           prompt: q,
@@ -943,16 +947,20 @@ export default function App() {
     // =========================================================================
     const isContinueCommand = /^(continue|continuer|suite|poursuis|poursuivre|vas-y|go)\b/i.test(text.trim());
     setThinkingStatus(
-      isContinueCommand
-        ? 'Poursuite de la recherche et synthèse en cours...'
-        : 'Recherche et réflexion en cours...'
+      isAdmin
+        ? (isContinueCommand
+          ? 'Poursuite de la recherche et synthèse en cours...'
+          : 'Recherche et réflexion en cours...')
+        : 'Réfléchis'
     );
     setIsThinking(true);
     try {
       // 1. Résolution des pronoms ("il", "elle", "ça") avec les 5 derniers messages
+      setPublicThinkingStatus('Analyse ta demande...');
       const questionResolue = resoudrePronomsAvecHistorique(text, conversationMessages.slice(-5));
 
       // 2. Recherche Hybride (Filtrage rapide par mots-clés + Comparaison vectorielle cosinus > 0.82)
+      setPublicThinkingStatus('Recherche dans ma mémoire...');
       const matchHybride = await rechercheHybride(questionResolue, memoire);
       if (matchHybride) {
         matchHybride.entry.hits += 1;
@@ -1026,6 +1034,7 @@ export default function App() {
       // =========================================================================
       // ÉTAPE 2 : OUTILS ET CALCULS ARITHMÉTIQUES DIRECTS
       // =========================================================================
+      setPublicThinkingStatus('Exécute un outil...');
       const resultatCalcul = evaluerCalculMath(text);
       if (resultatCalcul) {
         addBotMessage(resultatCalcul, { source: 'systeme' });
@@ -1035,6 +1044,7 @@ export default function App() {
 
       // Traduction automatique via les outils
       if (msgLower.startsWith('traduis en ') || msgLower.startsWith('traduis ')) {
+        setPublicThinkingStatus('Exécute l’outil de traduction...');
         if (!text.includes(':')) {
           addBotMessage('Format : traduis en anglais: ton texte ici');
           setIsThinking(false);
@@ -1070,6 +1080,7 @@ export default function App() {
 
       // Générateur d'idées
       if (msgLower.startsWith('idees ') || msgLower.startsWith('idées ') || msgLower.startsWith('idees:')) {
+        setPublicThinkingStatus('Génère des idées...');
         if (!text.includes(':')) {
           addBotMessage('Format : idees 5: theme  ou  idees 3 drole: theme');
           setIsThinking(false);
@@ -1107,6 +1118,7 @@ export default function App() {
 
       // Résumé de texte
       if (msgLower.startsWith('resume:')) {
+        setPublicThinkingStatus('Résume le texte...');
         const corps = text.split(':')[1]?.trim();
         if (corps && corps.length > 80) {
           const res = await apiService.resumer({
@@ -1123,6 +1135,7 @@ export default function App() {
 
       // Correction de texte
       if (msgLower.startsWith('corrige:') || msgLower.startsWith('corrige ')) {
+        setPublicThinkingStatus('Corrige le texte...');
         const corps = text.includes(':') ? text.split(':')[1].trim() : text.slice(7).trim();
         if (corps) {
           const result = await apiService.corriger({
@@ -1178,9 +1191,11 @@ export default function App() {
       try {
         // 1. Appel prioritaire de l'Agent intelligent ReAct (/api/agent avec les 10 derniers messages)
         setThinkingStatus(
-          isContinueCommand
-            ? 'Boucle ReAct : finalisation et synthèse finale...'
-            : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...'
+          isAdmin
+            ? (isContinueCommand
+              ? 'Boucle ReAct : finalisation et synthèse finale...'
+              : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...')
+            : 'Exécute un outil...'
         );
         const agentRes = await sendAgentMessage(text, historyFormatted);
         responseText = (agentRes.text || agentRes.question || '').trim();
@@ -1223,6 +1238,7 @@ export default function App() {
       } catch (agentErr: any) {
         console.warn('Endpoint /api/agent indisponible ou erreur, bascule vers /api/chat:', agentErr.message);
         // Fallback transparent vers /api/chat si /api/agent renvoie 404, 500 ou échoue
+        setPublicThinkingStatus('Synthétise la réponse...');
         const chatRes = await apiService.chat({
           prompt: text,
           history: historyFormatted,
