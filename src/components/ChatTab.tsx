@@ -268,6 +268,13 @@ interface ThinkingAccordionProps {
   thinkingStatus?: string;
 }
 
+const ReflectionLine: React.FC<{ complete?: boolean }> = ({ complete = false }) => (
+  <div className="flex items-center gap-2 px-1 py-1.5 text-sm text-gray-500 animate-in fade-in">
+    <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 ${complete ? '' : 'animate-pulse'}`} />
+    <span>{complete ? 'Réflexion terminée' : 'Réfléchis'}</span>
+  </div>
+);
+
 /**
  * Composant Accordéon repliable affiché pendant que KADERBOT réfléchit (live thinking).
  * Permet de cliquer sur "Réflexion" pour voir les détails en direct de l'étape de raisonnement.
@@ -1247,7 +1254,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 </div>
               </div>
               <h1 className="max-w-xl text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight text-gray-100 leading-tight">
-                Bonjour Kader Gadiaga, que fait-on aujourd'hui avec KaderBot ?
+                Bonjour, que souhaites-tu faire aujourd’hui avec KaderBot ?
               </h1>
               <p className="mt-3 text-xs sm:text-sm text-gray-500">Ton assistant personnel, prêt à t’aider.</p>
             </div>
@@ -1270,6 +1277,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 key={msg.id}
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group transition-all`}
               >
+                {!isAdmin && !isUser && <ReflectionLine complete />}
                 {/* Author name & source badge */}
                 <div
                   className={`flex items-center gap-2 mb-1 px-1 text-[11px] font-semibold ${
@@ -1314,7 +1322,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 {/* Message presentation: User Bubble vs Bot Free Flow (DeepSeek style) */}
                 {isUser ? (
                   /* Utilisateur : Bulle alignée à droite, max-w-[85%], bg-[#1E2028], rounded-2xl, bordure */
-                  <div className="relative max-w-[85%] rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 text-xs sm:text-sm leading-relaxed shadow-lg bg-[#1E2028] text-white border border-gray-700/60 rounded-tr-sm">
+                  <div className={`relative max-w-[85%] rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 ${isAdmin ? 'text-xs sm:text-sm' : 'text-sm sm:text-base'} leading-relaxed shadow-lg bg-[#1E2028] text-white border border-gray-700/60 rounded-tr-sm`}>
                     <div className="whitespace-pre-wrap break-words">{msg.text || ''}</div>
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                       <button
@@ -1328,9 +1336,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   </div>
                 ) : (
                   /* Bot : Style DeepSeek - aucun fond, aucune bordure, aucun padding de boîte, avec fondu doux */
-                  <div className="relative w-full max-w-none bg-transparent px-0 py-2 text-xs sm:text-sm leading-relaxed text-gray-100 animate-in fade-in duration-500 animate-fade-in">
+                  <div className={`relative w-full max-w-none bg-transparent px-0 py-2 ${isAdmin ? 'text-xs sm:text-sm' : 'text-base sm:text-[17px]'} leading-7 text-gray-100 animate-in fade-in duration-500 animate-fade-in public-markdown`}>
                     {/* Main text with Markdown & KaTeX LaTeX math */}
-                    <div className="text-gray-100 text-xs sm:text-sm leading-relaxed break-words">
+                    <div className="text-gray-100 break-words">
                       <MarkdownErrorBoundary rawText={msg.text || ''}>
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkMath]}
@@ -1461,7 +1469,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
           {/* Fenêtre Accordéon repliable "Réflexion" pendant le raisonnement */}
           {isThinking && (
-            <ThinkingAccordion thinkingStatus={isAdmin ? thinkingStatus : 'Je réfléchis à ta demande...'} />
+            isAdmin
+              ? <ThinkingAccordion thinkingStatus={thinkingStatus} />
+              : <ReflectionLine />
           )}
           </div>
           </>
