@@ -216,6 +216,20 @@ function formatMarkdownMath(content: string): string {
       return `${indentation}$${trimmed}$`;
     }
 
+    // Symboles LaTeX isolés dans une phrase : \Delta, \alpha, \infty,
+    // \frac{a}{b} et \sqrt{x} doivent aussi être interprétés sans exiger
+    // que le modèle entoure toute la phrase avec des dollars.
+    const latexToken = /\\(?:frac\{[^{}]+\}\{[^{}]+\}|sqrt(?:\[[^\]]+\])?\{[^{}]+\}|(?:alpha|beta|gamma|delta|Delta|theta|lambda|mu|pi|sigma|omega|infty|le|ge|leq|geq|neq|approx|pm|times|cdot))\b/g;
+    if (latexToken.test(trimmed)) {
+      return line.replace(latexToken, token => `$${token}$`);
+    }
+
+    // Équations courtes sans commande LaTeX, par exemple x^2 ou a_1.
+    if (/^[A-Za-zÀ-ÿ](?:\([^)]*\))?\s*[_^]\s*(?:\{[^{}]+\}|[A-Za-z0-9+-]+)\s*$/.test(trimmed)) {
+      const indentation = line.match(/^\s*/)?.[0] || '';
+      return `${indentation}$${trimmed}$`;
+    }
+
     return line;
   });
 
@@ -274,6 +288,62 @@ const ReflectionLine: React.FC<{ complete?: boolean; status?: string }> = ({ com
     <span>{complete ? 'Réflexion terminée' : status || 'Réfléchis'}</span>
   </div>
 );
+
+const publicToolLabel = (tool: string) => {
+  const labels: Record<string, string> = {
+    search_web: 'Recherche web',
+    search_news: 'Recherche actualités',
+    open_url: 'Lecture d’une page',
+    memo_lookup: 'Recherche mémoire',
+    memo_store: 'Mémorisation',
+    link_concepts: 'Association d’idées',
+    create_note: 'Création d’une note',
+    search_notes: 'Recherche dans les notes',
+    create_event: 'Création d’un événement',
+    list_events: 'Lecture de l’agenda',
+    send_message: 'Préparation d’un message',
+  };
+  return labels[tool] || 'Exécution d’un outil';
+};
+
+const PublicReflectionTimeline: React.FC<{ toolTrace?: ToolExecutionTrace[] }> = ({ toolTrace }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const steps = toolTrace && toolTrace.length > 0
+    ? toolTrace.map(trace => ({
+        label: publicToolLabel(trace.tool),
+        success: trace.status !== 'error' && !trace.errorMsg,
+      }))
+    : [
+        { label: 'Analyse de la demande', success: true },
+        { label: 'Recherche dans la mémoire', success: true },
+        { label: 'Synthèse de la réponse', success: true },
+      ];
+
+  return (
+    <div className="w-full max-w-xl mb-1">
+      <button
+        type="button"
+        onClick={() => setIsOpen(prev => !prev)}
+        className="inline-flex items-center gap-2 px-1 py-1.5 text-sm text-gray-500 hover:text-gray-300 transition text-left"
+        aria-expanded={isOpen}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+        <span>Réflexion terminée</span>
+        {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+      </button>
+      {isOpen && (
+        <div className="ml-0.5 mt-1 mb-2 pl-4 border-l border-emerald-500/25 space-y-1.5 animate-in fade-in duration-150">
+          {steps.map((step, index) => (
+            <div key={`${step.label}-${index}`} className="flex items-center gap-2 text-xs text-gray-500">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${step.success ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /**
  * Composant Accordéon repliable affiché pendant que KADERBOT réfléchit (live thinking).
@@ -1277,7 +1347,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 key={msg.id}
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group transition-all`}
               >
-                {!isAdmin && !isUser && <ReflectionLine complete />}
+                {!isAdmin && !isUser && <PublicReflectionTimeline toolTrace={msg.meta?.toolTrace} />}
                 {/* Author name & source badge */}
                 <div
                   className={`flex items-center gap-2 mb-1 px-1 text-[11px] font-semibold ${
