@@ -266,6 +266,22 @@ export const apiService = {
     return await res.blob();
   },
 
+  async downloadProjectZip(): Promise<Blob> {
+    const res = await fetch('/api/export-project-zip', {
+      method: 'GET',
+      headers: getAdminHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+      throw new Error(err.error || 'Erreur lors du téléchargement du projet ZIP');
+    }
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) {
+      throw new Error('Archive ZIP vide reçue du serveur.');
+    }
+    return blob;
+  },
+
   async sendAgentMessage(
     prompt: string,
     history: Array<{ role: string; content: string }> = []

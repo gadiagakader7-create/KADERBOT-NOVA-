@@ -65,6 +65,8 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   const [newSessionName, setNewSessionName] = useState('');
   const [decayReport, setDecayReport] = useState<{ modifs: number; supprimes: number } | null>(null);
   const [isExportingPydroid, setIsExportingPydroid] = useState(false);
+  const [isExportingZip, setIsExportingZip] = useState(false);
+  const [zipExportError, setZipExportError] = useState<string | null>(null);
 
   // Synchronisation Mémoire Hybride (Admin)
   const [isPushing, setIsPushing] = useState(false);
@@ -165,11 +167,32 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err: any) {
       alert(`Erreur export script : ${err.message}`);
     } finally {
       setIsExportingPydroid(false);
+    }
+  };
+
+  const handleDownloadProjectZip = async () => {
+    setIsExportingZip(true);
+    setZipExportError(null);
+    try {
+      const blob = await apiService.downloadProjectZip();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'kaderbot-projet-web-complet.zip';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err: any) {
+      setZipExportError(err?.message || 'Échec du téléchargement de l’archive ZIP.');
+    } finally {
+      setIsExportingZip(false);
     }
   };
 
@@ -191,7 +214,7 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -470,14 +493,31 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
           </ul>
         </div>
 
-        <a
-          href="/api/export-project-zip"
-          download="kaderbot-projet-web-complet.zip"
-          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-purple-950/50 flex items-center justify-center gap-2.5 transition active:scale-95"
+        {zipExportError && (
+          <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{zipExportError}</span>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleDownloadProjectZip}
+          disabled={isExportingZip}
+          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 disabled:opacity-60 text-white text-xs sm:text-sm font-bold shadow-lg shadow-purple-950/50 flex items-center justify-center gap-2.5 transition active:scale-95 cursor-pointer"
         >
-          <Download className="w-4 h-4" />
-          <span>Télécharger le Projet Web Complet (.ZIP)</span>
-        </a>
+          {isExportingZip ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Préparation de l'archive ZIP...</span>
+            </>
+          ) : (
+            <>
+              <Download className="w-4 h-4" />
+              <span>Télécharger le Projet Web Complet (.ZIP)</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* 2. Sessions Management */}

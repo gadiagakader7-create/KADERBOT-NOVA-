@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import JSZip from 'jszip';
 import type { Express, RequestHandler } from 'express';
 import type { PendingAgentAction } from '../types/agent';
 import type { ModelRouterDeps } from '../agent/modelRouter';
@@ -658,19 +659,46 @@ app.post('/api/agent/action', async (req, res) => {
 });
 
 // Route de téléchargement de l’archive ZIP complète du projet web
-app.get('/api/export-project-zip', (req, res) => {
+app.get('/api/export-project-zip', requireAdmin, async (_req, res) => {
   try {
-    const zipPath = path.resolve(projectRoot, '.aistudio/artifacts/brain/1e85614a-1a36-40c9-9d9d-04bf0651ef2e/kaderbot_projet_complet.zip');
-    if (fs.existsSync(zipPath)) {
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="kaderbot-projet-web-complet.zip"');
-      return res.sendFile(zipPath);
-    } else {
-      return res.status(404).json({ error: "L'archive ZIP n'est pas encore générée." });
-    }
+    const zip = new JSZip();
+    const excludedDirs = new Set(['node_modules', '.git', '.aistudio', 'data', 'workspace']);
+    const excludedFiles = new Set(['.env', '.env.local', '.env.production', '.DS_Store']);
+
+    const addDirectoryToZip = (dirPath: string, relativeBase = '') => {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (excludedDirs.has(entry.name)) continue;
+          const nextDir = path.join(dirPath, entry.name);
+          const nextRel = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
+          addDirectoryToZip(nextDir, nextRel);
+        } else if (entry.isFile()) {
+          if (excludedFiles.has(entry.name)) continue;
+          if (entry.name.startsWith('.env.') && entry.name !== '.env.example') continue;
+          const fullPath = path.join(dirPath, entry.name);
+          const relPath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
+          zip.file(relPath, fs.readFileSync(fullPath));
+        }
+      }
+    };
+
+    addDirectoryToZip(projectRoot);
+
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="kaderbot-projet-web-complet.zip"');
+    res.setHeader('Content-Length', String(zipBuffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(zipBuffer);
   } catch (err) {
     console.error('Erreur export zip:', err);
-    return res.status(500).json({ error: 'Erreur lors du téléchargement du zip' });
+    return res.status(500).json({ error: 'Erreur lors de la génération ou du téléchargement du zip' });
   }
 });
 
