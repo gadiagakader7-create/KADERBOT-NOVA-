@@ -56,7 +56,7 @@ export async function runToolLoopWithModel(
     }
 
     const fetchController = new AbortController();
-    const fetchTimeoutId = setTimeout(() => fetchController.abort(), 14000);
+    const fetchTimeoutId = setTimeout(() => fetchController.abort(), 20000);
 
     let response: Response;
     try {
@@ -181,7 +181,7 @@ export async function runToolLoopWithModel(
               toolResultStr.startsWith('Erreur') ||
               toolResultStr.startsWith('Impossible') ||
               toolResultStr.startsWith('Accès refusé') ||
-              toolResultStr.includes('403') ||
+              (fnName !== 'self_modify' && (/^HTTP 403\b|403 Forbidden/i.test(toolResultStr) || toolResultStr.includes('403'))) ||
               toolResultStr.includes("Délai d'attente dépassé")
             ) {
               isError = true;
@@ -209,7 +209,7 @@ export async function runToolLoopWithModel(
         });
 
         // Tronquer le résultat d'un outil pour l'injecter proprement dans la conversation
-        const maxToolOutputLen = fnName === 'self_modify' ? 24000 : 5000;
+        const maxToolOutputLen = fnName === 'self_modify' ? 16000 : 5000;
         let safeContent = (typeof toolResultStr === 'string' ? toolResultStr : JSON.stringify(toolResultStr)).slice(0, maxToolOutputLen);
         if (isError && fnName === 'open_url') {
           safeContent += ' [Note agent : Cette page est inaccessible ou protégée. Poursuis l’analyse avec une autre source ou résume avec les données déjà disponibles.]';
@@ -326,6 +326,251 @@ export async function runToolLoopWithModel(
   return {
     text: lastText || 'Voici les informations réunies sur votre demande.',
     provider: providerLabel,
+    model,
+    toolTrace,
+  };
+}
+
+function sanitizeSchemaForGemini(schema: any): any {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(sanitizeSchemaForGemini);
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'minimum' || k === 'maximum' || k === 'additionalProperties') continue;
+    if (k === 'properties' && v && typeof v === 'object') {
+      const props: Record<string, any> = {};
+      for (const [pk, pv] of Object.entries(v as Record<string, any>)) {
+        props[pk] = sanitizeSchemaForGemini(pv);
+      }
+      out.properties = props;
+    } else if (k === 'items' && v && typeof v === 'object') {
+      out.items = sanitizeSchemaForGemini(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Boucle ReAct compatible Gemini Function Calling (REST v1beta) pour ne jamais perdre les outils
+ * si Groq atteint ses limites TPM/RPM.
+ */
+export async function runGeminiToolLoop(
+  apiKey: string,
+  model: string,
+  userPrompt: string,
+  history: Array<{ role: string; content: string }> = [],
+  deps: ReactLoopDeps,
+  systemPrompt?: string
+): Promise<{
+  text?: string;
+  provider: string;
+  model: string;
+  toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }>;
+  awaitingUser?: boolean;
+  question?: string;
+  pendingAction?: PendingAgentAction;
+}> {
+  const isContinuePrompt = ['continue', 'continuer', 'poursuis', 'vas-y', 'go on', 'suite'].includes(userPrompt.trim().toLowerCase());
+  const effectiveUserPrompt = isContinuePrompt
+    ? "Poursuis l'analyse ou la recherche précédente et produis la synthèse finale claire et structurée en français."
+    : userPrompt;
+
+  const contents: any[] = [
+    ...history
+      .filter(h => typeof h.content === 'string' && h.content.trim().length > 0)
+      .map(h => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }],
+      })),
+    { role: 'user', parts: [{ text: effectiveUserPrompt }] },
+  ];
+
+  const functionDeclarations = deps.agentTools.map(t => ({
+    name: t.function.name,
+    description: t.function.description,
+    parameters: sanitizeSchemaForGemini(t.function.parameters),
+  }));
+
+  const toolTrace: Array<{ tool: string; args?: any; status?: 'success' | 'error'; errorMsg?: string; resultSnippet?: string }> = [];
+  const loopStartTime = Date.now();
+  const MAX_LOOP_DURATION_MS = deps.maxLoopDurationMs;
+
+  for (let i = 0; i < deps.maxAgentIterations; i++) {
+    if (Date.now() - loopStartTime > MAX_LOOP_DURATION_MS) {
+      break;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt || deps.defaultSystemPrompt }] },
+            contents,
+            tools: [{ functionDeclarations }],
+            generationConfig: { temperature: 0.4 },
+          }),
+          signal: controller.signal,
+        }
+      );
+    } catch (fetchErr: any) {
+      clearTimeout(timeoutId);
+      if (fetchErr.name === 'AbortError') {
+        throw new Error(`[${model}] Délai d'attente Gemini dépassé (20s)`);
+      }
+      throw fetchErr;
+    }
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+      throw new Error(`[${model}] ${errMsg}`);
+    }
+
+    const data: any = await response.json();
+    const modelContent = data.candidates?.[0]?.content;
+    const parts: any[] = Array.isArray(modelContent?.parts) ? modelContent.parts : [];
+    if (parts.length === 0) {
+      throw new Error(`[${model}] Réponse vide reçue de Gemini`);
+    }
+
+    const functionCalls = parts.filter(p => p && p.functionCall && typeof p.functionCall.name === 'string');
+    if (functionCalls.length > 0) {
+      contents.push({ role: 'model', parts });
+      const responseParts: any[] = [];
+
+      for (const fcPart of functionCalls) {
+        const fnName = fcPart.functionCall.name;
+        const parsedArgs: Record<string, any> =
+          fcPart.functionCall.args && typeof fcPart.functionCall.args === 'object' ? fcPart.functionCall.args : {};
+
+        const isToolAllowedInContext = deps.agentTools.some(t => t.function?.name === fnName);
+        if (!isToolAllowedInContext) {
+          const deniedMsg = `Accès refusé : l'outil ${fnName} n'est pas autorisé dans ce mode.`;
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: deniedMsg });
+          responseParts.push({ functionResponse: { name: fnName, response: { result: deniedMsg } } });
+          continue;
+        }
+
+        const validationError = deps.validateToolArguments(fnName, parsedArgs);
+        if (validationError) {
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: validationError });
+          responseParts.push({ functionResponse: { name: fnName, response: { result: `Erreur de validation : ${validationError}` } } });
+          continue;
+        }
+
+        if (fnName === 'ask_user') {
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'success' });
+          return {
+            awaitingUser: true,
+            question: parsedArgs.question || 'Pouvez-vous préciser votre demande ?',
+            provider: 'gemini-agent',
+            model,
+            toolTrace,
+          };
+        }
+
+        const policy = deps.toolPolicies[fnName];
+        const requiresConfirmation =
+          policy?.confirmation === true ||
+          (fnName === 'send_message' && parsedArgs.channel !== 'whatsapp');
+        if (requiresConfirmation) {
+          const pendingAction = deps.requestPendingAction(fnName, parsedArgs);
+          toolTrace.push({
+            tool: fnName,
+            args: parsedArgs,
+            status: 'success',
+            resultSnippet: 'En attente de confirmation utilisateur',
+          });
+          return {
+            awaitingUser: true,
+            pendingAction,
+            question: `Confirmation requise : ${pendingAction.summary}`,
+            provider: 'gemini-agent',
+            model,
+            toolTrace,
+          };
+        }
+
+        let toolResultStr = '';
+        let isError = false;
+        let errorDetail = '';
+        try {
+          const handler = deps.toolImplementations[fnName];
+          if (typeof handler === 'function') {
+            toolResultStr = await handler(parsedArgs);
+            if (
+              toolResultStr.startsWith('Erreur') ||
+              toolResultStr.startsWith('Impossible') ||
+              toolResultStr.startsWith('Accès refusé') ||
+              (fnName !== 'self_modify' && (/^HTTP 403\b|403 Forbidden/i.test(toolResultStr) || toolResultStr.includes('403'))) ||
+              toolResultStr.includes("Délai d'attente dépassé")
+            ) {
+              isError = true;
+              errorDetail = toolResultStr.slice(0, 160);
+            }
+          } else {
+            toolResultStr = `Outil inconnu : ${fnName}`;
+            isError = true;
+            errorDetail = toolResultStr;
+          }
+        } catch (err: any) {
+          toolResultStr = `Erreur lors de l'exécution de l'outil ${fnName} : ${err.message || 'Erreur inconnue'}`;
+          isError = true;
+          errorDetail = err.message || 'Erreur inconnue';
+        }
+
+        const snippet = toolResultStr.replace(/\s+/g, ' ').trim().slice(0, 120);
+        toolTrace.push({
+          tool: fnName,
+          args: parsedArgs,
+          status: isError ? 'error' : 'success',
+          errorMsg: isError ? errorDetail : undefined,
+          resultSnippet: snippet,
+        });
+
+        const maxToolOutputLen = fnName === 'self_modify' ? 16000 : 5000;
+        const safeContent = (typeof toolResultStr === 'string' ? toolResultStr : JSON.stringify(toolResultStr)).slice(0, maxToolOutputLen);
+        responseParts.push({
+          functionResponse: {
+            name: fnName,
+            response: { result: safeContent },
+          },
+        });
+      }
+
+      contents.push({ role: 'user', parts: responseParts });
+      continue;
+    }
+
+    const text = parts
+      .filter(p => typeof p?.text === 'string' && !p.thought)
+      .map(p => p.text)
+      .join('')
+      .trim();
+
+    if (text) {
+      return {
+        text,
+        provider: 'gemini-agent',
+        model,
+        toolTrace,
+      };
+    }
+  }
+
+  return {
+    text: 'Voici les informations réunies sur votre demande.',
+    provider: 'gemini-agent',
     model,
     toolTrace,
   };

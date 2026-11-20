@@ -33,10 +33,14 @@ export async function classifyIntentWithRouter(
     clean.includes('qui suis-je') ||
     clean.includes('patch') ||
     clean.includes('self_modify') ||
+    clean.includes('self-modify') ||
     clean.includes('code_workspace') ||
     clean.includes('execute_code') ||
     clean.includes('/workspace') ||
-    clean.includes('src/')
+    clean.includes('src/') ||
+    /\bsrc\b/.test(clean) ||
+    clean.includes('code source') ||
+    clean.includes('ton code')
   ) {
     return 'AGENT';
   }

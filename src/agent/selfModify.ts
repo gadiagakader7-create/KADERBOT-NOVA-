@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { transformSync } from 'esbuild';
 import {
   createPatch as createVirtualPatch,
@@ -12,8 +13,86 @@ import {
 } from './codeWorkspace';
 import { executeCode } from './codeExecutor';
 
-const PROJECT_ROOT = path.resolve(process.cwd());
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function resolveProjectRoot(): string {
+  const candidates = [
+    path.resolve(__dirname, '../../'),
+    path.resolve(process.cwd()),
+    path.resolve(process.cwd(), 'src'),
+    path.resolve(process.cwd(), '..'),
+  ];
+  for (const candidate of candidates) {
+    const srcDir = path.join(candidate, 'src');
+    const pkgFile = path.join(candidate, 'package.json');
+    if (fs.existsSync(srcDir) && fs.statSync(srcDir).isDirectory() && fs.existsSync(pkgFile)) {
+      return candidate;
+    }
+  }
+  for (const candidate of candidates) {
+    const srcDir = path.join(candidate, 'src');
+    if (fs.existsSync(srcDir) && fs.statSync(srcDir).isDirectory()) {
+      return candidate;
+    }
+  }
+  return path.resolve(__dirname, '../../');
+}
+
+export const PROJECT_ROOT = resolveProjectRoot();
 const ALLOWED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.css', '.json']);
+const DEFAULT_READ_LINE_WINDOW = 250;
+
+export function isDirectoryInSrc(targetPath: string): boolean {
+  const cleaned = String(targetPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!cleaned || cleaned.includes('..') || cleaned.includes('\0')) return false;
+  if (cleaned !== 'src' && !cleaned.startsWith('src/')) return false;
+  const abs = path.resolve(PROJECT_ROOT, cleaned);
+  const srcRoot = path.resolve(PROJECT_ROOT, 'src');
+  if (abs !== srcRoot && !abs.startsWith(srcRoot + path.sep)) return false;
+  return fs.existsSync(abs) && fs.statSync(abs).isDirectory();
+}
+
+export function listSourceFiles(subDir = 'src'): Array<{ path: string; lines: number; size: number }> {
+  const cleaned = String(subDir || 'src').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') || 'src';
+  if (cleaned.includes('..') || cleaned.includes('\0') || (cleaned !== 'src' && !cleaned.startsWith('src/'))) {
+    throw new Error('Le listage des fichiers source est limité au dossier src/.');
+  }
+
+  const srcRoot = path.resolve(PROJECT_ROOT, 'src');
+  const startDir = path.resolve(PROJECT_ROOT, cleaned);
+  if (startDir !== srcRoot && !startDir.startsWith(srcRoot + path.sep)) {
+    throw new Error('Chemin hors de src/.');
+  }
+  if (!fs.existsSync(startDir) || !fs.statSync(startDir).isDirectory()) {
+    throw new Error(`Dossier introuvable : ${cleaned}`);
+  }
+
+  const results: Array<{ path: string; lines: number; size: number }> = [];
+  const walk = (dir: string) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.has(ext)) continue;
+        const rel = path.relative(PROJECT_ROOT, fullPath).replace(/\\/g, '/');
+        const stat = fs.statSync(fullPath);
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        results.push({
+          path: rel,
+          lines: content.split('\n').length,
+          size: stat.size,
+        });
+      }
+    }
+  };
+  walk(startDir);
+  return results.sort((a, b) => a.path.localeCompare(b.path));
+}
 
 export function validateSelfModifyTarget(targetPath: string): { valid: boolean; normalized: string; absolutePath: string; error?: string } {
   const cleaned = String(targetPath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
@@ -57,10 +136,41 @@ export function readTargetFile(targetPath: string): { path: string; content: str
     throw new Error(check.error || 'Chemin cible refusé.');
   }
   if (!fs.existsSync(check.absolutePath)) {
-    throw new Error(`Fichier introuvable : ${check.normalized}`);
+    throw new Error(`Fichier introuvable : ${check.normalized} (racine détectée : ${PROJECT_ROOT}). Utilise action="list" pour voir les fichiers disponibles.`);
   }
   const content = fs.readFileSync(check.absolutePath, 'utf-8');
   return { path: check.normalized, content };
+}
+
+/**
+ * Lecture formatée et paginée par plage de lignes pour éviter de saturer la fenêtre/TPM du modèle sur les gros fichiers.
+ */
+export function formatTargetFileRead(targetPath: string, startLine?: number, endLine?: number): string {
+  const file = readTargetFile(targetPath);
+  const lines = file.content.split('\n');
+  const totalLines = lines.length;
+
+  const hasRange = typeof startLine === 'number' || typeof endLine === 'number';
+  const start = Math.max(1, typeof startLine === 'number' && Number.isFinite(startLine) ? Math.floor(startLine) : 1);
+  const defaultEnd = hasRange ? Math.min(totalLines, start + DEFAULT_READ_LINE_WINDOW - 1) : Math.min(totalLines, DEFAULT_READ_LINE_WINDOW);
+  const end = Math.min(
+    totalLines,
+    typeof endLine === 'number' && Number.isFinite(endLine) ? Math.max(start, Math.floor(endLine)) : defaultEnd
+  );
+
+  // Si le fichier tient dans DEFAULT_READ_LINE_WINDOW et aucune plage n'est demandée, renvoyer le texte brut complet
+  if (!hasRange && totalLines <= DEFAULT_READ_LINE_WINDOW) {
+    return `Contenu de ${file.path} (${totalLines} lignes, lecture seule) :\n${file.content}`;
+  }
+
+  const slice = lines.slice(start - 1, end);
+  const numbered = slice.map((line, idx) => `${start + idx}: ${line}`).join('\n');
+  const suffix =
+    end < totalLines
+      ? `\n\n[Affichage lignes ${start}-${end} sur ${totalLines}. Pour lire la suite : self_modify(action="read", targetPath="${file.path}", startLine=${end + 1}, endLine=${Math.min(totalLines, end + DEFAULT_READ_LINE_WINDOW)})]`
+      : `\n\n[Fin du fichier : lignes ${start}-${end} sur ${totalLines}]`;
+
+  return `Contenu de ${file.path} (lignes ${start}-${end}/${totalLines}, lecture seule) :\n${numbered}${suffix}`;
 }
 
 /**

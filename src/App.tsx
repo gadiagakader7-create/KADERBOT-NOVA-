@@ -1211,7 +1211,7 @@ export default function App() {
             ? 'groq-chat'
             : agentRes.provider === 'openrouter'
             ? 'openrouter'
-            : agentRes.provider === 'gemini'
+            : agentRes.provider === 'gemini' || agentRes.provider === 'gemini-agent'
             ? 'gemini'
             : 'groq';
 

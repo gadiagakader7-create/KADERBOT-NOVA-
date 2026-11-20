@@ -569,14 +569,14 @@ app.post('/api/agent', async (req, res) => {
     const normalizedPrompt = prompt.toLowerCase();
     const forceAdminAgent =
       isAdminAuthenticated &&
-      /(patch|self_modify|code_workspace|execute_code|workspace|src\/|fichier|modifi|ex[ée]cut|python|javascript|test)/i.test(
+      /(\bsrc\b|src\/|patch|self_modify|self-?modify|code_workspace|execute_code|workspace|fichier|modifi|am[ée]lior|inspect|analys|lis\b|lire\b|ex[ée]cut|python|javascript|test|code)/i.test(
         normalizedPrompt
       );
     const intent = forceAdminAgent ? 'AGENT' : await classifyIntentWithRouter(prompt, history);
 
     const basePrompt = systemPrompt || agentSystemPrompt;
     const effectiveSystemPrompt = isAdminAuthenticated
-      ? `${basePrompt}\n\n[MODE ADMIN ATELIER ACTIF]\nOutils admin supplémentaires disponibles :\n- self_modify : pour inspecter un fichier de src/ (action="read", targetPath) puis proposer un patch virtuel en_attente (targetPath + search/replace ou newContent). Retourne toujours le patchId et le diff proposés, sans jamais modifier src/ directement.\n- code_workspace : gérer les fichiers virtuels dans /workspace/ (generated/, patches/, tests/).\n- execute_code : exécuter du Python ou JavaScript en sandbox isolé.`
+      ? `${basePrompt}\n\n[MODE ADMIN ATELIER ACTIF]\nOutils admin supplémentaires disponibles :\n- self_modify : pour explorer src/ (action="list"), lire un fichier de src/ en lecture seule (action="read", targetPath="src/...", avec startLine/endLine pour les gros fichiers), puis proposer un patch virtuel en_attente (targetPath + search/replace ou newContent). Retourne toujours le patchId et le diff proposés, sans jamais modifier src/ directement.\n- code_workspace : gérer les fichiers virtuels dans /workspace/ (generated/, patches/, tests/). Ne l'utilise jamais pour src/.\n- execute_code : exécuter du Python ou JavaScript en sandbox isolé.`
       : basePrompt;
 
     if (intent === 'CHAT') {

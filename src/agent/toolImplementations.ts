@@ -8,7 +8,13 @@ import {
   writeFile as writeWorkspaceFile,
 } from './codeWorkspace';
 import { executeCode } from './codeExecutor';
-import { buildTargetedPatchContent, readTargetFile, runSelfModifyProtocol } from './selfModify';
+import {
+  buildTargetedPatchContent,
+  formatTargetFileRead,
+  isDirectoryInSrc,
+  listSourceFiles,
+  runSelfModifyProtocol,
+} from './selfModify';
 
 export type ToolImplementation = (args: Record<string, any>) => Promise<string>;
 
@@ -342,6 +348,10 @@ return {
 
   code_workspace: async ({ action, path: filePath, content }: { action?: string; path?: string; content?: string }) => {
     try {
+      const rawPath = String(filePath || '').trim().replace(/^\/+/, '');
+      if (rawPath === 'src' || rawPath.startsWith('src/')) {
+        return `Erreur : code_workspace gère uniquement le stockage virtuel /workspace/. Pour lister ou lire le code source réel dans src/, utilise l'outil self_modify avec action="list" ou action="read" et targetPath="${rawPath}".`;
+      }
       if (action === 'list') {
         const files = listWorkspaceFiles(filePath || '/workspace/');
         if (files.length === 0) return 'Le stockage virtuel /workspace/ est actuellement vide.';
@@ -407,24 +417,33 @@ return {
   self_modify: async ({
     action,
     targetPath,
+    startLine,
+    endLine,
     newContent,
     search,
     replace,
     testCode,
   }: {
-    action?: 'read' | 'propose';
+    action?: 'list' | 'read' | 'propose';
     targetPath?: string;
+    startLine?: number;
+    endLine?: number;
     newContent?: string;
     search?: string;
     replace?: string;
     testCode?: string;
   }) => {
     try {
-      const cleanTarget = String(targetPath || '');
+      const cleanTarget = String(targetPath || '').trim();
+      if (action === 'list' || (action === 'read' && isDirectoryInSrc(cleanTarget))) {
+        const files = listSourceFiles(cleanTarget || 'src');
+        if (files.length === 0) return `Aucun fichier source autorisé trouvé dans ${cleanTarget || 'src'}.`;
+        return `Fichiers source dans ${cleanTarget || 'src/'} (${files.length}) :\n` +
+          files.map(f => `- ${f.path} (${f.lines} lignes, ${f.size} octets)`).join('\n');
+      }
+
       if (action === 'read') {
-        const file = readTargetFile(cleanTarget);
-        const lineCount = file.content.split('\n').length;
-        return `Contenu de ${file.path} (${lineCount} lignes, lecture seule) :\n${file.content}`;
+        return formatTargetFileRead(cleanTarget, startLine, endLine);
       }
 
       const resolvedNewContent =

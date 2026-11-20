@@ -1,4 +1,4 @@
-import { runToolLoopWithModel } from './reactLoop';
+import { runGeminiToolLoop, runToolLoopWithModel } from './reactLoop';
 import type { ReactLoopDeps } from './reactLoop';
 import type { AgentToolDefinition } from '../types/agent';
 
@@ -81,7 +81,30 @@ export async function runAgentLoop(
     );
   }
 
-  // === MAILLON 3 : Gemini (sans tools) ===
+  // === MAILLON 3 : Gemini (avec tools puis fallback sans tools) ===
+  const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
+  if (geminiApiKey) {
+    for (const geminiModel of ['gemini-2.5-flash', 'gemini-flash-latest']) {
+      try {
+        const res = await runGeminiToolLoop(
+          geminiApiKey,
+          geminiModel,
+          userPrompt,
+          history,
+          effectiveLoopDeps,
+          systemPrompt
+        );
+        return {
+          ...res,
+          isFallback: true,
+          fallbackReason: `Groq indisponible, bascule sur Gemini (${geminiModel} avec tools)`,
+        };
+      } catch (geminiToolErr: any) {
+        console.warn(`[BASCULE AGENT] Gemini tools (${geminiModel}) a échoué : ${geminiToolErr.message}`);
+      }
+    }
+  }
+
   try {
     const formattedHistory = history
       .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)

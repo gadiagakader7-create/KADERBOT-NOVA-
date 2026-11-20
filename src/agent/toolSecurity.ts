@@ -68,8 +68,11 @@ export function validateToolArguments(tool: string, args: Record<string, unknown
   }
 
   if (tool === 'self_modify') {
+    if (args.action === 'list') {
+      return null;
+    }
     if (!isNonEmptyString(args.targetPath)) {
-      return 'targetPath requis pour self_modify.';
+      return 'targetPath requis pour self_modify (ou utilise action="list").';
     }
     if (args.action === 'read') {
       return null;
@@ -77,7 +80,7 @@ export function validateToolArguments(tool: string, args: Record<string, unknown
     const hasFullContent = isNonEmptyString(args.newContent);
     const hasSearchReplace = isNonEmptyString(args.search) && typeof args.replace === 'string';
     if (!hasFullContent && !hasSearchReplace) {
-      return 'Fournis action="read", ou newContent complet, ou search + replace pour self_modify.';
+      return 'Fournis action="list", action="read", newContent complet, ou search + replace pour self_modify.';
     }
   }
   return null;
