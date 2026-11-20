@@ -9,11 +9,13 @@ import {
 } from './codeWorkspace';
 import { executeCode } from './codeExecutor';
 import {
+  buildMultiTargetedPatchContent,
   buildTargetedPatchContent,
   formatTargetFileRead,
   isDirectoryInSrc,
   listSourceFiles,
   runSelfModifyProtocol,
+  type TargetedPatchEdit,
 } from './selfModify';
 
 export type ToolImplementation = (args: Record<string, any>) => Promise<string>;
@@ -419,6 +421,7 @@ return {
     targetPath,
     startLine,
     endLine,
+    edits,
     newContent,
     search,
     replace,
@@ -428,6 +431,7 @@ return {
     targetPath?: string;
     startLine?: number;
     endLine?: number;
+    edits?: TargetedPatchEdit[];
     newContent?: string;
     search?: string;
     replace?: string;
@@ -447,7 +451,9 @@ return {
       }
 
       const resolvedNewContent =
-        typeof newContent === 'string' && newContent.trim().length > 0
+        Array.isArray(edits) && edits.length > 0
+          ? buildMultiTargetedPatchContent(cleanTarget, edits)
+          : typeof newContent === 'string' && newContent.trim().length > 0
           ? newContent
           : buildTargetedPatchContent(cleanTarget, String(search ?? ''), String(replace ?? ''));
 

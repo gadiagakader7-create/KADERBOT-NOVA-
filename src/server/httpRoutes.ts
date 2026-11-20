@@ -576,7 +576,7 @@ app.post('/api/agent', async (req, res) => {
 
     const basePrompt = systemPrompt || agentSystemPrompt;
     const effectiveSystemPrompt = isAdminAuthenticated
-      ? `${basePrompt}\n\n[MODE ADMIN ATELIER ACTIF]\nOutils admin supplémentaires disponibles :\n- self_modify : pour explorer src/ (action="list"), lire un fichier de src/ en lecture seule (action="read", targetPath="src/...", avec startLine/endLine pour les gros fichiers), puis proposer un patch virtuel en_attente (targetPath + search/replace ou newContent). Retourne toujours le patchId et le diff proposés, sans jamais modifier src/ directement.\n- code_workspace : gérer les fichiers virtuels dans /workspace/ (generated/, patches/, tests/). Ne l'utilise jamais pour src/.\n- execute_code : exécuter du Python ou JavaScript en sandbox isolé.`
+      ? `${basePrompt}\n\n[MODE ADMIN ATELIER ACTIF]\nOutils admin supplémentaires disponibles :\n- self_modify : pour explorer src/ (action="list"), lire un fichier de src/ en lecture seule (action="read", targetPath="src/...", avec startLine/endLine pour les gros fichiers), puis proposer un patch virtuel en_attente. Pour modifier un grand fichier sans risque, utilise edits: [{ search, replace }, ...] (ou search/replace pour un seul bloc). Retourne toujours le patchId et le diff proposés, sans jamais modifier src/ directement.\n- code_workspace : gérer les fichiers virtuels dans /workspace/ (generated/, patches/, tests/). Ne l'utilise jamais pour src/.\n- execute_code : exécuter du Python ou JavaScript en sandbox isolé.`
       : basePrompt;
 
     if (intent === 'CHAT') {

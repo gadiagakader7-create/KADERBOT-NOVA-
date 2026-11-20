@@ -278,7 +278,7 @@ export const ADMIN_ONLY_TOOLS: AgentToolDefinition[] = [
     type: 'function',
     function: {
       name: 'self_modify',
-      description: 'Explore et lit les fichiers source dans src/ (action="list" ou action="read") ou propose un patch selon le protocole strict (lecture -> patch virtuel -> test sur copie virtuelle -> attente validation humaine). Pour modifier une partie ciblée sans réécrire tout le fichier, fournis search + replace (ou newContent complet).',
+      description: 'Explore et lit les fichiers source dans src/ (action="list" ou action="read") ou propose un patch selon le protocole strict (lecture -> patch virtuel -> test sur copie virtuelle -> attente validation humaine). Pour modifier un ou plusieurs endroits d’un grand fichier sans le réécrire, utilise edits: [{ search, replace }, ...] (ou search + replace pour un seul endroit).',
       parameters: {
         type: 'object',
         properties: {
@@ -290,8 +290,20 @@ export const ADMIN_ONLY_TOOLS: AgentToolDefinition[] = [
           targetPath: { type: 'string', description: 'Chemin relatif dans src/ (ex: src/agent/toolRegistry.ts, ou src/ pour action="list").' },
           startLine: { type: 'integer', minimum: 1, description: 'Ligne de début optionnelle pour action="read" (fichiers longs).' },
           endLine: { type: 'integer', minimum: 1, description: 'Ligne de fin optionnelle pour action="read" (fichiers longs).' },
-          newContent: { type: 'string', description: 'Nouveau contenu complet proposé pour le fichier (si search/replace non utilisé).' },
-          search: { type: 'string', description: 'Extrait exact existant dans le fichier cible à remplacer (alternative sûre à newContent).' },
+          edits: {
+            type: 'array',
+            description: 'Liste de modifications ciblées { search, replace } appliquées séquentiellement en un seul patch atomique (recommandé pour les grands fichiers).',
+            items: {
+              type: 'object',
+              properties: {
+                search: { type: 'string', description: 'Extrait exact unique existant dans le fichier cible.' },
+                replace: { type: 'string', description: 'Nouveau texte de remplacement.' },
+              },
+              required: ['search', 'replace'],
+            },
+          },
+          newContent: { type: 'string', description: 'Nouveau contenu complet proposé pour le fichier (uniquement si edits et search/replace ne sont pas utilisés).' },
+          search: { type: 'string', description: 'Extrait exact unique existant dans le fichier cible à remplacer (pour une modification unique).' },
           replace: { type: 'string', description: 'Nouveau texte qui remplace search dans le fichier cible.' },
           testCode: { type: 'string', description: 'Code de test optionnel à exécuter sur la copie virtuelle.' },
         },

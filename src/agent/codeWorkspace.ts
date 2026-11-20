@@ -131,66 +131,167 @@ export function deleteFile(filePath: string): boolean {
   return workspaceStore.delete(normalized);
 }
 
+type DiffOp = { type: ' ' | '-' | '+'; line: string };
+
+function lcsDiffSlice(oldSlice: string[], newSlice: string[]): DiffOp[] {
+  const n = oldSlice.length;
+  const m = newSlice.length;
+
+  if (n === 0) return newSlice.map(line => ({ type: '+', line }));
+  if (m === 0) return oldSlice.map(line => ({ type: '-', line }));
+
+  // Trim préfixe/suffixe commun de la sous-tranche
+  let p = 0;
+  while (p < n && p < m && oldSlice[p] === newSlice[p]) p++;
+  let s = 0;
+  while (s < n - p && s < m - p && oldSlice[n - 1 - s] === newSlice[m - 1 - s]) s++;
+
+  const ops: DiffOp[] = [];
+  for (let k = 0; k < p; k++) ops.push({ type: ' ', line: oldSlice[k] });
+
+  const midOld = oldSlice.slice(p, n - s);
+  const midNew = newSlice.slice(p, m - s);
+  const mn = midOld.length;
+  const mm = midNew.length;
+
+  if (mn === 0) {
+    for (const line of midNew) ops.push({ type: '+', line });
+  } else if (mm === 0) {
+    for (const line of midOld) ops.push({ type: '-', line });
+  } else if (mn * mm <= 120000) {
+    const dp: number[][] = Array.from({ length: mn + 1 }, () => new Array(mm + 1).fill(0));
+    for (let i = mn - 1; i >= 0; i--) {
+      for (let j = mm - 1; j >= 0; j--) {
+        if (midOld[i] === midNew[j]) {
+          dp[i][j] = dp[i + 1][j + 1] + 1;
+        } else {
+          dp[i][j] = dp[i + 1][j] >= dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1];
+        }
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < mn && j < mm) {
+      if (midOld[i] === midNew[j]) {
+        ops.push({ type: ' ', line: midOld[i] });
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        ops.push({ type: '-', line: midOld[i] });
+        i++;
+      } else {
+        ops.push({ type: '+', line: midNew[j] });
+        j++;
+      }
+    }
+    while (i < mn) {
+      ops.push({ type: '-', line: midOld[i] });
+      i++;
+    }
+    while (j < mm) {
+      ops.push({ type: '+', line: midNew[j] });
+      j++;
+    }
+  } else {
+    // Stratégie Patience / ancres uniques pour grands écarts (O(N))
+    const oldCounts = new Map<string, { count: number; idx: number }>();
+    const newCounts = new Map<string, { count: number; idx: number }>();
+    midOld.forEach((line, idx) => {
+      const cur = oldCounts.get(line);
+      oldCounts.set(line, cur ? { count: cur.count + 1, idx: cur.idx } : { count: 1, idx });
+    });
+    midNew.forEach((line, idx) => {
+      const cur = newCounts.get(line);
+      newCounts.set(line, cur ? { count: cur.count + 1, idx: cur.idx } : { count: 1, idx });
+    });
+
+    const anchors: Array<{ oi: number; ni: number }> = [];
+    let lastNi = -1;
+    for (let oi = 0; oi < mn; oi++) {
+      const oInfo = oldCounts.get(midOld[oi]);
+      const nInfo = newCounts.get(midOld[oi]);
+      if (oInfo?.count === 1 && nInfo?.count === 1 && nInfo.idx > lastNi) {
+        anchors.push({ oi, ni: nInfo.idx });
+        lastNi = nInfo.idx;
+      }
+    }
+
+    if (anchors.length > 0) {
+      let prevO = 0;
+      let prevN = 0;
+      for (const anchor of anchors) {
+        ops.push(...lcsDiffSlice(midOld.slice(prevO, anchor.oi), midNew.slice(prevN, anchor.ni)));
+        ops.push({ type: ' ', line: midOld[anchor.oi] });
+        prevO = anchor.oi + 1;
+        prevN = anchor.ni + 1;
+      }
+      ops.push(...lcsDiffSlice(midOld.slice(prevO), midNew.slice(prevN)));
+    } else {
+      for (const line of midOld) ops.push({ type: '-', line });
+      for (const line of midNew) ops.push({ type: '+', line });
+    }
+  }
+
+  for (let k = n - s; k < n; k++) ops.push({ type: ' ', line: oldSlice[k] });
+  return ops;
+}
+
 /**
- * Génère un diff lisible ligne par ligne (lignes supprimées '-', ajoutées '+').
+ * Génère un diff unifié compact (hunks avec 3 lignes de contexte autour des vraies modifications).
+ * Fonctionne rapidement et proprement même sur des fichiers > 1500 lignes.
  */
 export function computeReadableDiff(originalPath: string, original: string, nouveau: string): string {
   const oldLines = (original ?? '').replace(/\r\n/g, '\n').split('\n');
   const newLines = (nouveau ?? '').replace(/\r\n/g, '\n').split('\n');
 
-  const n = oldLines.length;
-  const m = newLines.length;
+  const ops = lcsDiffSlice(oldLines, newLines);
+  const CONTEXT = 3;
 
-  // Fallback linéaire si les fichiers sont très volumineux pour éviter une matrice O(n*m)
-  if (n * m > 250000) {
-    const header = [`--- a/${originalPath}`, `+++ b/${originalPath}`, `@@ -1,${n} +1,${m} @@`];
-    const removed = oldLines.map(line => `- ${line}`);
-    const added = newLines.map(line => `+ ${line}`);
-    return [...header, ...removed, ...added].join('\n');
+  // Assigner les numéros de ligne (1-indexed) et repérer les indices modifiés
+  const entries: Array<DiffOp & { oldLineNo: number; newLineNo: number }> = [];
+  let oldNo = 1;
+  let newNo = 1;
+  const changedIndices: number[] = [];
+
+  for (let idx = 0; idx < ops.length; idx++) {
+    const op = ops[idx];
+    entries.push({ ...op, oldLineNo: oldNo, newLineNo: newNo });
+    if (op.type !== ' ') changedIndices.push(idx);
+    if (op.type !== '+') oldNo++;
+    if (op.type !== '-') newNo++;
   }
 
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      if (oldLines[i] === newLines[j]) {
-        dp[i][j] = dp[i + 1][j + 1] + 1;
-      } else {
-        dp[i][j] = dp[i + 1][j] >= dp[i][j + 1] ? dp[i + 1][j] : dp[i][j + 1];
-      }
-    }
+  if (changedIndices.length === 0) {
+    return [`--- a/${originalPath}`, `+++ b/${originalPath}`, '@@ -0,0 +0,0 @@ (aucune modification)'].join('\n');
   }
 
-  const diffLines: string[] = [
-    `--- a/${originalPath}`,
-    `+++ b/${originalPath}`,
-    `@@ -1,${n} +1,${m} @@`,
-  ];
-
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (oldLines[i] === newLines[j]) {
-      diffLines.push(`  ${oldLines[i]}`);
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      diffLines.push(`- ${oldLines[i]}`);
-      i++;
+  // Regrouper les changements proches en hunks compacts avec CONTEXT lignes autour
+  const hunks: Array<{ start: number; end: number }> = [];
+  for (const chIdx of changedIndices) {
+    const start = Math.max(0, chIdx - CONTEXT);
+    const end = Math.min(entries.length - 1, chIdx + CONTEXT);
+    const last = hunks[hunks.length - 1];
+    if (last && start <= last.end + 1) {
+      last.end = Math.max(last.end, end);
     } else {
-      diffLines.push(`+ ${newLines[j]}`);
-      j++;
+      hunks.push({ start, end });
     }
   }
-  while (i < n) {
-    diffLines.push(`- ${oldLines[i]}`);
-    i++;
-  }
-  while (j < m) {
-    diffLines.push(`+ ${newLines[j]}`);
-    j++;
+
+  const output: string[] = [`--- a/${originalPath}`, `+++ b/${originalPath}`];
+  for (const hunk of hunks) {
+    const slice = entries.slice(hunk.start, hunk.end + 1);
+    const oldStart = slice[0].oldLineNo;
+    const newStart = slice[0].newLineNo;
+    const oldCount = slice.filter(e => e.type !== '+').length;
+    const newCount = slice.filter(e => e.type !== '-').length;
+    output.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+    for (const e of slice) {
+      output.push(`${e.type} ${e.line}`);
+    }
   }
 
-  return diffLines.join('\n');
+  return output.join('\n');
 }
 
 export function createPatch(

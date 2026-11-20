@@ -173,19 +173,51 @@ export function formatTargetFileRead(targetPath: string, startLine?: number, end
   return `Contenu de ${file.path} (lignes ${start}-${end}/${totalLines}, lecture seule) :\n${numbered}${suffix}`;
 }
 
+export interface TargetedPatchEdit {
+  search: string;
+  replace: string;
+}
+
 /**
- * Étape 1bis : Construit le nouveau contenu complet à partir d'un remplacement ciblé (sans troncature).
+ * Étape 1bis : Applique un ou plusieurs remplacements ciblés sur la lecture réelle du fichier (sans troncature).
  */
+export function buildMultiTargetedPatchContent(targetPath: string, edits: TargetedPatchEdit[]): string {
+  const { content: initialContent } = readTargetFile(targetPath);
+  if (!Array.isArray(edits) || edits.length === 0) {
+    throw new Error('Tableau edits vide pour le patch ciblé.');
+  }
+
+  let updated = initialContent;
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i];
+    const search = typeof edit?.search === 'string' ? edit.search : '';
+    const replace = typeof edit?.replace === 'string' ? edit.replace : '';
+    if (!search) {
+      throw new Error(`Édition #${i + 1} invalide : search vide.`);
+    }
+    const index = updated.indexOf(search);
+    if (index === -1) {
+      throw new Error(
+        `Extrait search #${i + 1} introuvable dans ${targetPath}. Utilise action="read" avec startLine/endLine pour vérifier le texte exact (espaces et retours à la ligne inclus).`
+      );
+    }
+    const secondIndex = updated.indexOf(search, index + search.length);
+    if (secondIndex !== -1) {
+      throw new Error(
+        `Extrait search #${i + 1} ambigu (trouvé plusieurs fois dans ${targetPath}). Ajoute 1 à 2 lignes de contexte autour pour le rendre unique.`
+      );
+    }
+    updated = updated.slice(0, index) + replace + updated.slice(index + search.length);
+  }
+
+  if (updated === initialContent) {
+    throw new Error('Aucune différence détectée après application des éditions.');
+  }
+  return updated;
+}
+
 export function buildTargetedPatchContent(targetPath: string, search: string, replace: string): string {
-  const { content } = readTargetFile(targetPath);
-  if (!search) {
-    throw new Error('Paramètre search vide pour le patch ciblé.');
-  }
-  const index = content.indexOf(search);
-  if (index === -1) {
-    throw new Error(`Extrait search introuvable dans ${targetPath}. Utilise action="read" pour vérifier le contenu exact.`);
-  }
-  return content.slice(0, index) + replace + content.slice(index + search.length);
+  return buildMultiTargetedPatchContent(targetPath, [{ search, replace }]);
 }
 
 /**
@@ -193,6 +225,9 @@ export function buildTargetedPatchContent(targetPath: string, search: string, re
  */
 export function createPatchProposal(targetPath: string, nouveauContenu: string): WorkspacePatch {
   const { path: cleanPath, content: originalContent } = readTargetFile(targetPath);
+  if (originalContent === nouveauContenu) {
+    throw new Error(`Aucune modification détectée par rapport au fichier actuel ${cleanPath}.`);
+  }
   const { patch } = createVirtualPatch(cleanPath, nouveauContenu, originalContent);
   return patch;
 }
@@ -345,10 +380,15 @@ export function demandeValidation(patch: WorkspacePatch): {
   message: string;
 } {
   const testStatusLabel = patch.testResult?.success ? 'réussi' : 'échoué';
+  const diffPreview =
+    patch.diff.length > 10000
+      ? `${patch.diff.slice(0, 10000)}\n... [diff tronqué pour l'aperçu, complet dans /workspace/patches/${patch.patchId}.json]`
+      : patch.diff;
+
   const message =
     patch.status === 'rejeté'
-      ? `Patch rejeté automatiquement (${patch.patchId}) :\n${patch.diff}\n\nTest : échoué (${patch.rejectionReason || patch.testResult?.stderr || 'erreur inconnue'}).`
-      : `Patch proposé (${patch.patchId}) :\n${patch.diff}\n\nTest : ${testStatusLabel}. Tu valides ?`;
+      ? `Patch rejeté automatiquement (${patch.patchId}) — Raison du rejet : ${patch.rejectionReason || patch.testResult?.stderr || 'erreur inconnue'}\n\nDiff :\n${diffPreview}`
+      : `Patch proposé (${patch.patchId}) — Statut : ${patch.status} — Test : ${testStatusLabel}. Tu valides ?\n\n${diffPreview}`;
 
   return {
     patchId: patch.patchId,

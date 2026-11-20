@@ -79,8 +79,14 @@ export function validateToolArguments(tool: string, args: Record<string, unknown
     }
     const hasFullContent = isNonEmptyString(args.newContent);
     const hasSearchReplace = isNonEmptyString(args.search) && typeof args.replace === 'string';
-    if (!hasFullContent && !hasSearchReplace) {
-      return 'Fournis action="list", action="read", newContent complet, ou search + replace pour self_modify.';
+    const hasEdits =
+      Array.isArray(args.edits) &&
+      args.edits.length > 0 &&
+      args.edits.every(
+        (e: any) => e && typeof e === 'object' && isNonEmptyString(e.search) && typeof e.replace === 'string'
+      );
+    if (!hasFullContent && !hasSearchReplace && !hasEdits) {
+      return 'Fournis action="list", action="read", edits: [{search, replace}], search + replace, ou newContent complet pour self_modify.';
     }
   }
   return null;
