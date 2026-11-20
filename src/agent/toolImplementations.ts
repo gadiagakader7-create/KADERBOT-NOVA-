@@ -8,7 +8,7 @@ import {
   writeFile as writeWorkspaceFile,
 } from './codeWorkspace';
 import { executeCode } from './codeExecutor';
-import { runSelfModifyProtocol } from './selfModify';
+import { buildTargetedPatchContent, readTargetFile, runSelfModifyProtocol } from './selfModify';
 
 export type ToolImplementation = (args: Record<string, any>) => Promise<string>;
 
@@ -404,11 +404,37 @@ return {
     return JSON.stringify(result, null, 2);
   },
 
-  self_modify: async ({ targetPath, newContent, testCode }: { targetPath?: string; newContent?: string; testCode?: string }) => {
+  self_modify: async ({
+    action,
+    targetPath,
+    newContent,
+    search,
+    replace,
+    testCode,
+  }: {
+    action?: 'read' | 'propose';
+    targetPath?: string;
+    newContent?: string;
+    search?: string;
+    replace?: string;
+    testCode?: string;
+  }) => {
     try {
+      const cleanTarget = String(targetPath || '');
+      if (action === 'read') {
+        const file = readTargetFile(cleanTarget);
+        const lineCount = file.content.split('\n').length;
+        return `Contenu de ${file.path} (${lineCount} lignes, lecture seule) :\n${file.content}`;
+      }
+
+      const resolvedNewContent =
+        typeof newContent === 'string' && newContent.trim().length > 0
+          ? newContent
+          : buildTargetedPatchContent(cleanTarget, String(search ?? ''), String(replace ?? ''));
+
       const outcome = await runSelfModifyProtocol({
-        targetPath: String(targetPath || ''),
-        newContent: String(newContent ?? ''),
+        targetPath: cleanTarget,
+        newContent: resolvedNewContent,
         testCode: typeof testCode === 'string' ? testCode : undefined,
       });
       return outcome.message;

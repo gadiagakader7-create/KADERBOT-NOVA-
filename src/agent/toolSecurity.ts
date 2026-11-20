@@ -68,8 +68,16 @@ export function validateToolArguments(tool: string, args: Record<string, unknown
   }
 
   if (tool === 'self_modify') {
-    if (!isNonEmptyString(args.targetPath) || !isNonEmptyString(args.newContent)) {
-      return 'targetPath et newContent requis pour self_modify.';
+    if (!isNonEmptyString(args.targetPath)) {
+      return 'targetPath requis pour self_modify.';
+    }
+    if (args.action === 'read') {
+      return null;
+    }
+    const hasFullContent = isNonEmptyString(args.newContent);
+    const hasSearchReplace = isNonEmptyString(args.search) && typeof args.replace === 'string';
+    if (!hasFullContent && !hasSearchReplace) {
+      return 'Fournis action="read", ou newContent complet, ou search + replace pour self_modify.';
     }
   }
   return null;

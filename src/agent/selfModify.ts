@@ -64,6 +64,21 @@ export function readTargetFile(targetPath: string): { path: string; content: str
 }
 
 /**
+ * Étape 1bis : Construit le nouveau contenu complet à partir d'un remplacement ciblé (sans troncature).
+ */
+export function buildTargetedPatchContent(targetPath: string, search: string, replace: string): string {
+  const { content } = readTargetFile(targetPath);
+  if (!search) {
+    throw new Error('Paramètre search vide pour le patch ciblé.');
+  }
+  const index = content.indexOf(search);
+  if (index === -1) {
+    throw new Error(`Extrait search introuvable dans ${targetPath}. Utilise action="read" pour vérifier le contenu exact.`);
+  }
+  return content.slice(0, index) + replace + content.slice(index + search.length);
+}
+
+/**
  * Étape 2 : Création d'un patch dans /workspace/patches/ avec statut "en_attente".
  */
 export function createPatchProposal(targetPath: string, nouveauContenu: string): WorkspacePatch {

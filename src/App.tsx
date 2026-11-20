@@ -1199,7 +1199,7 @@ export default function App() {
               : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...')
             : 'Exécute un outil...'
         );
-        const agentRes = await sendAgentMessage(text, historyFormatted);
+        const agentRes = await sendAgentMessage(text, historyFormatted, isAdmin);
         responseText = (agentRes.text || agentRes.question || '').trim();
 
         botSource =

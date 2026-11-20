@@ -278,15 +278,22 @@ export const ADMIN_ONLY_TOOLS: AgentToolDefinition[] = [
     type: 'function',
     function: {
       name: 'self_modify',
-      description: 'Propose un patch sur un fichier de src/ selon le protocole strict (lecture -> patch virtuel -> test sur copie virtuelle -> attente validation humaine).',
+      description: 'Lit un fichier de src/ (action="read") ou propose un patch selon le protocole strict (lecture -> patch virtuel -> test sur copie virtuelle -> attente validation humaine). Pour modifier une partie ciblée sans réécrire tout le fichier, fournis search + replace (ou newContent complet).',
       parameters: {
         type: 'object',
         properties: {
+          action: {
+            type: 'string',
+            enum: ['read', 'propose'],
+            description: '"read" pour lire le fichier cible dans src/ avant patch, ou "propose" (défaut) pour créer et tester un patch en_attente.',
+          },
           targetPath: { type: 'string', description: 'Chemin relatif dans src/ (ex: src/agent/toolRegistry.ts).' },
-          newContent: { type: 'string', description: 'Nouveau contenu complet proposé pour le fichier.' },
+          newContent: { type: 'string', description: 'Nouveau contenu complet proposé pour le fichier (si search/replace non utilisé).' },
+          search: { type: 'string', description: 'Extrait exact existant dans le fichier cible à remplacer (alternative sûre à newContent).' },
+          replace: { type: 'string', description: 'Nouveau texte qui remplace search dans le fichier cible.' },
           testCode: { type: 'string', description: 'Code de test optionnel à exécuter sur la copie virtuelle.' },
         },
-        required: ['targetPath', 'newContent'],
+        required: ['targetPath'],
       },
     },
   },

@@ -1,6 +1,5 @@
 import path from 'path';
 import fs from 'fs';
-import { timingSafeEqual } from 'crypto';
 import JSZip from 'jszip';
 import type { Express, RequestHandler } from 'express';
 import type { PendingAgentAction } from '../types/agent';
@@ -547,13 +546,38 @@ app.post('/api/agent', async (req, res) => {
     return res.status(429).json({ error: 'Limite atteinte : maximum 10 requêtes agentiques par minute.' });
   }
   try {
-    const { prompt, history = [], systemPrompt } = req.body;
+    const { prompt, history = [], systemPrompt, isAdmin = false } = req.body;
     if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ error: 'Prompt requis' });
     }
 
+    // Sélection stricte des outils via requireAdmin :
+    // ADMIN_TOOLS uniquement si isAdmin === true ET jeton administrateur valide ; sinon PUBLIC_TOOLS.
+    let isAdminAuthenticated = false;
+    if (isAdmin === true) {
+      const silentRes: any = {
+        status: () => silentRes,
+        json: () => silentRes,
+      };
+      requireAdmin(req, silentRes, () => {
+        isAdminAuthenticated = true;
+      });
+    }
+    const allowedTools = isAdminAuthenticated ? ADMIN_TOOLS : PUBLIC_TOOLS;
+
     // 1. Classification d'intention (CHAT vs AGENT)
-    const intent = await classifyIntentWithRouter(prompt, history);
+    const normalizedPrompt = prompt.toLowerCase();
+    const forceAdminAgent =
+      isAdminAuthenticated &&
+      /(patch|self_modify|code_workspace|execute_code|workspace|src\/|fichier|modifi|ex[ée]cut|python|javascript|test)/i.test(
+        normalizedPrompt
+      );
+    const intent = forceAdminAgent ? 'AGENT' : await classifyIntentWithRouter(prompt, history);
+
+    const basePrompt = systemPrompt || agentSystemPrompt;
+    const effectiveSystemPrompt = isAdminAuthenticated
+      ? `${basePrompt}\n\n[MODE ADMIN ATELIER ACTIF]\nOutils admin supplémentaires disponibles :\n- self_modify : pour inspecter un fichier de src/ (action="read", targetPath) puis proposer un patch virtuel en_attente (targetPath + search/replace ou newContent). Retourne toujours le patchId et le diff proposés, sans jamais modifier src/ directement.\n- code_workspace : gérer les fichiers virtuels dans /workspace/ (generated/, patches/, tests/).\n- execute_code : exécuter du Python ou JavaScript en sandbox isolé.`
+      : basePrompt;
 
     if (intent === 'CHAT') {
       const serverGroqKey = process.env.GROQ_API_KEY?.trim();
@@ -561,7 +585,7 @@ app.post('/api/agent', async (req, res) => {
         try {
           const chatRes = await callGroqWithFallback(
             prompt,
-            systemPrompt || agentSystemPrompt,
+            effectiveSystemPrompt,
             serverGroqKey,
             'openai/gpt-oss-120b',
             history
@@ -586,8 +610,8 @@ app.post('/api/agent', async (req, res) => {
         const formattedHistory = history
           .map((h: { role: string; content: string }) => `${h.role === 'user' ? 'Utilisateur' : 'KADERBOT'}: ${h.content}`)
           .join('\n');
-        const fullPrompt = `${systemPrompt || agentSystemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
-        const geminiRes = await callGeminiWithFallback(fullPrompt, systemPrompt || agentSystemPrompt);
+        const fullPrompt = `${effectiveSystemPrompt}\n\nHistorique récent:\n${formattedHistory}\n\nUtilisateur: ${prompt}\nKADERBOT:`;
+        const geminiRes = await callGeminiWithFallback(fullPrompt, effectiveSystemPrompt);
         return res.json({
           text: geminiRes.text,
           provider: 'gemini',
@@ -603,20 +627,7 @@ app.post('/api/agent', async (req, res) => {
     }
 
     // 2. Si intention AGENT (ou échec de CHAT) : Exécute la cascade agentique complète
-    // Sélection stricte des outils : ADMIN_TOOLS uniquement si ADMIN_TOKEN est valide
-    const expectedAdminToken = process.env.ADMIN_TOKEN?.trim() || '';
-    const authHeader = req.header('authorization') || '';
-    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const providedToken = req.header('x-admin-token')?.trim() || bearer;
-    let isAdminRequest = false;
-    if (expectedAdminToken && providedToken) {
-      const a = Buffer.from(expectedAdminToken);
-      const b = Buffer.from(providedToken);
-      isAdminRequest = a.length === b.length && timingSafeEqual(a, b);
-    }
-    const allowedTools = isAdminRequest ? ADMIN_TOOLS : PUBLIC_TOOLS;
-
-    const agentResult = await runAgentLoop(prompt, history, modelRouterDeps, systemPrompt, allowedTools);
+    const agentResult = await runAgentLoop(prompt, history, modelRouterDeps, effectiveSystemPrompt, allowedTools);
     return res.json({
       ...agentResult,
       routedTo: 'agent',

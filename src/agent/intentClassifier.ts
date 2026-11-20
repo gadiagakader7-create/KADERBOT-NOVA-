@@ -13,7 +13,7 @@ export async function classifyIntentWithRouter(
     return 'AGENT';
   }
 
-  // Détection directe des requêtes mémoire, préférences, notes et outils
+  // Détection directe des requêtes mémoire, préférences, notes, outils, patches et code
   if (
     clean.includes('mémoire') ||
     clean.includes('memoire') ||
@@ -30,7 +30,13 @@ export async function classifyIntentWithRouter(
     clean.includes('jaime') ||
     clean.includes('préfère') ||
     clean.includes('prefere') ||
-    clean.includes('qui suis-je')
+    clean.includes('qui suis-je') ||
+    clean.includes('patch') ||
+    clean.includes('self_modify') ||
+    clean.includes('code_workspace') ||
+    clean.includes('execute_code') ||
+    clean.includes('/workspace') ||
+    clean.includes('src/')
   ) {
     return 'AGENT';
   }
@@ -43,7 +49,7 @@ export async function classifyIntentWithRouter(
 
   try {
     const classificationPrompt = `Réponds uniquement CHAT ou AGENT.
-AGENT si le message demande une information en mémoire ou personnelle (ex: "Quels fruits j'aime ?"), une recherche web, une actualité, ou d'apprendre/noter un fait.
+AGENT si le message demande une information en mémoire ou personnelle (ex: "Quels fruits j'aime ?"), une recherche web, une actualité, d'apprendre/noter un fait, de générer/exécuter du code, ou de lire/modifier/patcher un fichier.
 CHAT uniquement pour les salutations simples ("bonjour", "coucou") ou de la pure discussion informelle.
 
 Message: "${userPrompt.replace(/"/g, '\\"')}"

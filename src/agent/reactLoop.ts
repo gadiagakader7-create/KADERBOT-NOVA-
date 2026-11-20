@@ -209,7 +209,8 @@ export async function runToolLoopWithModel(
         });
 
         // Tronquer le résultat d'un outil pour l'injecter proprement dans la conversation
-        let safeContent = (typeof toolResultStr === 'string' ? toolResultStr : JSON.stringify(toolResultStr)).slice(0, 5000);
+        const maxToolOutputLen = fnName === 'self_modify' ? 24000 : 5000;
+        let safeContent = (typeof toolResultStr === 'string' ? toolResultStr : JSON.stringify(toolResultStr)).slice(0, maxToolOutputLen);
         if (isError && fnName === 'open_url') {
           safeContent += ' [Note agent : Cette page est inaccessible ou protégée. Poursuis l’analyse avec une autre source ou résume avec les données déjà disponibles.]';
         }

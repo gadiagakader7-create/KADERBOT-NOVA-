@@ -284,20 +284,25 @@ export const apiService = {
 
   async sendAgentMessage(
     prompt: string,
-    history: Array<{ role: string; content: string }> = []
+    history: Array<{ role: string; content: string }> = [],
+    isAdmin = false
   ): Promise<AgentApiResponse> {
-    return sendAgentMessage(prompt, history);
+    return sendAgentMessage(prompt, history, isAdmin);
   },
 
   async callAgent(params: {
     prompt: string;
     history?: Array<{ role: string; content: string }>;
     systemPrompt?: string;
+    isAdmin?: boolean;
   }): Promise<AgentApiResponse> {
     const res = await fetch('/api/agent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-      body: JSON.stringify(params),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(params.isAdmin ? getAdminHeaders() : {}),
+      },
+      body: JSON.stringify({ ...params, isAdmin: Boolean(params.isAdmin) }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
@@ -359,7 +364,8 @@ export async function decideAgentAction(
 
 export async function sendAgentMessage(
   prompt: string,
-  history: Array<{ role: string; content: string }> = []
+  history: Array<{ role: string; content: string }> = [],
+  isAdmin = false
 ): Promise<AgentApiResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120000);
@@ -367,8 +373,11 @@ export async function sendAgentMessage(
   try {
     const res = await fetch('/api/agent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-      body: JSON.stringify({ prompt, history }),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(isAdmin ? getAdminHeaders() : {}),
+      },
+      body: JSON.stringify({ prompt, history, isAdmin: Boolean(isAdmin) }),
       signal: controller.signal,
     });
 
