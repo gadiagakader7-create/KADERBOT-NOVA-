@@ -3,6 +3,7 @@ export type ToolRisk = 'safe' | 'write' | 'external';
 export interface ToolPolicy {
   risk: ToolRisk;
   confirmation: boolean;
+  adminOnly?: boolean;
 }
 
 export type JsonSchema = Record<string, unknown>;

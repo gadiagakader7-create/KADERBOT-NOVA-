@@ -112,6 +112,18 @@ export async function runToolLoopWithModel(
           parsedArgs = {};
         }
 
+        const isToolAllowedInContext = deps.agentTools.some(t => t.function?.name === fnName);
+        if (!isToolAllowedInContext) {
+          const deniedMsg = `Accès refusé : l'outil ${fnName} n'est pas autorisé dans ce mode.`;
+          toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: deniedMsg });
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: deniedMsg,
+          });
+          continue;
+        }
+
         const validationError = deps.validateToolArguments(fnName, parsedArgs);
         if (validationError) {
           toolTrace.push({ tool: fnName, args: parsedArgs, status: 'error', errorMsg: validationError });

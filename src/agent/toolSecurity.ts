@@ -51,6 +51,27 @@ export function validateToolArguments(tool: string, args: Record<string, unknown
     if (String(args.text).length > 4000) return 'Message trop long.';
     if ((args.channel === 'sms' || args.channel === 'telegram') && args.confirm !== true) return 'Confirmation explicite requise pour ce canal.';
   }
+
+  if (tool === 'generate_code_for_canvas') {
+    if (!isNonEmptyString(args.language) || !isNonEmptyString(args.code)) return 'Langage et code requis.';
+    if (String(args.code).length > 50000) return 'Code trop volumineux.';
+  }
+
+  if (tool === 'code_workspace') {
+    if (!['list', 'read', 'write', 'delete'].includes(String(args.action))) return 'Action code_workspace invalide.';
+    if (args.action !== 'list' && !isNonEmptyString(args.path)) return 'Chemin virtuel requis.';
+  }
+
+  if (tool === 'execute_code') {
+    if (!['python', 'javascript'].includes(String(args.language))) return 'Langage non supporté.';
+    if (!isNonEmptyString(args.code) || String(args.code).length > 50000) return 'Code invalide ou trop volumineux.';
+  }
+
+  if (tool === 'self_modify') {
+    if (!isNonEmptyString(args.targetPath) || !isNonEmptyString(args.newContent)) {
+      return 'targetPath et newContent requis pour self_modify.';
+    }
+  }
   return null;
 }
 
@@ -60,6 +81,7 @@ export function summarizePendingAction(tool: string, args: Record<string, unknow
   if (tool === 'create_note') return `Créer la note « ${String(args.title)} »`;
   if (tool === 'send_message') return `Envoyer un message ${String(args.channel)} à ${String(args.target)} : « ${String(args.text).slice(0, 180)} »`;
   if (tool === 'create_event') return `Créer l’événement « ${String(args.title || 'sans titre')} »`;
+  if (tool === 'self_modify') return `Proposer un patch sur « ${String(args.targetPath || '')} »`;
   return `Autoriser l’action ${tool}`;
 }
 

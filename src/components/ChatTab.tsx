@@ -44,6 +44,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { ChatMessage, ChatThread, PendingAgentAction, ToolExecutionTrace } from '../types/kaderbot';
+import { CodeCanvas } from './CodeCanvas';
 
 const markdownComponents = {
   p: ({ children }: any) => (
@@ -64,13 +65,38 @@ const markdownComponents = {
     <strong className="font-semibold text-emerald-300">{children}</strong>
   ),
   em: ({ children }: any) => <em className="italic text-cyan-200">{children}</em>,
+  pre: ({ node, children }: any) => {
+    const codeNode = node?.children?.[0];
+    if (codeNode && codeNode.type === 'element' && codeNode.tagName === 'code') {
+      const classNames: string[] = Array.isArray(codeNode.properties?.className)
+        ? codeNode.properties.className
+        : typeof codeNode.properties?.className === 'string'
+          ? [codeNode.properties.className]
+          : [];
+      const lang = classNames
+        .map((c: string) => /language-([^\s]+)/.exec(c)?.[1])
+        .find(Boolean);
+      const extractText = (n: any): string => {
+        if (!n) return '';
+        if (n.type === 'text') return n.value || '';
+        if (Array.isArray(n.children)) return n.children.map(extractText).join('');
+        return '';
+      };
+      const rawCode = extractText(codeNode).replace(/\n$/, '');
+      return <CodeCanvas code={rawCode} language={lang || 'code'} />;
+    }
+    return <pre className="my-2.5 overflow-x-auto">{children}</pre>;
+  },
   code: ({ className, children }: any) => {
-    const isMultiLine = typeof children === 'string' && children.includes('\n');
-    if (className || isMultiLine) {
+    const match = /language-([^\s]+)/.exec(className || '');
+    const raw = String(children ?? '');
+    const isMultiLine = raw.includes('\n');
+    if (match || isMultiLine) {
       return (
-        <pre className="p-3 my-2.5 rounded-xl bg-[#080B11] border border-gray-800 font-mono text-[11px] sm:text-xs overflow-x-auto max-w-full text-emerald-200 leading-normal">
-          <code className={className}>{children}</code>
-        </pre>
+        <CodeCanvas
+          code={raw.replace(/\n$/, '')}
+          language={match ? match[1] : 'code'}
+        />
       );
     }
     return (
@@ -168,10 +194,8 @@ const markdownComponents = {
  * en syntaxe standard $inline$ et $$bloc$$ reconnue par remark-math et rehype-katex,
  * sans jamais corrompre les formules contenant déjà des délimiteurs $ ou $$.
  */
-function formatMarkdownMath(content: string): string {
-  if (!content) return '';
-
-  let formatted = content;
+function formatMarkdownMathSegment(segment: string): string {
+  let formatted = segment;
 
   // 1. Convertit les blocs LaTeX \[ ... \] en $$ ... $$
   formatted = formatted.replace(/\\\[([\s\S]*?)\\\]/g, (_match, math) => `$$\n${math.trim()}\n$$`);
@@ -234,6 +258,16 @@ function formatMarkdownMath(content: string): string {
   });
 
   return processed.join('\n');
+}
+
+function formatMarkdownMath(content: string): string {
+  if (!content) return '';
+
+  // Protège les blocs de code ```...``` et le code en ligne `...` contre toute transformation LaTeX
+  const parts = content.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  return parts
+    .map((part, idx) => (idx % 2 === 1 ? part : formatMarkdownMathSegment(part)))
+    .join('');
 }
 
 interface MarkdownErrorBoundaryProps {

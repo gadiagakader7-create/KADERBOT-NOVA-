@@ -15,6 +15,7 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 export const MEMORY_FILE = path.join(DATA_DIR, 'kaderbot_storage.json');
+export const WORKSPACE_PATCHES_FILE = path.join(DATA_DIR, 'workspace_patches.json');
 export const BRAVE_USAGE_FILE = path.join(DATA_DIR, 'brave_usage.json');
 export const NOTES_FILE = path.join(DATA_DIR, 'kaderbot_notes.json');
 export const ACTION_LOG_FILE = path.join(DATA_DIR, 'kaderbot_action_logs.json');
@@ -95,6 +96,52 @@ export function writeStorageFile(data: any): void {
     );
   } catch (err) {
     console.error('Erreur écriture kaderbot_storage.json:', err);
+  }
+}
+
+export interface WorkspacePatchesDiskData {
+  patches: any[];
+  tests: any[];
+  updatedAt?: string;
+}
+
+export function readWorkspacePatchesFile(): { patches: any[]; tests: any[]; corrupted: boolean } {
+  if (!fs.existsSync(WORKSPACE_PATCHES_FILE)) {
+    return { patches: [], tests: [], corrupted: false };
+  }
+  try {
+    const raw = fs.readFileSync(WORKSPACE_PATCHES_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.warn('Format invalide dans workspace_patches.json : réinitialisation d’un workspace vide.');
+      return { patches: [], tests: [], corrupted: true };
+    }
+    const patches = Array.isArray(parsed.patches) ? parsed.patches : [];
+    const tests = Array.isArray(parsed.tests) ? parsed.tests : [];
+    return { patches, tests, corrupted: false };
+  } catch (err) {
+    console.warn('Fichier workspace_patches.json corrompu, redémarrage sur un workspace vide :', err);
+    return { patches: [], tests: [], corrupted: true };
+  }
+}
+
+export function writeWorkspacePatchesFile(data: WorkspacePatchesDiskData): void {
+  try {
+    fs.writeFileSync(
+      WORKSPACE_PATCHES_FILE,
+      JSON.stringify(
+        {
+          patches: Array.isArray(data.patches) ? data.patches : [],
+          tests: Array.isArray(data.tests) ? data.tests : [],
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+  } catch (err) {
+    console.error('Erreur écriture workspace_patches.json:', err);
   }
 }
 

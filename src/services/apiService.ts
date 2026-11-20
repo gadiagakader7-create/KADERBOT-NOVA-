@@ -296,7 +296,7 @@ export const apiService = {
   }): Promise<AgentApiResponse> {
     const res = await fetch('/api/agent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
       body: JSON.stringify(params),
     });
     if (!res.ok) {
@@ -367,7 +367,7 @@ export async function sendAgentMessage(
   try {
     const res = await fetch('/api/agent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
       body: JSON.stringify({ prompt, history }),
       signal: controller.signal,
     });

@@ -8,6 +8,8 @@ import { createPendingAction, validateToolArguments } from './src/agent/toolSecu
 import { runAgentLoop } from './src/agent/modelRouter';
 import { classifyIntentWithRouter } from './src/agent/intentClassifier';
 import { registerHttpRoutes } from './src/server/httpRoutes';
+import { registerAdminRoutes } from './src/server/adminRoutes';
+import { loadWorkspaceFromDisk } from './src/agent/codeWorkspace';
 import {
   callGeminiWithFallback,
   callGroqWithFallback,
@@ -137,6 +139,27 @@ registerHttpRoutes(app, {
   pendingAgentActions,
   toolImplementations: TOOL_IMPLEMENTATIONS,
   validateToolArguments,
+});
+
+// === 4b. ROUTES ADMIN D'AUTO-ÉVOLUTION & SANDBOX ===
+registerAdminRoutes(app, {
+  requireAdmin,
+  projectRoot: PROJECT_ROOT,
+});
+
+// Rechargement des patches et résultats de tests persistés sur disque au démarrage
+const workspaceReload = loadWorkspaceFromDisk();
+if (workspaceReload.corrupted) {
+  console.warn('[WORKSPACE] Fichier workspace_patches.json corrompu : workspace réinitialisé à vide.');
+} else if (workspaceReload.patchesLoaded > 0 || workspaceReload.testsLoaded > 0) {
+  console.log(
+    `[WORKSPACE] Rechargé depuis le disque : ${workspaceReload.patchesLoaded} patch(es), ${workspaceReload.testsLoaded} test(s).`
+  );
+}
+
+// Route publique légère pour UptimeRobot (sans token, sans exposition admin)
+app.get('/health', (_req, res) => {
+  return res.json({ ok: true });
 });
 
 // === 5. SERVEUR DEV VITE / PRODUCTION ===

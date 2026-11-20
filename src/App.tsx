@@ -5,6 +5,7 @@ import {
   Scale,
   Wrench,
   FolderTree,
+  Code2,
 } from 'lucide-react';
 
 import {
@@ -52,6 +53,7 @@ import { KnowledgeGraphTab } from './components/KnowledgeGraphTab';
 import { RulesTab } from './components/RulesTab';
 import { ToolsTab } from './components/ToolsTab';
 import { SessionsTab } from './components/SessionsTab';
+import { CodeWorkspaceTab } from './components/CodeWorkspaceTab';
 import { ActionMenuModal } from './components/ActionMenuModal';
 import { SettingsModal } from './components/SettingsModal';
 import { apiService, decideAgentAction, sendAgentMessage } from './services/apiService';
@@ -60,7 +62,7 @@ export default function App() {
   // Le paramètre ?admin=true ne suffit pas : le serveur doit valider ADMIN_TOKEN.
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions' | 'workspace'>('chat');
 
   // Configuration générale de KADERBOT NOVA
   const NOVA_DEFAULT_SYSTEM_PROMPT =
@@ -139,7 +141,7 @@ export default function App() {
 
   // En mode public, restreindre les onglets à 'chat' ou 'tools'
   useEffect(() => {
-    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions')) {
+    if (!isAdmin && (activeTab === 'graph' || activeTab === 'rules' || activeTab === 'sessions' || activeTab === 'workspace')) {
       setActiveTab('chat');
     }
   }, [isAdmin, activeTab]);
@@ -1448,6 +1450,10 @@ export default function App() {
             onPullMemoryFromServer={handlePullMemoryFromServer}
           />
         )}
+
+        {activeTab === 'workspace' && isAdmin && (
+          <CodeWorkspaceTab isAdmin={isAdmin} />
+        )}
       </main>
 
       {/* Barre de navigation inférieure */}
@@ -1515,6 +1521,20 @@ export default function App() {
           >
             <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
             <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
+          </button>
+        )}
+
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('workspace')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+              activeTab === 'workspace'
+                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Code2 className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Atelier Code</span>
           </button>
         )}
       </nav>

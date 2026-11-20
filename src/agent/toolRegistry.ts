@@ -1,10 +1,10 @@
 import type { AgentToolDefinition, ToolPolicy } from '../types/agent';
 
 /**
- * Registre unique des outils exposés au modèle agentique.
- * Les schémas restent compatibles OpenAI/Groq/OpenRouter.
+ * Outils accessibles à l'interface publique et à l'agent général.
+ * Aucun outil d'exécution de code ou de modification du code source n'y figure.
  */
-export const AGENT_TOOL_REGISTRY: AgentToolDefinition[] = [
+export const PUBLIC_TOOLS: AgentToolDefinition[] = [
   {
     type: 'function',
     function: {
@@ -214,9 +214,86 @@ export const AGENT_TOOL_REGISTRY: AgentToolDefinition[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_code_for_canvas',
+      description: 'Génère un extrait de code texte formaté pour affichage dans CodeCanvas sans aucune exécution.',
+      parameters: {
+        type: 'object',
+        properties: {
+          language: {
+            type: 'string',
+            description: 'Langage du code pour la coloration/affichage (ex: python, javascript, typescript, html, css).',
+          },
+          code: {
+            type: 'string',
+            description: 'Le code source texte à afficher dans CodeCanvas.',
+          },
+        },
+        required: ['language', 'code'],
+      },
+    },
+  },
 ];
 
+/**
+ * Outils strictement réservés au mode Admin (Atelier d'auto-évolution et sandbox isolé).
+ */
+export const ADMIN_ONLY_TOOLS: AgentToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'code_workspace',
+      description: 'Gère le stockage virtuel /workspace/ (list, read, write, delete dans /workspace/generated/, /workspace/patches/, /workspace/tests/).',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'read', 'write', 'delete'] },
+          path: { type: 'string', description: 'Chemin virtuel sous /workspace/.' },
+          content: { type: 'string', description: 'Contenu à écrire pour action=write.' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'execute_code',
+      description: 'Exécute du code Python ou JavaScript dans un sandbox isolé sans réseau ni accès disque réel (Admin uniquement).',
+      parameters: {
+        type: 'object',
+        properties: {
+          language: { type: 'string', enum: ['python', 'javascript'] },
+          code: { type: 'string' },
+          isTest: { type: 'boolean' },
+          timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000 },
+        },
+        required: ['language', 'code'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'self_modify',
+      description: 'Propose un patch sur un fichier de src/ selon le protocole strict (lecture -> patch virtuel -> test sur copie virtuelle -> attente validation humaine).',
+      parameters: {
+        type: 'object',
+        properties: {
+          targetPath: { type: 'string', description: 'Chemin relatif dans src/ (ex: src/agent/toolRegistry.ts).' },
+          newContent: { type: 'string', description: 'Nouveau contenu complet proposé pour le fichier.' },
+          testCode: { type: 'string', description: 'Code de test optionnel à exécuter sur la copie virtuelle.' },
+        },
+        required: ['targetPath', 'newContent'],
+      },
+    },
+  },
+];
 
+export const ADMIN_TOOLS: AgentToolDefinition[] = [...PUBLIC_TOOLS, ...ADMIN_ONLY_TOOLS];
+export const AGENT_TOOL_REGISTRY: AgentToolDefinition[] = PUBLIC_TOOLS;
 
 /** Politique de risque associée à chaque outil agentique : l'agent gère les confirmations de manière conversationnelle. */
 export const TOOL_POLICIES: Record<string, ToolPolicy> = {
@@ -227,11 +304,15 @@ export const TOOL_POLICIES: Record<string, ToolPolicy> = {
   search_notes: { risk: 'safe', confirmation: false },
   list_events: { risk: 'safe', confirmation: false },
   ask_user: { risk: 'safe', confirmation: false },
+  generate_code_for_canvas: { risk: 'safe', confirmation: false },
   memo_store: { risk: 'write', confirmation: false },
   link_concepts: { risk: 'write', confirmation: false },
   create_note: { risk: 'write', confirmation: false },
   create_event: { risk: 'write', confirmation: false },
   send_message: { risk: 'external', confirmation: false },
+  code_workspace: { risk: 'write', confirmation: false, adminOnly: true },
+  execute_code: { risk: 'write', confirmation: false, adminOnly: true },
+  self_modify: { risk: 'write', confirmation: false, adminOnly: true },
 };
 
-export const AGENT_TOOLS = AGENT_TOOL_REGISTRY;
+export const AGENT_TOOLS = PUBLIC_TOOLS;

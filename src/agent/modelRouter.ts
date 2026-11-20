@@ -1,5 +1,6 @@
 import { runToolLoopWithModel } from './reactLoop';
 import type { ReactLoopDeps } from './reactLoop';
+import type { AgentToolDefinition } from '../types/agent';
 
 export interface ModelRouterDeps {
   groqApiKey?: string;
@@ -14,7 +15,8 @@ export async function runAgentLoop(
   userPrompt: string,
   history: Array<{ role: string; content: string }> = [],
   deps: ModelRouterDeps,
-  systemPrompt?: string
+  systemPrompt?: string,
+  agentToolsOverride?: AgentToolDefinition[]
 ): Promise<{
   text?: string;
   provider: string;
@@ -27,6 +29,9 @@ export async function runAgentLoop(
 }> {
   const groqApiKey = deps.groqApiKey?.trim();
   const openRouterApiKey = deps.openRouterApiKey?.trim();
+  const effectiveLoopDeps: ReactLoopDeps = agentToolsOverride
+    ? { ...deps.reactLoopDeps, agentTools: agentToolsOverride }
+    : deps.reactLoopDeps;
 
   // === MAILLON 1 : Groq openai/gpt-oss-120b (avec tools) ===
   if (groqApiKey) {
@@ -38,7 +43,7 @@ export async function runAgentLoop(
         'groq-agent',
         userPrompt,
         history,
-        deps.reactLoopDeps,
+        effectiveLoopDeps,
         systemPrompt
       );
       return res;
@@ -57,7 +62,7 @@ export async function runAgentLoop(
         'groq-agent',
         userPrompt,
         history,
-        deps.reactLoopDeps,
+        effectiveLoopDeps,
         systemPrompt
       );
       return {
@@ -114,7 +119,7 @@ export async function runAgentLoop(
         'openrouter-agent',
         userPrompt,
         history,
-        deps.reactLoopDeps,
+        effectiveLoopDeps,
         systemPrompt,
         {
           'HTTP-Referer': 'https://kaderbot.app',

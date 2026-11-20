@@ -1,9 +1,11 @@
 import path from 'path';
 import fs from 'fs';
+import { timingSafeEqual } from 'crypto';
 import JSZip from 'jszip';
 import type { Express, RequestHandler } from 'express';
 import type { PendingAgentAction } from '../types/agent';
 import type { ModelRouterDeps } from '../agent/modelRouter';
+import { ADMIN_TOOLS, PUBLIC_TOOLS } from '../agent/toolRegistry';
 
 type AgentActionLog = Record<string, unknown>;
 type KaderbotEvent = Record<string, unknown>;
@@ -601,7 +603,20 @@ app.post('/api/agent', async (req, res) => {
     }
 
     // 2. Si intention AGENT (ou échec de CHAT) : Exécute la cascade agentique complète
-    const agentResult = await runAgentLoop(prompt, history, modelRouterDeps, systemPrompt);
+    // Sélection stricte des outils : ADMIN_TOOLS uniquement si ADMIN_TOKEN est valide
+    const expectedAdminToken = process.env.ADMIN_TOKEN?.trim() || '';
+    const authHeader = req.header('authorization') || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const providedToken = req.header('x-admin-token')?.trim() || bearer;
+    let isAdminRequest = false;
+    if (expectedAdminToken && providedToken) {
+      const a = Buffer.from(expectedAdminToken);
+      const b = Buffer.from(providedToken);
+      isAdminRequest = a.length === b.length && timingSafeEqual(a, b);
+    }
+    const allowedTools = isAdminRequest ? ADMIN_TOOLS : PUBLIC_TOOLS;
+
+    const agentResult = await runAgentLoop(prompt, history, modelRouterDeps, systemPrompt, allowedTools);
     return res.json({
       ...agentResult,
       routedTo: 'agent',

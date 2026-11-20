@@ -1,4 +1,14 @@
 import { randomUUID } from 'crypto';
+import {
+  deleteFile as deleteWorkspaceFile,
+  listFiles as listWorkspaceFiles,
+  normalizeWorkspacePath,
+  readFile as readWorkspaceFile,
+  saveTestResult,
+  writeFile as writeWorkspaceFile,
+} from './codeWorkspace';
+import { executeCode } from './codeExecutor';
+import { runSelfModifyProtocol } from './selfModify';
 
 export type ToolImplementation = (args: Record<string, any>) => Promise<string>;
 
@@ -322,6 +332,89 @@ return {
 
   ask_user: async ({ question }: { question?: string }) => {
     return `Question posée à l'utilisateur : ${question || 'Pouvez-vous préciser votre demande ?'}`;
+  },
+
+  generate_code_for_canvas: async ({ language, code }: { language?: string; code?: string }) => {
+    const cleanLang = (language || 'text').trim().replace(/[^a-zA-Z0-9_-]/g, '') || 'text';
+    const cleanCode = String(code ?? '').replace(/\n$/, '');
+    return `\`\`\`${cleanLang}\n${cleanCode}\n\`\`\``;
+  },
+
+  code_workspace: async ({ action, path: filePath, content }: { action?: string; path?: string; content?: string }) => {
+    try {
+      if (action === 'list') {
+        const files = listWorkspaceFiles(filePath || '/workspace/');
+        if (files.length === 0) return 'Le stockage virtuel /workspace/ est actuellement vide.';
+        return files.map(f => `${f.path} (${f.size} octets)`).join('\n');
+      }
+      if (action === 'read') {
+        if (!filePath) return 'Chemin requis.';
+        const data = readWorkspaceFile(filePath);
+        return data !== null ? data : `Fichier virtuel introuvable : ${filePath}`;
+      }
+      if (action === 'write') {
+        if (!filePath) return 'Chemin requis.';
+        const norm = normalizeWorkspacePath(filePath, '/workspace/generated/');
+        if (norm.startsWith('/workspace/patches/')) {
+          return 'Erreur : utilisez self_modify pour créer un patch dans /workspace/patches/.';
+        }
+        const entry = writeWorkspaceFile(norm, String(content ?? ''));
+        return `Fichier virtuel enregistré : ${entry.path} (${entry.size} octets).`;
+      }
+      if (action === 'delete') {
+        if (!filePath) return 'Chemin requis.';
+        const deleted = deleteWorkspaceFile(filePath);
+        return deleted ? `Fichier virtuel supprimé : ${filePath}` : `Fichier introuvable : ${filePath}`;
+      }
+      return `Action code_workspace inconnue : ${action}`;
+    } catch (err: any) {
+      return `Erreur code_workspace : ${err?.message || 'Erreur inconnue'}`;
+    }
+  },
+
+  execute_code: async ({ language, code, isTest, timeoutMs }: { language?: 'python' | 'javascript'; code?: string; isTest?: boolean; timeoutMs?: number }) => {
+    if (language !== 'python' && language !== 'javascript') {
+      return 'Erreur : langage doit être "python" ou "javascript".';
+    }
+    const result = await executeCode({
+      language,
+      code: String(code ?? ''),
+      isTest: Boolean(isTest),
+      timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : undefined,
+    });
+    if (Array.isArray(result.filesCreated)) {
+      for (const f of result.filesCreated) {
+        try {
+          const norm = normalizeWorkspacePath(f.path, '/workspace/generated/');
+          if (!norm.startsWith('/workspace/patches/')) {
+            writeWorkspaceFile(norm, f.content);
+          }
+        } catch {}
+      }
+    }
+    saveTestResult({
+      language,
+      label: `Agent execute_code (${language})`,
+      success: result.success,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      durationMs: result.durationMs,
+      filesCreated: result.filesCreated,
+    });
+    return JSON.stringify(result, null, 2);
+  },
+
+  self_modify: async ({ targetPath, newContent, testCode }: { targetPath?: string; newContent?: string; testCode?: string }) => {
+    try {
+      const outcome = await runSelfModifyProtocol({
+        targetPath: String(targetPath || ''),
+        newContent: String(newContent ?? ''),
+        testCode: typeof testCode === 'string' ? testCode : undefined,
+      });
+      return outcome.message;
+    } catch (err: any) {
+      return `Erreur protocole self_modify : ${err?.message || 'Erreur inconnue'}`;
+    }
   },
 };
 }
