@@ -44,6 +44,8 @@ import {
   RefreshCw,
   Wrench,
   ShieldCheck,
+  Paperclip,
+  Library,
 } from 'lucide-react';
 import { ChatMessage, ChatThread, PendingAgentAction, ToolExecutionTrace } from '../types/kaderbot';
 import { CodeCanvas } from './CodeCanvas';
@@ -838,6 +840,8 @@ interface ChatTabProps {
   onAgentActionDecision?: (actionId: string, decision: 'approve' | 'reject') => Promise<void>;
   onRegenerateMessage?: (text: string) => void;
   onOpenTools?: () => void;
+  onOpenLibrary?: () => void;
+  onOpenAttach?: () => void;
   onOpenAdminDrawer?: () => void;
   isAdminDrawerOpen?: boolean;
   onCloseAdminDrawer?: () => void;
@@ -867,6 +871,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onAgentActionDecision,
   onRegenerateMessage,
   onOpenTools,
+  onOpenLibrary,
+  onOpenAttach,
   onOpenAdminDrawer,
   isAdminDrawerOpen = false,
   onCloseAdminDrawer,
@@ -1151,19 +1157,33 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               </button>
             </div>
 
-            {/* "Atelier Texte" Button */}
-            {onOpenTools && (
-              <div className="p-3 border-b border-gray-800/80">
-                <button
-                  onClick={() => {
-                    setIsHistoryOpen(false);
-                    onOpenTools();
-                  }}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 font-bold text-xs transition active:scale-98"
-                >
-                  <Wrench className="w-4 h-4 text-emerald-400" />
-                  <span>Atelier Texte</span>
-                </button>
+            {/* "Bibliothèque" et "Atelier Texte" */}
+            {(onOpenLibrary || onOpenTools) && (
+              <div className="p-3 border-b border-gray-800/80 space-y-2">
+                {onOpenLibrary && (
+                  <button
+                    onClick={() => {
+                      setIsHistoryOpen(false);
+                      onOpenLibrary();
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 font-bold text-xs transition active:scale-98"
+                  >
+                    <Library className="w-4 h-4 text-emerald-400" />
+                    <span>Bibliothèque</span>
+                  </button>
+                )}
+                {onOpenTools && (
+                  <button
+                    onClick={() => {
+                      setIsHistoryOpen(false);
+                      onOpenTools();
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 font-bold text-xs transition active:scale-98"
+                  >
+                    <Wrench className="w-4 h-4 text-emerald-400" />
+                    <span>Atelier Texte</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -1675,6 +1695,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       <div className="shrink-0 flex-shrink-0 px-3.5 sm:px-6 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-1 bg-transparent z-20">
         <form onSubmit={handleFormSubmit} className="max-w-4xl mx-auto">
           <div className="flex items-end gap-2 rounded-2xl bg-[#121622]/90 backdrop-blur-md border border-gray-800/90 hover:border-gray-700/80 focus-within:border-emerald-500/50 p-2 shadow-2xl shadow-black/60 transition-all">
+            {onOpenAttach && (
+              <button
+                type="button"
+                onClick={onOpenAttach}
+                className="p-2.5 rounded-xl text-gray-400 hover:bg-gray-800/70 hover:text-emerald-300 transition-all shrink-0"
+                title="Joindre un document"
+                aria-label="Joindre un document"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+            )}
             <textarea
               ref={inputRef}
               rows={1}

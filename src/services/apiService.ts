@@ -322,6 +322,30 @@ export const apiService = {
     if (!res.ok) return { ok: false };
     return await res.json();
   },
+
+  async extractFileText(file: File): Promise<{
+    name: string;
+    type: string;
+    size: number;
+    text: string;
+  }> {
+    const buffer = await file.arrayBuffer();
+    const res = await fetch('/api/files/extract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-File-Name': encodeURIComponent(file.name),
+      },
+      body: buffer,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+      throw new Error(err.error || `Erreur extraction (${res.status})`);
+    }
+
+    return await res.json();
+  },
 };
 
 export interface AgentApiResponse {

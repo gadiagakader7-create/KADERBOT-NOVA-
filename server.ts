@@ -9,6 +9,7 @@ import { runAgentLoop } from './src/agent/modelRouter';
 import { classifyIntentWithRouter } from './src/agent/intentClassifier';
 import { registerHttpRoutes } from './src/server/httpRoutes';
 import { registerAdminRoutes } from './src/server/adminRoutes';
+import { registerFileRoutes } from './src/server/fileRoutes';
 import { loadWorkspaceFromDisk } from './src/agent/codeWorkspace';
 import {
   callGeminiWithFallback,
@@ -146,6 +147,9 @@ registerAdminRoutes(app, {
   requireAdmin,
   projectRoot: PROJECT_ROOT,
 });
+
+// === 4c. EXTRACTION DE DOCUMENTS (PUBLIQUE, SANS STOCKAGE) ===
+registerFileRoutes(app);
 
 // Rechargement des patches et résultats de tests persistés sur disque au démarrage
 const workspaceReload = loadWorkspaceFromDisk();

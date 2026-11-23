@@ -68,6 +68,16 @@ export interface ChatThread {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  docIds?: string[];
+}
+
+export interface LibraryDoc {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  addedAt: string;
+  text: string;
 }
 
 export interface IdeaItem {

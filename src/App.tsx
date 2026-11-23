@@ -13,6 +13,7 @@ import {
   AppConfig,
   ChatMessage,
   ChatThread,
+  LibraryDoc,
   LinksStore,
   MemoryStore,
   RulesStore,
@@ -54,15 +55,18 @@ import { RulesTab } from './components/RulesTab';
 import { ToolsTab } from './components/ToolsTab';
 import { SessionsTab } from './components/SessionsTab';
 import { CodeWorkspaceTab } from './components/CodeWorkspaceTab';
+import { LibraryTab } from './components/LibraryTab';
+import { AttachSheet } from './components/AttachSheet';
 import { ActionMenuModal } from './components/ActionMenuModal';
 import { SettingsModal } from './components/SettingsModal';
 import { apiService, decideAgentAction, sendAgentMessage } from './services/apiService';
+import { getDoc } from './services/libraryService';
 
 export default function App() {
   // Le paramètre ?admin=true ne suffit pas : le serveur doit valider ADMIN_TOKEN.
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions' | 'workspace'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'graph' | 'rules' | 'tools' | 'sessions' | 'workspace' | 'library'>('chat');
 
   // Configuration générale de KADERBOT NOVA
   const NOVA_DEFAULT_SYSTEM_PROMPT =
@@ -149,6 +153,8 @@ export default function App() {
   const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAdminDrawerOpen, setIsAdminDrawerOpen] = useState(false);
+  const [isAttachSheetOpen, setIsAttachSheetOpen] = useState(false);
+  const [activeDocIds, setActiveDocIds] = useState<string[]>([]);
 
   // Gestion des sessions
   const [sessions, setSessions] = useState<string[]>(() => {
@@ -429,11 +435,64 @@ export default function App() {
     setMessages(prev => prev.map(m => (m.id === id ? { ...m, isNew: false } : m)));
   };
 
+  const syncActiveDocsToThread = (nextIds: string[]) => {
+    const currentThreadId = activeThreadIdRef.current;
+    if (!currentThreadId) return;
+    setThreads(prev =>
+      prev.map(t => (t.id === currentThreadId ? { ...t, docIds: nextIds } : t))
+    );
+  };
+
+  const handleToggleDoc = (id: string): { ok: boolean; error?: string } => {
+    if (activeDocIds.includes(id)) {
+      const next = activeDocIds.filter(docId => docId !== id);
+      setActiveDocIds(next);
+      syncActiveDocsToThread(next);
+      return { ok: true };
+    }
+    if (activeDocIds.length >= 3) {
+      return { ok: false, error: "Maximum 3 documents activés. Désactive-en un d'abord." };
+    }
+    const next = [...activeDocIds, id];
+    setActiveDocIds(next);
+    syncActiveDocsToThread(next);
+    return { ok: true };
+  };
+
+  const handleDocDeleted = (id: string) => {
+    if (activeDocIds.includes(id)) {
+      const next = activeDocIds.filter(docId => docId !== id);
+      setActiveDocIds(next);
+    }
+    setThreads(prev =>
+      prev.map(t =>
+        t.docIds && t.docIds.includes(id)
+          ? { ...t, docIds: t.docIds.filter(docId => docId !== id) }
+          : t
+      )
+    );
+  };
+
+  const handleAttachFileAdded = (doc: LibraryDoc): { ok: boolean; error?: string } => {
+    if (activeDocIds.includes(doc.id)) {
+      return { ok: true };
+    }
+    if (activeDocIds.length >= 3) {
+      return { ok: false, error: "Maximum 3 documents activés. Désactive-en un d'abord." };
+    }
+    const next = [...activeDocIds, doc.id];
+    setActiveDocIds(next);
+    syncActiveDocsToThread(next);
+    addBotMessage(`📄 ${doc.name} ajouté et activé.`, { source: 'systeme' });
+    return { ok: true };
+  };
+
   const handleSelectThread = (threadId: string) => {
     const target = threads.find(t => t.id === threadId);
     if (!target) return;
     activeThreadIdRef.current = target.id;
     setActiveThreadId(target.id);
+    setActiveDocIds(target.docIds ? [...target.docIds] : []);
     setMessages(
       target.messages && target.messages.length > 0
         ? target.messages.map(m => ({ ...m, isNew: false }))
@@ -444,6 +503,7 @@ export default function App() {
   const handleNewThread = () => {
     activeThreadIdRef.current = null;
     setActiveThreadId(null);
+    setActiveDocIds([]);
     setMessages([]);
   };
 
@@ -632,6 +692,7 @@ export default function App() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         messages: [...messages, userMsg],
+        docIds: activeDocIds.length > 0 ? [...activeDocIds] : undefined,
       };
 
       setThreads(prev => [newThread, ...prev]);
@@ -654,6 +715,50 @@ export default function App() {
     const setPublicThinkingStatus = (status: string) => {
       if (!isAdmin) setThinkingStatus(status);
     };
+
+    // Vérification des documents activés pour cette discussion
+    const MAX_DOC_CHARS = 12000;
+    let activeDocsForPrompt: LibraryDoc[] = [];
+    if (activeDocIds.length > 0) {
+      try {
+        const loaded = await Promise.all(activeDocIds.map(id => getDoc(id)));
+        activeDocsForPrompt = loaded.filter((d): d is LibraryDoc => Boolean(d));
+      } catch {
+        activeDocsForPrompt = [];
+      }
+    }
+
+    const hasActiveDocs = activeDocsForPrompt.length > 0;
+    let promptToSend = text;
+    let wasDocsTruncated = false;
+
+    if (hasActiveDocs) {
+      const totalDocChars = activeDocsForPrompt.reduce((sum, d) => sum + d.text.length, 0);
+      wasDocsTruncated = totalDocChars > MAX_DOC_CHARS;
+
+      let remainingBudget = MAX_DOC_CHARS;
+      const sortedByLen = [...activeDocsForPrompt].sort((a, b) => a.text.length - b.text.length);
+      const allocationMap = new Map<string, number>();
+      sortedByLen.forEach((doc, idx) => {
+        const docsLeft = sortedByLen.length - idx;
+        const fairShare = Math.floor(remainingBudget / docsLeft);
+        const used = Math.min(doc.text.length, fairShare);
+        allocationMap.set(doc.id, used);
+        remainingBudget -= used;
+      });
+
+      const docsBlock = activeDocsForPrompt
+        .map(doc => {
+          const limit = allocationMap.get(doc.id) ?? doc.text.length;
+          const snippet = doc.text.length > limit ? doc.text.slice(0, limit) : doc.text;
+          return `[${doc.name}]\n${snippet}`;
+        })
+        .join('\n\n');
+
+      promptToSend = `DOCUMENT(S) FOURNI(S) PAR L'UTILISATEUR :\n${docsBlock}\n\nQUESTION :\n${text}`;
+    }
+
+    if (!hasActiveDocs) {
 
     // 1. Commandes de contexte explicites
     if (msgLower === 'reset contexte' || msgLower === 'vider contexte') {
@@ -924,13 +1029,16 @@ export default function App() {
         return;
       }
     }
+    } // Fin de if (!hasActiveDocs) pour commandes et salutations
 
     // =========================================================================
     // ÉTAPE 1 : LOCAL SÉMANTIQUE (Embeddings Transformers.js côté navigateur)
     // =========================================================================
     const isContinueCommand = /^(continue|continuer|suite|poursuis|poursuivre|vas-y|go)\b/i.test(text.trim());
     setThinkingStatus(
-      isAdmin
+      hasActiveDocs
+        ? (isAdmin ? 'Analyse des documents activés...' : 'Analyse du document...')
+        : isAdmin
         ? (isContinueCommand
           ? 'Poursuite de la recherche et synthèse en cours...'
           : 'Recherche et réflexion en cours...')
@@ -938,6 +1046,7 @@ export default function App() {
     );
     setIsThinking(true);
     try {
+      if (!hasActiveDocs) {
       // 1. Résolution des pronoms ("il", "elle", "ça") avec les 5 derniers messages
       setPublicThinkingStatus('Analyse ta demande...');
       const questionResolue = resoudrePronomsAvecHistorique(text, conversationMessages.slice(-5));
@@ -1158,6 +1267,7 @@ export default function App() {
         setIsThinking(false);
         return;
       }
+    } // Fin de if (!hasActiveDocs) : si un document est activé, on passe directement à l'agent/chat
 
       // =========================================================================
       // ÉTAPE 3 : AGENT AVEC OUTILS & ROUTEUR COGNITIF (AVEC FALLBACK /api/chat)
@@ -1173,14 +1283,16 @@ export default function App() {
 
       try {
         // 1. Appel prioritaire de l'Agent intelligent ReAct (/api/agent avec les 10 derniers messages)
-        setThinkingStatus(
-          isAdmin
-            ? (isContinueCommand
-              ? 'Boucle ReAct : finalisation et synthèse finale...'
-              : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...')
-            : 'Exécute un outil...'
-        );
-        const agentRes = await sendAgentMessage(text, historyFormatted, isAdmin);
+        if (!hasActiveDocs) {
+          setThinkingStatus(
+            isAdmin
+              ? (isContinueCommand
+                ? 'Boucle ReAct : finalisation et synthèse finale...'
+                : 'Boucle ReAct : Pensée → Action → Observation (jusqu’à 25 itérations)...')
+              : 'Exécute un outil...'
+          );
+        }
+        const agentRes = await sendAgentMessage(promptToSend, historyFormatted, isAdmin);
         responseText = (agentRes.text || agentRes.question || '').trim();
 
         botSource =
@@ -1223,7 +1335,7 @@ export default function App() {
         // Fallback transparent vers /api/chat si /api/agent renvoie 404, 500 ou échoue
         setPublicThinkingStatus('Synthétise la réponse...');
         const chatRes = await apiService.chat({
-          prompt: text,
+          prompt: promptToSend,
           history: historyFormatted,
           provider: config.provider,
           groqModel: config.groqModel || 'openai/gpt-oss-120b',
@@ -1246,6 +1358,10 @@ export default function App() {
         };
       }
 
+      if (wasDocsTruncated) {
+        responseText = `⚠️ Document tronqué aux 12 000 premiers caractères.\n\n${responseText}`;
+      }
+
       // L'indicateur "Réflexion" disparaît dès que le bot s'apprête à afficher sa réponse finale
       setIsThinking(false);
       addBotMessage(responseText, metaPayload);
@@ -1254,7 +1370,7 @@ export default function App() {
       // =========================================================================
       // ÉTAPE 4 : APPRENTISSAGE AUTOMATIQUE & CALCUL D'EMBEDDING LOCAL
       // =========================================================================
-      if (config.autoLearnFromLLM && !metaPayload.pendingAction) {
+      if (!hasActiveDocs && config.autoLearnFromLLM && !metaPayload.pendingAction) {
         const learned = apprendreDeLLM(text, responseText, memoire, botSource === 'groq' || botSource === 'groq-chat' ? 'groq' : 'gemini');
         if (learned) {
           // Calcule et stocke son vecteur dans l'entrée avant de sauvegarder
@@ -1380,10 +1496,21 @@ export default function App() {
             onAgentActionDecision={handleAgentActionDecision}
             onRegenerateMessage={isAdmin ? undefined : handleRegenerateMessage}
             onOpenTools={() => setActiveTab('tools')}
+            onOpenLibrary={() => setActiveTab('library')}
+            onOpenAttach={() => setIsAttachSheetOpen(true)}
             onOpenAdminDrawer={isAdmin ? () => setIsAdminDrawerOpen(true) : undefined}
             isAdminDrawerOpen={isAdmin ? isAdminDrawerOpen : false}
             onCloseAdminDrawer={() => setIsAdminDrawerOpen(false)}
             adminMenuItems={adminMenuItems}
+          />
+        )}
+
+        {activeTab === 'library' && (
+          <LibraryTab
+            activeDocIds={activeDocIds}
+            onToggleDoc={handleToggleDoc}
+            onBack={() => setActiveTab('chat')}
+            onDocDeleted={handleDocDeleted}
           />
         )}
 
@@ -1526,6 +1653,13 @@ export default function App() {
           onPullMemoryFromServer={handlePullMemoryFromServer}
         />
       )}
+      {/* Panneau inférieur de pièce jointe (Public et Admin) */}
+      <AttachSheet
+        isOpen={isAttachSheetOpen}
+        onClose={() => setIsAttachSheetOpen(false)}
+        onOpenLibrary={() => setActiveTab('library')}
+        onFileAdded={handleAttachFileAdded}
+      />
     </div>
   );
 }
