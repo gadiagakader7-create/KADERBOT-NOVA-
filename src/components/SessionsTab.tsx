@@ -15,6 +15,7 @@ import {
   CloudDownload,
   AlertCircle,
   Server,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   LinksStore,
@@ -44,6 +45,7 @@ interface SessionsTabProps {
   groqModel?: string;
   onPushMemoryToServer?: () => Promise<{ success: boolean; message: string }>;
   onPullMemoryFromServer?: () => Promise<{ success: boolean; message: string }>;
+  onBack?: () => void;
 }
 
 export const SessionsTab: React.FC<SessionsTabProps> = ({
@@ -61,6 +63,7 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   groqModel,
   onPushMemoryToServer,
   onPullMemoryFromServer,
+  onBack,
 }) => {
   const [newSessionName, setNewSessionName] = useState('');
   const [decayReport, setDecayReport] = useState<{ modifs: number; supprimes: number } | null>(null);
@@ -242,7 +245,19 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#050508] max-w-5xl mx-auto space-y-6">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#050508] max-w-5xl mx-auto w-full space-y-6">
+      {onBack && (
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 text-xs font-semibold transition active:scale-95"
+          >
+            <ArrowLeft className="w-4 h-4 text-emerald-400" />
+            <span>Discussion</span>
+          </button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-800 pb-4">
         <div>

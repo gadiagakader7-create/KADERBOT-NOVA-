@@ -11,6 +11,7 @@ import {
   GitBranch,
   Layers,
   Sparkles,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   LinksStore,
@@ -32,6 +33,10 @@ interface KnowledgeGraphTabProps {
   onAddLink: (source: string, target: string) => void;
   onDeleteLink: (source: string, target: string) => void;
   onAskQuestionAbout: (sujet: string) => void;
+  onBack?: () => void;
+  conceptsCount?: number;
+  rulesCount?: number;
+  isAgentActive?: boolean;
 }
 
 export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
@@ -46,6 +51,10 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
   onAddLink,
   onDeleteLink,
   onAskQuestionAbout,
+  onBack,
+  conceptsCount,
+  rulesCount,
+  isAgentActive = false,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
@@ -111,7 +120,33 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col md:flex-row h-[calc(100vh-112px)] sm:h-[calc(100vh-120px)] overflow-hidden bg-[#050508] text-gray-200">
+    <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden bg-[#050508] text-gray-200">
+      {onBack && (
+        <div className="shrink-0 px-3 sm:px-5 py-2.5 border-b border-gray-800/80 bg-[#090B10]/95 flex items-center justify-between gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 text-xs font-semibold transition active:scale-95"
+          >
+            <ArrowLeft className="w-4 h-4 text-emerald-400" />
+            <span>Discussion</span>
+          </button>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-gray-900 border border-gray-800 text-gray-300">
+              {conceptsCount ?? conceptsList.length} faits · {rulesCount ?? 0} règles
+            </span>
+            {isAgentActive && (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Agent actif</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden bg-[#050508] text-gray-200">
       {/* Left panel: List & Search */}
       <div className="w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-gray-800/80 flex flex-col bg-[#090B10]/95 flex-shrink-0">
         {/* Search header */}
@@ -512,6 +547,7 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
             </p>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

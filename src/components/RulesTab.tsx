@@ -9,6 +9,7 @@ import {
   HelpCircle,
   Play,
   ArrowRight,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   GeneralRule,
@@ -35,6 +36,7 @@ interface RulesTabProps {
     poids?: number
   ) => void;
   onDeleteRule: (sujet: string, prop: string) => void;
+  onBack?: () => void;
 }
 
 export const RulesTab: React.FC<RulesTabProps> = ({
@@ -44,6 +46,7 @@ export const RulesTab: React.FC<RulesTabProps> = ({
   synonymes,
   onAddRule,
   onDeleteRule,
+  onBack,
 }) => {
   // Simulator state
   const [testSujet, setTestSujet] = useState('moineau');
@@ -120,7 +123,19 @@ export const RulesTab: React.FC<RulesTabProps> = ({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#050508] space-y-6 max-w-5xl mx-auto">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#050508] space-y-6 max-w-5xl mx-auto w-full">
+      {onBack && (
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 text-xs font-semibold transition active:scale-95"
+          >
+            <ArrowLeft className="w-4 h-4 text-emerald-400" />
+            <span>Discussion</span>
+          </button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-800 pb-4">
         <div>

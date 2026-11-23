@@ -43,6 +43,7 @@ import {
   MessageSquarePlus,
   RefreshCw,
   Wrench,
+  ShieldCheck,
 } from 'lucide-react';
 import { ChatMessage, ChatThread, PendingAgentAction, ToolExecutionTrace } from '../types/kaderbot';
 import { CodeCanvas } from './CodeCanvas';
@@ -807,6 +808,13 @@ const AgentActionApproval: React.FC<AgentActionApprovalProps> = ({ action, onDec
   );
 };
 
+export interface AdminMenuItem {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}
+
 interface ChatTabProps {
   messages: ChatMessage[];
   isThinking: boolean;
@@ -830,6 +838,10 @@ interface ChatTabProps {
   onAgentActionDecision?: (actionId: string, decision: 'approve' | 'reject') => Promise<void>;
   onRegenerateMessage?: (text: string) => void;
   onOpenTools?: () => void;
+  onOpenAdminDrawer?: () => void;
+  isAdminDrawerOpen?: boolean;
+  onCloseAdminDrawer?: () => void;
+  adminMenuItems?: AdminMenuItem[];
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -855,6 +867,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onAgentActionDecision,
   onRegenerateMessage,
   onOpenTools,
+  onOpenAdminDrawer,
+  isAdminDrawerOpen = false,
+  onCloseAdminDrawer,
+  adminMenuItems = [],
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -1062,64 +1078,44 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   return (
     <div className={`flex-1 flex flex-col h-full min-h-0 relative overflow-hidden bg-[#050508] ${isAdmin ? 'cyber-bg' : 'public-bg'}`}>
-      {/* Header : Bandeau technique pour Admin, îlots flottants avec ombres douces pour Public */}
-      {isAdmin ? (
-        <div className="shrink-0 flex-shrink-0 px-3 sm:px-4 py-2.5 bg-[#090B10]/95 border-b border-gray-800/80 flex items-center justify-between gap-2 z-10">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              onClick={() => setIsHistoryOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-emerald-500/40 text-xs font-semibold text-gray-200 transition active:scale-95 shrink-0 shadow-xs"
-              title="Ouvrir l'historique des discussions"
-            >
-              <History className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Historique</span>
-              {(threads?.length || 0) > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono">
-                  {threads?.length}
-                </span>
-              )}
-            </button>
-            <div className="min-w-0 flex items-center gap-1.5 text-xs text-gray-400">
-              <span className="hidden sm:inline text-gray-700">|</span>
-              <span className="truncate font-medium text-gray-300 max-w-[130px] sm:max-w-[280px]">
-                {activeThread ? activeThread.title : 'Nouvelle discussion'}
-              </span>
-            </div>
-          </div>
+      {/* Header : Badges et boutons 100% flottants avec ombrage doux sans bandeau plaqué */}
+      <div className="shrink-0 flex-shrink-0 px-3.5 sm:px-6 pt-3.5 pb-1 bg-transparent flex items-center justify-between gap-2.5 z-20 pointer-events-none">
+        <div className="flex items-center gap-2.5 min-w-0 pointer-events-auto">
+          {/* Bouton Hamburger flottant */}
           <button
-            onClick={onNewThread}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition active:scale-95 shrink-0 shadow-xs"
-            title="Démarrer une nouvelle discussion vierge"
+            onClick={() => setIsHistoryOpen(true)}
+            className="p-2.5 rounded-2xl bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-gray-300 hover:text-emerald-300 shadow-lg shadow-black/40 backdrop-blur-md transition-all active:scale-95 shrink-0"
+            title="Ouvrir l'historique des discussions"
           >
-            <Plus className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Nouvelle discussion</span>
+            <Menu className="w-4 h-4" />
           </button>
-        </div>
-      ) : (
-        /* En-tête Public : Badges et boutons 100% flottants avec ombrage doux sans bandeau plaqué */
-        <div className="shrink-0 flex-shrink-0 px-3.5 sm:px-6 pt-3.5 pb-1 bg-transparent flex items-center justify-between gap-2.5 z-20 pointer-events-none">
-          <div className="flex items-center gap-2.5 min-w-0 pointer-events-auto">
-            {/* Bouton Hamburger flottant */}
-            <button
-              onClick={() => setIsHistoryOpen(true)}
-              className="p-2.5 rounded-2xl bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-gray-300 hover:text-emerald-300 shadow-lg shadow-black/40 backdrop-blur-md transition-all active:scale-95 shrink-0"
-              title="Ouvrir l'historique des discussions"
-            >
-              <Menu className="w-4 h-4" />
-            </button>
 
-            {/* Badge Session cognitive flottant */}
-            <div className="inline-flex items-center gap-2 min-w-0 px-3.5 py-2 rounded-2xl bg-[#121622]/85 border border-gray-800/80 text-[11px] sm:text-xs text-gray-300 font-mono shadow-lg shadow-black/40 backdrop-blur-md">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <span className="truncate">Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
-            </div>
+          {/* Badge Session cognitive flottant */}
+          <div className="inline-flex items-center gap-2 min-w-0 px-3.5 py-2 rounded-2xl bg-[#121622]/85 border border-gray-800/80 text-[11px] sm:text-xs text-gray-300 font-mono shadow-lg shadow-black/40 backdrop-blur-md">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span className="truncate">Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 pointer-events-auto">
+          {isAdmin && onOpenAdminDrawer && (
+            <button
+              type="button"
+              onClick={onOpenAdminDrawer}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-gray-200 hover:text-emerald-300 text-xs font-semibold shadow-lg shadow-black/40 backdrop-blur-md transition-all active:scale-95 shrink-0"
+              title="Ouvrir l'espace admin"
+              aria-label="Ouvrir l'espace admin"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Admin</span>
+            </button>
+          )}
 
           {/* Bouton + (Nouveau Chat) flottant : caché lorsqu'il n'y a pas encore de conversation active */}
           {hasActiveConversation && (
             <button
               onClick={onNewThread || onClearMessages}
-              className="p-2.5 rounded-2xl bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-gray-300 hover:text-emerald-300 shadow-lg shadow-black/40 backdrop-blur-md transition-all active:scale-95 shrink-0 pointer-events-auto"
+              className="p-2.5 rounded-2xl bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-gray-300 hover:text-emerald-300 shadow-lg shadow-black/40 backdrop-blur-md transition-all active:scale-95 shrink-0"
               title="Démarrer une nouvelle discussion"
               aria-label="Nouvelle discussion"
             >
@@ -1127,7 +1123,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             </button>
           )}
         </div>
-      )}
+      </div>
 
       {/* Slide-over History Drawer (ChatGPT style side panel) */}
       {isHistoryOpen && (
@@ -1155,8 +1151,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               </button>
             </div>
 
-            {/* "Atelier Texte" Button (Public uniquement) */}
-            {!isAdmin && onOpenTools && (
+            {/* "Atelier Texte" Button */}
+            {onOpenTools && (
               <div className="p-3 border-b border-gray-800/80">
                 <button
                   onClick={() => {
@@ -1365,6 +1361,46 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         </div>
       )}
 
+      {/* Slide-over Espace Admin Drawer (droite, Admin uniquement) */}
+      {isAdmin && isAdminDrawerOpen && (
+        <div className="absolute inset-0 z-50 flex justify-end">
+          <div
+            onClick={() => onCloseAdminDrawer?.()}
+            className="absolute inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+          />
+          <div className="relative w-full max-w-[300px] sm:max-w-xs bg-[#090B10] border-l border-gray-800 flex flex-col h-full shadow-2xl z-10 animate-in slide-in-from-right duration-200">
+            <div className="p-3.5 border-b border-gray-800 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-white font-bold text-xs sm:text-sm">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Espace admin</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onCloseAdminDrawer?.()}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
+                title="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 overscroll-contain">
+              {(adminMenuItems || []).map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={item.onClick}
+                  className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-gray-900/70 hover:bg-gray-800/90 border border-gray-800/80 hover:border-emerald-500/40 text-gray-200 hover:text-white text-xs font-semibold transition active:scale-[0.98] text-left"
+                >
+                  <span className="text-emerald-400 shrink-0">{item.icon}</span>
+                  <span className="truncate">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Messages Scroll Area - Only this container scrolls */}
       <div
         ref={scrollContainerRef}
@@ -1372,7 +1408,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         className="flex-1 overflow-y-auto min-h-0 px-4 py-4 sm:px-6 sm:py-6 overscroll-contain [overflow-anchor:none]"
       >
         <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col">
-          {!isAdmin && !hasMessages ? (
+          {!hasMessages ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-4 pb-10 sm:pb-16">
               <div className="relative mb-6">
                 <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-2xl animate-pulse-glow" />
@@ -1381,20 +1417,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 </div>
               </div>
               <h1 className="max-w-xl text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight text-gray-100 leading-tight">
-                Bonjour, que souhaites-tu faire aujourd’hui avec KaderBot ?
+                {isAdmin
+                  ? 'Bonjour, bienvenue administrateur'
+                  : 'Bonjour, que souhaites-tu faire aujourd’hui avec KaderBot ?'}
               </h1>
               <p className="mt-3 text-xs sm:text-sm text-gray-500">Ton assistant personnel, prêt à t’aider.</p>
             </div>
           ) : (
           <>
-          {isAdmin && (
-            <div className="flex justify-center mb-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-900/80 border border-gray-800 text-[11px] text-gray-400 font-mono">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Session cognitive : {activeSession === 'defaut' ? 'défaut' : activeSession}</span>
-              </div>
-            </div>
-          )}
           {/* Message bubbles */}
           <div className="space-y-4 sm:space-y-6">
           {messages.map(msg => {
@@ -1626,24 +1656,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         </button>
       </div>
 
-      {/* Quick Action Pills : bar pour Admin, îlots flottants avec ombres douces pour Public */}
-      <div
-        className={
-          isAdmin
-            ? 'shrink-0 flex-shrink-0 px-3 sm:px-6 py-2 border-t border-gray-800/60 bg-[#090B10]/90 overflow-x-auto flex items-center gap-1.5 no-scrollbar'
-            : 'shrink-0 flex-shrink-0 px-3.5 sm:px-6 py-1.5 bg-transparent overflow-x-auto flex items-center gap-2 no-scrollbar z-10'
-        }
-      >
-        <div className={isAdmin ? 'contents' : 'max-w-4xl mx-auto w-full flex items-center gap-2'}>
+      {/* Quick Action Pills : îlots flottants avec ombres douces */}
+      <div className="shrink-0 flex-shrink-0 px-3.5 sm:px-6 py-1.5 bg-transparent overflow-x-auto flex items-center gap-2 no-scrollbar z-10">
+        <div className="max-w-4xl mx-auto w-full flex items-center gap-2">
           {quickPills.map((pill, idx) => (
             <button
               key={idx}
               onClick={() => setInputText(pill.text)}
-              className={
-                isAdmin
-                  ? 'flex-shrink-0 px-2.5 py-1 rounded-lg bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-emerald-500/40 text-[11px] font-medium text-gray-300 hover:text-emerald-300 transition'
-                  : 'flex-shrink-0 px-3.5 py-1.5 rounded-full bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-[11px] sm:text-xs font-medium text-gray-300 hover:text-emerald-300 shadow-md shadow-black/30 backdrop-blur-md transition-all active:scale-95'
-              }
+              className="flex-shrink-0 px-3.5 py-1.5 rounded-full bg-[#121622]/85 hover:bg-[#181e2e] border border-gray-800/80 hover:border-emerald-500/40 text-[11px] sm:text-xs font-medium text-gray-300 hover:text-emerald-300 shadow-md shadow-black/30 backdrop-blur-md transition-all active:scale-95"
             >
               {pill.label}
             </button>
@@ -1651,94 +1671,47 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         </div>
       </div>
 
-      {/* Input Form Bar : bandeau fixe pour Admin, capsule flottante avec ombres douces pour Public */}
-      <div
-        className={
-          isAdmin
-            ? 'shrink-0 flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20'
-            : 'shrink-0 flex-shrink-0 px-3.5 sm:px-6 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-1 bg-transparent z-20'
-        }
-      >
-        {isAdmin ? (
-          <form onSubmit={handleFormSubmit} className="max-w-7xl mx-auto flex items-center gap-2">
+      {/* Input Form Bar : capsule flottante avec ombres douces */}
+      <div className="shrink-0 flex-shrink-0 px-3.5 sm:px-6 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-1 bg-transparent z-20">
+        <form onSubmit={handleFormSubmit} className="max-w-4xl mx-auto">
+          <div className="flex items-end gap-2 rounded-2xl bg-[#121622]/90 backdrop-blur-md border border-gray-800/90 hover:border-gray-700/80 focus-within:border-emerald-500/50 p-2 shadow-2xl shadow-black/60 transition-all">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              placeholder={
+                isAdmin
+                  ? "Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..."
+                  : 'Écris ton message...'
+              }
+              className="flex-1 w-full max-h-32 min-h-[42px] resize-none overflow-y-auto bg-transparent px-2.5 py-2 text-xs sm:text-sm leading-relaxed text-white placeholder-gray-500 focus:outline-none"
+            />
             <button
               type="button"
               onClick={handleToggleVoice}
-              className={`p-2.5 rounded-xl border transition-all ${
+              className={`p-2.5 rounded-xl transition-all shrink-0 ${
                 isRecording
-                  ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
-                  : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white hover:border-gray-700'
+                  ? 'bg-rose-500/20 text-rose-400 animate-pulse'
+                  : 'text-gray-400 hover:bg-gray-800/70 hover:text-white'
               }`}
               title={isRecording ? 'Arrêter dictée' : 'Dicter vocalement en français'}
             >
               {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
-            <div className="relative flex-1">
-              <textarea
-                ref={inputRef}
-                rows={1}
-                value={inputText}
-                onChange={e => setInputText(e.target.value)}
-                onKeyDown={handleInputKeyDown}
-                placeholder="Pose une question, écris 'pourquoi...', ou 'retiens: sujet = définition'..."
-                className="w-full max-h-32 min-h-[42px] resize-none overflow-y-auto bg-[#161822] border border-gray-800 rounded-xl px-4 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!inputText.trim() || isThinking}
-              className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs sm:text-sm font-bold shadow-md shadow-emerald-950/40 transition active:scale-95"
-            >
-              {isThinking ? <Loader2 className="w-4 h-4 animate-spin text-emerald-200" /> : <Send className="w-4 h-4" />}
-              <span className="hidden sm:inline">{isThinking ? 'Réflexion...' : 'Envoyer'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNewThread || onClearMessages}
-              className="p-2.5 sm:p-3 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 hover:text-emerald-400 hover:border-emerald-500/40 transition active:scale-95"
-              title="Démarrer une nouvelle discussion"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleFormSubmit} className="max-w-4xl mx-auto">
-            {/* Barre de saisie flottante : îlot en verre dépoli avec ombre douce projetée */}
-            <div className="flex items-end gap-2 rounded-2xl bg-[#121622]/90 backdrop-blur-md border border-gray-800/90 hover:border-gray-700/80 focus-within:border-emerald-500/50 p-2 shadow-2xl shadow-black/60 transition-all">
-              <textarea
-                ref={inputRef}
-                rows={1}
-                value={inputText}
-                onChange={e => setInputText(e.target.value)}
-                onKeyDown={handleInputKeyDown}
-                placeholder="Écris ton message..."
-                className="flex-1 w-full max-h-32 min-h-[42px] resize-none overflow-y-auto bg-transparent px-2.5 py-2 text-xs sm:text-sm leading-relaxed text-white placeholder-gray-500 focus:outline-none"
-              />
+            {inputText.trim() && (
               <button
-                type="button"
-                onClick={handleToggleVoice}
-                className={`p-2.5 rounded-xl transition-all shrink-0 ${
-                  isRecording
-                    ? 'bg-rose-500/20 text-rose-400 animate-pulse'
-                    : 'text-gray-400 hover:bg-gray-800/70 hover:text-white'
-                }`}
-                title={isRecording ? 'Arrêter dictée' : 'Dicter vocalement en français'}
+                type="submit"
+                disabled={isThinking}
+                className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-950/50 transition active:scale-95 shrink-0"
+                title={isThinking ? 'KaderBot réfléchit...' : 'Envoyer'}
               >
-                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                {isThinking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
-              {inputText.trim() && (
-                <button
-                  type="submit"
-                  disabled={isThinking}
-                  className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-950/50 transition active:scale-95 shrink-0"
-                  title={isThinking ? 'KaderBot réfléchit...' : 'Envoyer'}
-                >
-                  {isThinking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </button>
-              )}
-            </div>
-          </form>
-        )}
+            )}
+          </div>
+        </form>
       </div>
     </div>
   );

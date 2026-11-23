@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  MessageSquare,
   Brain,
   Scale,
   Wrench,
   FolderTree,
   Code2,
+  Settings,
+  Terminal,
 } from 'lucide-react';
 
 import {
@@ -47,8 +48,7 @@ import {
   evaluerCalculMath,
   construirePromptContextuelNova,
 } from './core/cognitiveEngine';
-import { Header } from './components/Header';
-import { ChatTab } from './components/ChatTab';
+import { ChatTab, AdminMenuItem } from './components/ChatTab';
 import { KnowledgeGraphTab } from './components/KnowledgeGraphTab';
 import { RulesTab } from './components/RulesTab';
 import { ToolsTab } from './components/ToolsTab';
@@ -123,9 +123,8 @@ export default function App() {
       const authenticated = await apiService.verifyAdminSession();
       if (!cancelled) {
         setIsAdmin(authenticated);
-        if (authenticated) {
-          setMessages(prev => prev.length === 0 ? [getWelcomeMessage()] : prev);
-        } else {
+        if (!authenticated) {
+          setIsAdminDrawerOpen(false);
           setMessages(prev => prev.length === 1 && prev[0]?.id === 'welcome' ? [] : prev);
         }
         if (!authenticated && hasAdminParam) setActiveTab('chat');
@@ -146,9 +145,10 @@ export default function App() {
     }
   }, [isAdmin, activeTab]);
 
-  // État des modales
+  // État des modales et du tiroir Espace admin
   const [isActionsModalOpen, setIsActionsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isAdminDrawerOpen, setIsAdminDrawerOpen] = useState(false);
 
   // Gestion des sessions
   const [sessions, setSessions] = useState<string[]>(() => {
@@ -213,25 +213,6 @@ export default function App() {
   const [chatPrefill, setChatPrefill] = useState('');
   const [dernieresIdees, setDernieresIdees] = useState<string[]>([]);
   const [groqLog, setGroqLog] = useState<Array<{ q: string; r: string; time: string }>>([]);
-
-  // Message d'accueil propre et accueillant
-  const getWelcomeMessage = (): ChatMessage => {
-    const hour = new Date().getHours();
-    let welcome = 'Bonjour, prêt pour une nouvelle discussion ?';
-    if (hour >= 12 && hour < 18) {
-      welcome = "Bon après-midi ! Que souhaites-tu explorer aujourd’hui ?";
-    } else if (hour >= 18 || hour < 6) {
-      welcome = 'Bonsoir ! Je suis à ton écoute.';
-    }
-
-    return {
-      id: 'welcome',
-      author: 'KB',
-      text: `${welcome} Je suis KADERBOT, ton assistant personnel. Tu peux me poser une question, me demander une explication ou m’aider à rédiger un texte.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      meta: { source: 'systeme' },
-    };
-  };
 
   // Fils de discussion sauvegardés en localStorage (Style ChatGPT)
   const [threads, setThreads] = useState<ChatThread[]>(() => {
@@ -456,14 +437,14 @@ export default function App() {
     setMessages(
       target.messages && target.messages.length > 0
         ? target.messages.map(m => ({ ...m, isNew: false }))
-        : (isAdmin ? [getWelcomeMessage()] : [])
+        : []
     );
   };
 
   const handleNewThread = () => {
     activeThreadIdRef.current = null;
     setActiveThreadId(null);
-    setMessages(isAdmin ? [getWelcomeMessage()] : []);
+    setMessages([]);
   };
 
   const handleDeleteThread = (threadId: string) => {
@@ -1301,26 +1282,76 @@ export default function App() {
     void handleProcessUserMessage(text, { regenerate: true });
   };
 
+  const adminMenuItems: AdminMenuItem[] = isAdmin
+    ? [
+        {
+          id: 'graph',
+          label: 'Cerveau & Graphe',
+          icon: <Brain className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setActiveTab('graph');
+          },
+        },
+        {
+          id: 'rules',
+          label: 'Règles & Inférence',
+          icon: <Scale className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setActiveTab('rules');
+          },
+        },
+        {
+          id: 'tools',
+          label: 'Atelier Texte',
+          icon: <Wrench className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setActiveTab('tools');
+          },
+        },
+        {
+          id: 'sessions',
+          label: 'Sessions & Pydroid',
+          icon: <FolderTree className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setActiveTab('sessions');
+          },
+        },
+        {
+          id: 'workspace',
+          label: 'Atelier Code',
+          icon: <Code2 className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setActiveTab('workspace');
+          },
+        },
+        {
+          id: 'settings',
+          label: 'Paramètres',
+          icon: <Settings className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setIsSettingsModalOpen(true);
+          },
+        },
+        {
+          id: 'actions',
+          label: 'Actions',
+          icon: <Terminal className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            setIsActionsModalOpen(true);
+          },
+        },
+      ]
+    : [];
+
   return (
     <div className="fixed inset-0 h-full w-full max-h-[100dvh] flex flex-col bg-[#050508] text-gray-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 overflow-hidden">
-      {/* En-tête technique réservé à l’interface admin. Le public commence directement par ChatTab. */}
-      {isAdmin && <Header
-        config={config}
-        onUpdateConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
-        sessions={sessions}
-        onSelectSession={handleSelectSession}
-        onOpenSettings={() => {
-          if (isAdmin) setIsSettingsModalOpen(true);
-        }}
-        onOpenActionsMenu={() => {
-          if (isAdmin) setIsActionsModalOpen(true);
-        }}
-        conceptsCount={Object.keys(memoire).length}
-        rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
-        isAdmin={isAdmin}
-        isAgentActive={isAgentActive}
-      />}
-
       {/* Espace de travail principal */}
       <main className="flex-1 flex flex-col min-h-0 w-full overflow-hidden relative">
         {activeTab === 'chat' && (
@@ -1349,6 +1380,10 @@ export default function App() {
             onAgentActionDecision={handleAgentActionDecision}
             onRegenerateMessage={isAdmin ? undefined : handleRegenerateMessage}
             onOpenTools={() => setActiveTab('tools')}
+            onOpenAdminDrawer={isAdmin ? () => setIsAdminDrawerOpen(true) : undefined}
+            isAdminDrawerOpen={isAdmin ? isAdminDrawerOpen : false}
+            onCloseAdminDrawer={() => setIsAdminDrawerOpen(false)}
+            adminMenuItems={adminMenuItems}
           />
         )}
 
@@ -1358,6 +1393,10 @@ export default function App() {
             regles={regles}
             liens={liens}
             synonymes={synonymes}
+            onBack={() => setActiveTab('chat')}
+            conceptsCount={Object.keys(memoire).length}
+            rulesCount={Object.values(regles).reduce((acc, l) => acc + l.length, 0)}
+            isAgentActive={isAgentActive}
             onAddDefinition={(s, d) => {
               const nowIso = new Date().toISOString();
               setMemoire(prev => {
@@ -1399,6 +1438,7 @@ export default function App() {
             regles={regles}
             liens={liens}
             synonymes={synonymes}
+            onBack={() => setActiveTab('chat')}
             onAddRule={handleAddRule}
             onDeleteRule={handleDeleteRule}
           />
@@ -1407,7 +1447,7 @@ export default function App() {
         {activeTab === 'tools' && (
           <ToolsTab
             config={config}
-            onBack={!isAdmin ? () => setActiveTab('chat') : undefined}
+            onBack={() => setActiveTab('chat')}
             onSaveToMemory={(sujet, def) => {
               const nowIso = new Date().toISOString();
               setMemoire(prev => ({
@@ -1437,6 +1477,7 @@ export default function App() {
             regles={regles}
             liens={liens}
             synonymes={synonymes}
+            onBack={() => setActiveTab('chat')}
             onUpdateMemory={(newM, newR) => {
               setMemoire(newM);
               setRegles(newR);
@@ -1454,94 +1495,9 @@ export default function App() {
         )}
 
         {activeTab === 'workspace' && isAdmin && (
-          <CodeWorkspaceTab isAdmin={isAdmin} />
+          <CodeWorkspaceTab isAdmin={isAdmin} onBack={() => setActiveTab('chat')} />
         )}
       </main>
-
-      {/* Barre de navigation inférieure (Admin uniquement) */}
-      {isAdmin && (
-        <nav className="h-14 sm:h-16 shrink-0 flex-shrink-0 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'chat'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Discussion</span>
-          </button>
-
-          {isAdmin && (
-            <button
-              onClick={() => setActiveTab('graph')}
-              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-                activeTab === 'graph'
-                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
-            </button>
-          )}
-
-          {isAdmin && (
-            <button
-              onClick={() => setActiveTab('rules')}
-              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-                activeTab === 'rules'
-                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setActiveTab('tools')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'tools'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Wrench className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Atelier Texte</span>
-          </button>
-
-          {isAdmin && (
-            <button
-              onClick={() => setActiveTab('sessions')}
-              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-                activeTab === 'sessions'
-                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
-            </button>
-          )}
-
-          {isAdmin && (
-            <button
-              onClick={() => setActiveTab('workspace')}
-              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-                activeTab === 'workspace'
-                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Code2 className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="text-[10px] sm:text-xs font-semibold">Atelier Code</span>
-            </button>
-          )}
-        </nav>
-      )}
 
       {/* Menu d'actions (Admin uniquement) */}
       {isAdmin && (

@@ -14,6 +14,7 @@ import {
   XCircle,
   Clock,
   ShieldAlert,
+  ArrowLeft,
 } from 'lucide-react';
 import { CodeCanvas } from './CodeCanvas';
 import { executeCode } from '../agent/codeExecutor';
@@ -61,6 +62,7 @@ interface WorkspaceTestResult {
 
 interface CodeWorkspaceTabProps {
   isAdmin: boolean;
+  onBack?: () => void;
 }
 
 function getAdminHeaders(): Record<string, string> {
@@ -92,7 +94,7 @@ function detectCanvasLanguage(filePath: string): string {
   return 'javascript';
 }
 
-export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin }) => {
+export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onBack }) => {
   const [subTab, setSubTab] = useState<'generated' | 'patches' | 'tests'>('generated');
   const [generatedFiles, setGeneratedFiles] = useState<WorkspaceFileEntry[]>([]);
   const [patches, setPatches] = useState<WorkspacePatch[]>([]);
@@ -355,6 +357,18 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin }) =
   return (
     <div className="flex-1 overflow-y-auto bg-[#050508] text-gray-100 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
+        {onBack && (
+          <div className="flex items-center">
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 text-xs font-semibold transition active:scale-95"
+            >
+              <ArrowLeft className="w-4 h-4 text-emerald-400" />
+              <span>Discussion</span>
+            </button>
+          </div>
+        )}
         {/* En-tête Atelier Admin */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-800 pb-4">
           <div>
