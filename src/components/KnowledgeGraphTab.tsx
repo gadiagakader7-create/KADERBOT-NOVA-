@@ -120,7 +120,7 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden bg-[#050508] text-gray-200">
+    <div className="flex flex-col flex-1 min-h-0 h-full overflow-hidden bg-[#050508] text-gray-200">
       {onBack && (
         <div className="shrink-0 px-3 sm:px-5 py-2.5 border-b border-gray-800/80 bg-[#090B10]/95 flex items-center justify-between gap-2 flex-wrap">
           <button
@@ -146,11 +146,11 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
         </div>
       )}
 
-      <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden bg-[#050508] text-gray-200">
+      <div className="flex-1 min-h-0 h-full flex flex-col md:flex-row overflow-hidden bg-[#050508] text-gray-200">
       {/* Left panel: List & Search */}
-      <div className="w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-gray-800/80 flex flex-col bg-[#090B10]/95 flex-shrink-0">
+      <div className="w-full h-[40%] min-h-0 md:h-full md:w-80 lg:w-96 md:flex-shrink-0 border-b md:border-b-0 md:border-r border-gray-800/80 flex flex-col bg-[#090B10]/95">
         {/* Search header */}
-        <div className="p-3 sm:p-4 border-b border-gray-800/80">
+        <div className="shrink-0 p-3 sm:p-4 border-b border-gray-800/80">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <Brain className="w-4 h-4 text-emerald-400" />
@@ -174,7 +174,7 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
         </div>
 
         {/* List of Concepts */}
-        <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 sm:p-3 space-y-1.5">
           {filteredConcepts.length === 0 ? (
             <div className="text-center py-10 text-xs text-gray-500">
               Aucun concept trouvé. Pose une question au bot pour lui apprendre !
@@ -236,7 +236,7 @@ export const KnowledgeGraphTab: React.FC<KnowledgeGraphTabProps> = ({
       </div>
 
       {/* Right panel: Detail, Chains & Graph Connections */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-[#050508]">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 pb-24 space-y-5 bg-[#050508]">
         {selectedConcept ? (
           <div className="space-y-5 max-w-4xl mx-auto">
             {/* Header card */}
