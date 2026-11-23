@@ -1348,6 +1348,7 @@ export default function App() {
             onMessageAnimationComplete={handleMessageAnimationComplete}
             onAgentActionDecision={handleAgentActionDecision}
             onRegenerateMessage={isAdmin ? undefined : handleRegenerateMessage}
+            onOpenTools={() => setActiveTab('tools')}
           />
         )}
 
@@ -1406,6 +1407,7 @@ export default function App() {
         {activeTab === 'tools' && (
           <ToolsTab
             config={config}
+            onBack={!isAdmin ? () => setActiveTab('chat') : undefined}
             onSaveToMemory={(sujet, def) => {
               const nowIso = new Date().toISOString();
               setMemoire(prev => ({
@@ -1456,88 +1458,90 @@ export default function App() {
         )}
       </main>
 
-      {/* Barre de navigation inférieure */}
-      <nav className="h-14 sm:h-16 shrink-0 flex-shrink-0 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
-        <button
-          onClick={() => setActiveTab('chat')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'chat'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Discussion</span>
-        </button>
-
-        {isAdmin && (
+      {/* Barre de navigation inférieure (Admin uniquement) */}
+      {isAdmin && (
+        <nav className="h-14 sm:h-16 shrink-0 flex-shrink-0 bg-[#090B10] border-t border-gray-800/80 px-2 sm:px-6 flex items-center justify-around z-30">
           <button
-            onClick={() => setActiveTab('graph')}
+            onClick={() => setActiveTab('chat')}
             className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'graph'
+              activeTab === 'chat'
                 ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
-            <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
+            <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Discussion</span>
           </button>
-        )}
 
-        {isAdmin && (
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('graph')}
+              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+                activeTab === 'graph'
+                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-[10px] sm:text-xs font-semibold">Cerveau & Graphe</span>
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('rules')}
+              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+                activeTab === 'rules'
+                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
+            </button>
+          )}
+
           <button
-            onClick={() => setActiveTab('rules')}
+            onClick={() => setActiveTab('tools')}
             className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'rules'
+              activeTab === 'tools'
                 ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
-            <Scale className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Règles & Inférence</span>
+            <Wrench className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] sm:text-xs font-semibold">Atelier Texte</span>
           </button>
-        )}
 
-        <button
-          onClick={() => setActiveTab('tools')}
-          className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-            activeTab === 'tools'
-              ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <Wrench className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-[10px] sm:text-xs font-semibold">Atelier Texte</span>
-        </button>
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('sessions')}
+              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+                activeTab === 'sessions'
+                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
+            </button>
+          )}
 
-        {isAdmin && (
-          <button
-            onClick={() => setActiveTab('sessions')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'sessions'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <FolderTree className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Sessions & Pydroid</span>
-          </button>
-        )}
-
-        {isAdmin && (
-          <button
-            onClick={() => setActiveTab('workspace')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
-              activeTab === 'workspace'
-                ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Code2 className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] sm:text-xs font-semibold">Atelier Code</span>
-          </button>
-        )}
-      </nav>
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('workspace')}
+              className={`flex flex-col items-center gap-1 py-1 px-3 sm:px-5 rounded-xl transition ${
+                activeTab === 'workspace'
+                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Code2 className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-[10px] sm:text-xs font-semibold">Atelier Code</span>
+            </button>
+          )}
+        </nav>
+      )}
 
       {/* Menu d'actions (Admin uniquement) */}
       {isAdmin && (

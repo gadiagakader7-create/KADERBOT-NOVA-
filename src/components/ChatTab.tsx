@@ -42,6 +42,7 @@ import {
   Workflow,
   MessageSquarePlus,
   RefreshCw,
+  Wrench,
 } from 'lucide-react';
 import { ChatMessage, ChatThread, PendingAgentAction, ToolExecutionTrace } from '../types/kaderbot';
 import { CodeCanvas } from './CodeCanvas';
@@ -828,6 +829,7 @@ interface ChatTabProps {
   onMessageAnimationComplete?: (id: string) => void;
   onAgentActionDecision?: (actionId: string, decision: 'approve' | 'reject') => Promise<void>;
   onRegenerateMessage?: (text: string) => void;
+  onOpenTools?: () => void;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -852,6 +854,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onMessageAnimationComplete,
   onAgentActionDecision,
   onRegenerateMessage,
+  onOpenTools,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -1151,6 +1154,22 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* "Atelier Texte" Button (Public uniquement) */}
+            {!isAdmin && onOpenTools && (
+              <div className="p-3 border-b border-gray-800/80">
+                <button
+                  onClick={() => {
+                    setIsHistoryOpen(false);
+                    onOpenTools();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 font-bold text-xs transition active:scale-98"
+                >
+                  <Wrench className="w-4 h-4 text-emerald-400" />
+                  <span>Atelier Texte</span>
+                </button>
+              </div>
+            )}
 
             {/* "+ Nouvelle discussion" Button (ChatGPT style) */}
             <div className="p-3 border-b border-gray-800/80">
@@ -1637,7 +1656,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         className={
           isAdmin
             ? 'shrink-0 flex-shrink-0 p-2.5 sm:p-4 bg-[#090B10] border-t border-gray-800/80 z-20'
-            : 'shrink-0 flex-shrink-0 px-3.5 sm:px-6 pb-3.5 sm:pb-6 pt-1 bg-transparent z-20'
+            : 'shrink-0 flex-shrink-0 px-3.5 sm:px-6 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-1 bg-transparent z-20'
         }
       >
         {isAdmin ? (

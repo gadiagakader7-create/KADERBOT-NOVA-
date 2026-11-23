@@ -11,6 +11,7 @@ import {
   Volume2,
   RefreshCw,
   Send,
+  ArrowLeft,
 } from 'lucide-react';
 import { STYLES_IDEES } from '../core/cognitiveEngine';
 import { apiService } from '../services/apiService';
@@ -19,9 +20,10 @@ import { AppConfig, IdeaItem } from '../types/kaderbot';
 interface ToolsTabProps {
   config: AppConfig;
   onSaveToMemory: (sujet: string, def: string) => void;
+  onBack?: () => void;
 }
 
-export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) => {
+export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory, onBack }) => {
   const [activeTool, setActiveTool] = useState<'idees' | 'traduction' | 'correction' | 'resume'>('idees');
 
   // Ideas Generator state
@@ -192,7 +194,20 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({ config, onSaveToMemory }) =>
   ];
 
   return (
-    <div className="flex-1 min-w-0 w-full overflow-x-hidden overflow-y-auto p-3 sm:p-6 bg-[#050508] max-w-5xl mx-auto space-y-6 box-border">
+    <div className="flex-1 min-w-0 w-full overflow-x-hidden overflow-y-auto p-3 sm:p-6 pb-[max(1rem,env(safe-area-inset-bottom))] bg-[#050508] max-w-5xl mx-auto space-y-6 box-border">
+      {onBack && (
+        <div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#121622] hover:bg-[#161c2c] border border-gray-800 hover:border-emerald-500/40 text-gray-200 text-xs font-semibold transition active:scale-95"
+          >
+            <ArrowLeft className="w-4 h-4 text-emerald-400" />
+            <span>Discussion</span>
+          </button>
+        </div>
+      )}
+
       {/* Sub-nav tabs */}
       <div className="min-w-0 w-full flex items-center gap-2 p-1.5 rounded-2xl bg-[#090B10] border border-gray-800 overflow-x-auto">
         <button
