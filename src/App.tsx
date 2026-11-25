@@ -18,6 +18,7 @@ import {
   MemoryStore,
   RulesStore,
   SynonymsStore,
+  ToolExecutionTrace,
 } from './types/kaderbot';
 import {
   SEED_MEMORY,
@@ -61,6 +62,12 @@ import { ActionMenuModal } from './components/ActionMenuModal';
 import { SettingsModal } from './components/SettingsModal';
 import { apiService, decideAgentAction, sendAgentMessage } from './services/apiService';
 import { getDoc } from './services/libraryService';
+import {
+  addNote,
+  buildPersonalContext,
+  deleteNote,
+  listNotes,
+} from './services/personalMemory';
 
 export default function App() {
   // Le paramètre ?admin=true ne suffit pas : le serveur doit valider ADMIN_TOKEN.
@@ -627,9 +634,33 @@ export default function App() {
    * 4. Étape 3 : Cloud Fallback (Gemini/Groq avec historique complet des 5 derniers messages)
    * 5. Apprentissage automatique avec calcul du vecteur sémantique pour la prochaine fois
    */
+  const capturePersonalNotesFromTrace = async (toolTrace?: ToolExecutionTrace[]) => {
+    if (!Array.isArray(toolTrace) || toolTrace.length === 0) return;
+    for (const trace of toolTrace) {
+      if (trace.status !== 'success') continue;
+      if (trace.resultSnippet === 'En attente de confirmation utilisateur') continue;
+      if (trace.tool === 'create_note') {
+        const title = typeof trace.args?.title === 'string' ? trace.args.title.trim() : '';
+        const body = typeof trace.args?.body === 'string' ? trace.args.body.trim() : '';
+        if (title && body) {
+          await addNote({ title, body, source: 'note' }).catch(() => {});
+        }
+      } else if (trace.tool === 'memo_store') {
+        const title = typeof trace.args?.sujet === 'string' ? trace.args.sujet.trim() : '';
+        const body = typeof trace.args?.definition === 'string' ? trace.args.definition.trim() : '';
+        if (title && body) {
+          await addNote({ title, body, source: 'fait' }).catch(() => {});
+        }
+      }
+    }
+  };
+
   const handleAgentActionDecision = async (actionId: string, decision: 'approve' | 'reject') => {
     try {
       const result = await decideAgentAction(actionId, decision);
+      if (decision === 'approve') {
+        await capturePersonalNotesFromTrace(result.toolTrace);
+      }
       let text = (result.text || '').trim();
       if (!text) {
         const toolNames =
@@ -715,6 +746,59 @@ export default function App() {
     const setPublicThinkingStatus = (status: string) => {
       if (!isAdmin) setThinkingStatus(status);
     };
+
+    // Commandes locales de gestion des notes personnelles (sans appel serveur)
+    if (msgClean === 'mes notes') {
+      try {
+        const notes = await listNotes();
+        if (notes.length === 0) {
+          addBotMessage('Aucune note personnelle enregistrée pour le moment.', { source: 'systeme' });
+        } else {
+          const lines = notes.map((n, idx) => `${idx + 1}. **${n.title}** : ${n.body}`);
+          addBotMessage(
+            `Notes personnelles enregistrées (${notes.length}) :\n${lines.join('\n')}`,
+            { source: 'systeme' }
+          );
+        }
+      } catch {
+        addBotMessage('Impossible de lire les notes personnelles locales.', { source: 'systeme' });
+      }
+      return;
+    }
+
+    const forgetNoteMatch = msgClean.match(/^(?:oublie|oublier)\s+(?:la\s+)?note\s+(\d+)$/);
+    if (forgetNoteMatch) {
+      const noteIndex = Number.parseInt(forgetNoteMatch[1], 10);
+      try {
+        const notes = await listNotes();
+        if (notes.length === 0) {
+          addBotMessage('Aucune note personnelle enregistrée à supprimer.', { source: 'systeme' });
+        } else if (noteIndex < 1 || noteIndex > notes.length) {
+          addBotMessage(
+            `Numéro invalide. Tu as ${notes.length} note${notes.length > 1 ? 's' : ''} enregistrée${notes.length > 1 ? 's' : ''}.`,
+            { source: 'systeme' }
+          );
+        } else {
+          const target = notes[noteIndex - 1];
+          await deleteNote(target.id);
+          addBotMessage(`Note ${noteIndex} supprimée : « ${target.title} ».`, { source: 'systeme' });
+        }
+      } catch {
+        addBotMessage('Impossible de supprimer cette note personnelle.', { source: 'systeme' });
+      }
+      return;
+    }
+
+    // Contexte personnel persistant (IndexedDB)
+    let personalContextBlock = '';
+    try {
+      const rawPersonalContext = await buildPersonalContext(3000);
+      if (rawPersonalContext) {
+        personalContextBlock = `[CONTEXTE PERSONNEL]\n${rawPersonalContext}\n[FIN CONTEXTE]`;
+      }
+    } catch {
+      personalContextBlock = '';
+    }
 
     // Vérification des documents activés pour cette discussion
     const MAX_DOC_CHARS = 12000;
@@ -806,12 +890,16 @@ export default function App() {
       setIsThinking(true);
       setPublicThinkingStatus('Exécute le moteur Groq...');
       try {
+        const groqBaseHistory = conversationMessages.slice(-5).map(m => ({
+          role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
+          content: m.text,
+        }));
+        const groqHistory = personalContextBlock
+          ? [{ role: 'user' as const, content: personalContextBlock }, ...groqBaseHistory]
+          : groqBaseHistory;
         const res = await apiService.chat({
           prompt: q,
-          history: conversationMessages.slice(-5).map(m => ({
-            role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
-            content: m.text,
-          })),
+          history: groqHistory,
           provider: 'groq',
           groqModel: config.groqModel || 'openai/gpt-oss-120b',
           systemPrompt: config.systemPrompt,
@@ -1272,10 +1360,13 @@ export default function App() {
       // =========================================================================
       // ÉTAPE 3 : AGENT AVEC OUTILS & ROUTEUR COGNITIF (AVEC FALLBACK /api/chat)
       // =========================================================================
-      const historyFormatted = conversationMessages.slice(-10).map(m => ({
+      const baseHistory = conversationMessages.slice(-10).map(m => ({
         role: m.author === 'Toi' ? ('user' as const) : ('assistant' as const),
         content: m.text,
       }));
+      const historyFormatted = personalContextBlock
+        ? [{ role: 'user' as const, content: personalContextBlock }, ...baseHistory]
+        : baseHistory;
 
       let responseText = '';
       let botSource: NonNullable<ChatMessage['meta']>['source'] = 'groq';
@@ -1293,6 +1384,9 @@ export default function App() {
           );
         }
         const agentRes = await sendAgentMessage(promptToSend, historyFormatted, isAdmin);
+        if (!agentRes.pendingAction) {
+          await capturePersonalNotesFromTrace(agentRes.toolTrace);
+        }
         responseText = (agentRes.text || agentRes.question || '').trim();
 
         botSource =
@@ -1370,7 +1464,20 @@ export default function App() {
       // =========================================================================
       // ÉTAPE 4 : APPRENTISSAGE AUTOMATIQUE & CALCUL D'EMBEDDING LOCAL
       // =========================================================================
-      if (!hasActiveDocs && config.autoLearnFromLLM && !metaPayload.pendingAction) {
+      const hasPersonalTrace = Boolean(
+        metaPayload.toolTrace?.some(
+          t => t.status === 'success' && (t.tool === 'create_note' || t.tool === 'memo_store')
+        )
+      );
+      const isPersonalQuery =
+        /\b(?:de moi|sur moi|me concerne|me connais|sais[- ]tu de moi)\b/i.test(msgClean);
+      if (
+        !hasActiveDocs &&
+        !hasPersonalTrace &&
+        !(personalContextBlock && isPersonalQuery) &&
+        config.autoLearnFromLLM &&
+        !metaPayload.pendingAction
+      ) {
         const learned = apprendreDeLLM(text, responseText, memoire, botSource === 'groq' || botSource === 'groq-chat' ? 'groq' : 'gemini');
         if (learned) {
           // Calcule et stocke son vecteur dans l'entrée avant de sauvegarder

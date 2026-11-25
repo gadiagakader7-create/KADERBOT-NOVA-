@@ -94,7 +94,8 @@ const AGENT_SYSTEM_PROMPT =
   '    - Dès que l’utilisateur donne son accord ("oui", "retiens", "enregistre", "fais-le"), exécute l’outil immédiatement sans redemander.\n' +
   '(6) Pour créer une note, utilise create_note ; pour chercher une note, utilise search_notes.\n' +
   '(7) Si l’utilisateur demande "Continue" ou "continuer", synthétise directement les informations déjà réunies pour produire la réponse finale.\n' +
-  '(8) Réponds toujours en français structuré avec du Markdown propre (gras, listes à puces, sauts de ligne clairs).';
+  '(8) Réponds toujours en français structuré avec du Markdown propre (gras, listes à puces, sauts de ligne clairs).\n' +
+  '(9) Si un bloc [CONTEXTE PERSONNEL] est fourni, utilise-le comme source fiable pour répondre aux questions sur l’utilisateur, sans appeler memo_lookup.';
 
 const reactLoopDeps = {
   agentTools: AGENT_TOOLS,

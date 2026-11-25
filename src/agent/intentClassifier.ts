@@ -31,6 +31,12 @@ export async function classifyIntentWithRouter(
     clean.includes('préfère') ||
     clean.includes('prefere') ||
     clean.includes('qui suis-je') ||
+    clean.includes('de moi') ||
+    clean.includes('sur moi') ||
+    clean.includes('me concerne') ||
+    clean.includes('me connais') ||
+    clean.includes('sais-tu de moi') ||
+    clean.includes('sais tu de moi') ||
     clean.includes('patch') ||
     clean.includes('self_modify') ||
     clean.includes('self-modify') ||

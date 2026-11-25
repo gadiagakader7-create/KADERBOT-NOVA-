@@ -80,6 +80,14 @@ export interface LibraryDoc {
   text: string;
 }
 
+export interface PersonalNote {
+  id: string;
+  title: string;
+  body: string;
+  source: 'note' | 'fait';
+  createdAt: string;
+}
+
 export interface IdeaItem {
   id: number;
   title: string;
