@@ -70,6 +70,12 @@ function notifySessionInvalidated(): void {
   }
 }
 
+const ADMIN_LOCK_ERROR_CODES = new Set([
+  'ADMIN_SESSION_REQUIRED',
+  'ADMIN_TOKEN_INVALID',
+  'ADMIN_NOT_CONFIGURED',
+]);
+
 async function adminFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const mergedHeaders: Record<string, string> = {
     ...(init.headers instanceof Headers
@@ -87,12 +93,15 @@ async function adminFetch(input: RequestInfo | URL, init: RequestInit = {}): Pro
 
   if (res.status === 401 || res.status === 403 || res.status === 503) {
     const errBody = await res.clone().json().catch(() => ({}));
-    notifySessionInvalidated();
-    throw new AdminSessionError(
-      errBody?.error || 'Session administrateur invalide ou expirée.',
-      res.status,
-      typeof errBody?.code === 'string' ? errBody.code : undefined
-    );
+    const code = typeof errBody?.code === 'string' ? errBody.code : undefined;
+    if (code && ADMIN_LOCK_ERROR_CODES.has(code)) {
+      notifySessionInvalidated();
+      throw new AdminSessionError(
+        errBody?.error || 'Session administrateur invalide ou expirée.',
+        res.status,
+        code
+      );
+    }
   }
 
   return res;
@@ -210,7 +219,7 @@ export const apiService = {
     apiKey?: string,
     model = 'meta-llama/llama-3.3-70b-instruct:free'
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
-    const res = await fetch('/api/openrouter/test', {
+    const res = await adminFetch('/api/openrouter/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey: apiKey?.trim() || undefined, model }),
@@ -223,7 +232,7 @@ export const apiService = {
     apiKey?: string,
     model = 'openai/gpt-oss-120b'
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
-    const res = await fetch('/api/groq/test', {
+    const res = await adminFetch('/api/groq/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey: apiKey?.trim() || undefined, model }),
@@ -235,7 +244,7 @@ export const apiService = {
   async testGeminiConnection(
     apiKey?: string
   ): Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; reply?: string }> {
-    const res = await fetch('/api/gemini/test', {
+    const res = await adminFetch('/api/gemini/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey: apiKey?.trim() || undefined }),

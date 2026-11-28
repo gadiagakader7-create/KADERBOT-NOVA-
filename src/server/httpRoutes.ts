@@ -68,7 +68,7 @@ export function registerHttpRoutes(app: Express, deps: HttpRouteDependencies): v
   } = deps;
 
 // 0. Gemini Connection Tester Endpoint (Uses process.env.GEMINI_API_KEY explicitly)
-app.post('/api/gemini/test', async (req, res) => {
+app.post('/api/gemini/test', requireAdmin, async (req, res) => {
   try {
     const keyToUse = process.env.GEMINI_API_KEY?.trim() || req.body?.apiKey?.trim();
     if (!keyToUse) {
@@ -94,7 +94,7 @@ app.post('/api/gemini/test', async (req, res) => {
 });
 
 // 0.1 Groq Connection & Model Tester Endpoint (Uses process.env.GROQ_API_KEY exclusively)
-app.post('/api/groq/test', async (req, res) => {
+app.post('/api/groq/test', requireAdmin, async (req, res) => {
   try {
     const keyToUse = process.env.GROQ_API_KEY || req.body?.apiKey;
     const model = req.body?.model || 'openai/gpt-oss-120b';
@@ -149,7 +149,7 @@ app.post('/api/groq/test', async (req, res) => {
 });
 
 // 0.2 OpenRouter Connection & Model Tester Endpoint (Uses process.env.OPENROUTER_API_KEY exclusively)
-app.post('/api/openrouter/test', async (req, res) => {
+app.post('/api/openrouter/test', requireAdmin, async (req, res) => {
   try {
     const keyToUse = process.env.OPENROUTER_API_KEY || req.body?.apiKey;
     const model = req.body?.model || 'meta-llama/llama-3.3-70b-instruct:free';
