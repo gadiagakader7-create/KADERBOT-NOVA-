@@ -32,7 +32,7 @@ import {
   appendActionLog,
 } from './src/server/storage';
 import { executeBraveSearch, isUrlForbidden } from './src/server/webSearch';
-import { createAgentRateLimiter, createRequireAdmin } from './src/server/middleware';
+import { createAdminSecurity, createAgentRateLimiter } from './src/server/middleware';
 import type { PendingAgentAction } from './src/types/agent';
 
 dotenv.config();
@@ -58,7 +58,11 @@ const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
 
 const pendingAgentActions = new Map<string, PendingAgentAction>();
 const checkAgentRateLimit = createAgentRateLimiter(60 * 1000, 10);
-const requireAdmin = createRequireAdmin(() => process.env.ADMIN_TOKEN?.trim() || '');
+const adminSecurity = createAdminSecurity({
+  getAdminToken: () => process.env.ADMIN_TOKEN?.trim() || '',
+  getAdminKeyword: () => process.env.ADMIN_AUTH_KEYWORD || '',
+});
+const requireAdmin = adminSecurity.requireAdmin;
 
 function requestPendingAction(tool: string, args: Record<string, unknown>): PendingAgentAction {
   return createPendingAction(tool, args, { ttlMs: PENDING_ACTION_TTL_MS, store: pendingAgentActions });
@@ -126,6 +130,8 @@ registerHttpRoutes(app, {
   defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
   agentSystemPrompt: AGENT_SYSTEM_PROMPT,
   requireAdmin,
+  createAdminSession: adminSecurity.createSessionHandler,
+  destroyAdminSession: adminSecurity.destroySessionHandler,
   checkAgentRateLimit,
   classifyIntentWithRouter,
   runAgentLoop,

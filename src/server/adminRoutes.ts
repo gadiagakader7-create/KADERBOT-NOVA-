@@ -31,9 +31,13 @@ function createStrictAdmin403Guard(requireAdmin: RequestHandler): RequestHandler
     const originalJson = res.json.bind(res);
 
     const statusSpy = ((code: number) => {
-      if (code === 401 || code === 503) {
+      if (code === 401) {
         blocked = true;
         return originalStatus(403);
+      }
+      if (code === 503) {
+        blocked = true;
+        return originalStatus(503);
       }
       return originalStatus(code);
     }) as Response['status'];
@@ -41,7 +45,8 @@ function createStrictAdmin403Guard(requireAdmin: RequestHandler): RequestHandler
     const jsonSpy = ((body: any) => {
       if (blocked) {
         return originalJson({
-          error: body?.error || 'Accès refusé (403) : ADMIN_TOKEN manquant ou invalide.',
+          error: body?.error || 'Accès refusé (403) : authentification administrateur requise.',
+          ...(body?.code ? { code: body.code } : {}),
         });
       }
       return originalJson(body);

@@ -1,16 +1,109 @@
 import { MemoryStore, RulesStore, LinksStore, SynonymsStore, ToolExecutionTrace, PendingAgentAction } from '../types/kaderbot';
 
-function getAdminHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
+let activeAdminSessionId: string | null = null;
+
+type AdminSessionInvalidatedListener = () => void;
+const sessionInvalidatedListeners = new Set<AdminSessionInvalidatedListener>();
+
+export class AdminSessionError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'AdminSessionError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function getStoredAdminToken(): string {
+  if (typeof window === 'undefined') return '';
   try {
     const raw = window.localStorage.getItem('kaderbot_config');
     const config = raw ? JSON.parse(raw) : null;
-    return config?.adminToken?.trim()
-      ? { 'X-Admin-Token': config.adminToken.trim() }
-      : {};
+    return typeof config?.adminToken === 'string' ? config.adminToken.trim() : '';
   } catch {
-    return {};
+    return '';
   }
+}
+
+export function getAdminHeaders(tokenOverride?: string, sessionOverride?: string | null): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const headers: Record<string, string> = {};
+  const token = tokenOverride !== undefined ? tokenOverride.trim() : getStoredAdminToken();
+  const sessionId = sessionOverride !== undefined ? sessionOverride : activeAdminSessionId;
+  if (token) {
+    headers['X-Admin-Token'] = token;
+  }
+  if (sessionId) {
+    headers['X-Admin-Session'] = sessionId;
+  }
+  return headers;
+}
+
+export function activateAdminSession(sessionId: string): void {
+  activeAdminSessionId = sessionId.trim() || null;
+}
+
+export function clearAdminSession(): void {
+  activeAdminSessionId = null;
+}
+
+export function hasAdminSession(): boolean {
+  return Boolean(activeAdminSessionId);
+}
+
+export function onAdminSessionInvalidated(listener: AdminSessionInvalidatedListener): () => void {
+  sessionInvalidatedListeners.add(listener);
+  return () => {
+    sessionInvalidatedListeners.delete(listener);
+  };
+}
+
+function notifySessionInvalidated(): void {
+  activeAdminSessionId = null;
+  for (const listener of sessionInvalidatedListeners) {
+    try {
+      listener();
+    } catch {}
+  }
+}
+
+async function adminFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const mergedHeaders: Record<string, string> = {
+    ...(init.headers instanceof Headers
+      ? Object.fromEntries(init.headers.entries())
+      : Array.isArray(init.headers)
+      ? Object.fromEntries(init.headers)
+      : (init.headers as Record<string, string> | undefined)),
+    ...getAdminHeaders(),
+  };
+
+  const res = await fetch(input, {
+    ...init,
+    headers: mergedHeaders,
+  });
+
+  if (res.status === 401 || res.status === 403 || res.status === 503) {
+    const errBody = await res.clone().json().catch(() => ({}));
+    notifySessionInvalidated();
+    throw new AdminSessionError(
+      errBody?.error || 'Session administrateur invalide ou expirée.',
+      res.status,
+      typeof errBody?.code === 'string' ? errBody.code : undefined
+    );
+  }
+
+  return res;
+}
+
+export interface AdminLoginResult {
+  ok: boolean;
+  status: number;
+  sessionId?: string;
+  code?: string;
+  error?: string;
 }
 
 export interface ChatApiParams {
@@ -31,16 +124,62 @@ export interface ChatApiResponse {
 }
 
 export const apiService = {
-  async verifyAdminSession(): Promise<boolean> {
+  async loginAdminSession(params: { keyword: string; token?: string }): Promise<AdminLoginResult> {
+    const effectiveToken = (params.token !== undefined ? params.token : getStoredAdminToken()).trim();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (effectiveToken) {
+      headers['X-Admin-Token'] = effectiveToken;
+    }
+
     try {
       const res = await fetch('/api/admin/session', {
         method: 'POST',
-        headers: getAdminHeaders(),
+        headers,
+        body: JSON.stringify({ keyword: params.keyword }),
       });
-      return res.ok;
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok && typeof data?.sessionId === 'string' && data.sessionId.trim()) {
+        return {
+          ok: true,
+          status: res.status,
+          sessionId: data.sessionId.trim(),
+        };
+      }
+
+      return {
+        ok: false,
+        status: res.status,
+        code: typeof data?.code === 'string' ? data.code : undefined,
+        error: typeof data?.error === 'string' ? data.error : `Erreur HTTP ${res.status}`,
+      };
     } catch {
-      return false;
+      return {
+        ok: false,
+        status: 0,
+        code: 'NETWORK_ERROR',
+        error: 'Connexion au serveur impossible.',
+      };
     }
+  },
+
+  async logoutAdminSession(sessionIdOverride?: string | null, tokenOverride?: string): Promise<void> {
+    const sid = sessionIdOverride !== undefined ? sessionIdOverride : activeAdminSessionId;
+    activeAdminSessionId = null;
+    if (!sid) return;
+
+    try {
+      await fetch('/api/admin/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAdminHeaders(tokenOverride, sid),
+        },
+        body: JSON.stringify({ sessionId: sid }),
+      });
+    } catch {}
   },
 
   async chat(params: ChatApiParams): Promise<ChatApiResponse> {
@@ -228,7 +367,7 @@ export const apiService = {
     synonymes: SynonymsStore;
     sessions: string[];
   }> {
-    const res = await fetch('/api/memory', { headers: getAdminHeaders() });
+    const res = await adminFetch('/api/memory');
     if (!res.ok) throw new Error('Impossible de charger la mémoire distante');
     return await res.json();
   },
@@ -240,9 +379,9 @@ export const apiService = {
     synonymes: SynonymsStore;
     sessions: string[];
   }): Promise<{ success: boolean; savedAt: string }> {
-    const res = await fetch('/api/memory/save', {
+    const res = await adminFetch('/api/memory/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error('Erreur sauvegarde sur serveur');
@@ -257,9 +396,9 @@ export const apiService = {
     groqModel?: string;
     mode?: 'auto' | 'console' | 'gui';
   }): Promise<Blob> {
-    const res = await fetch('/api/export-pydroid', {
+    const res = await adminFetch('/api/export-pydroid', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error('Erreur téléchargement script Pydroid 3');
@@ -267,9 +406,8 @@ export const apiService = {
   },
 
   async downloadProjectZip(): Promise<Blob> {
-    const res = await fetch('/api/export-project-zip', {
+    const res = await adminFetch('/api/export-project-zip', {
       method: 'GET',
-      headers: getAdminHeaders(),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
@@ -296,14 +434,19 @@ export const apiService = {
     systemPrompt?: string;
     isAdmin?: boolean;
   }): Promise<AgentApiResponse> {
-    const res = await fetch('/api/agent', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(params.isAdmin ? getAdminHeaders() : {}),
-      },
-      body: JSON.stringify({ ...params, isAdmin: Boolean(params.isAdmin) }),
-    });
+    const useAdmin = Boolean(params.isAdmin);
+    const res = useAdmin
+      ? await adminFetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...params, isAdmin: true }),
+        })
+      : await fetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...params, isAdmin: false }),
+        });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
       throw new Error(err.error || `Erreur serveur (${res.status})`);
@@ -312,9 +455,113 @@ export const apiService = {
   },
 
   async refreshMemory(): Promise<{ ok: boolean; data: any; refreshedAt: string }> {
-    const res = await fetch('/api/memory/refresh', { headers: getAdminHeaders() });
+    const res = await adminFetch('/api/memory/refresh');
     if (!res.ok) throw new Error('Impossible de rafraîchir la mémoire');
     return await res.json();
+  },
+
+  async getAdminWorkspace(): Promise<{
+    generated: Array<{ path: string; content: string; size: number; updatedAt: string }>;
+    patches: any[];
+    tests: any[];
+  }> {
+    const res = await adminFetch('/api/admin/workspace');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+      throw new Error(err.error || `Erreur HTTP ${res.status}`);
+    }
+    return await res.json();
+  },
+
+  async saveAdminWorkspaceFile(filePath: string, content: string): Promise<{ ok: boolean; file: { path: string } }> {
+    const res = await adminFetch('/api/admin/workspace/file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur enregistrement script.');
+    return data;
+  },
+
+  async deleteAdminWorkspaceFile(filePath: string): Promise<void> {
+    const res = await adminFetch('/api/admin/workspace/file', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: filePath }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Erreur suppression.');
+    }
+  },
+
+  async logAdminWorkspaceTest(payload: Record<string, unknown>): Promise<void> {
+    const res = await adminFetch('/api/admin/workspace/test-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Erreur enregistrement du test.');
+    }
+  },
+
+  async executeAdminCode(payload: {
+    language: 'python' | 'javascript';
+    code: string;
+    isTest?: boolean;
+    label?: string;
+  }): Promise<{ success: boolean; durationMs: number; stdout?: string; stderr?: string; error?: string }> {
+    const res = await adminFetch('/api/admin/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erreur exécution sandbox.');
+    return result;
+  },
+
+  async getAdminSourceFile(targetPath: string): Promise<{ path: string; content: string }> {
+    const res = await adminFetch(`/api/admin/source-file?path=${encodeURIComponent(targetPath)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Lecture impossible.');
+    return data;
+  },
+
+  async proposeAdminPatch(targetPath: string, newContent: string): Promise<{ patchId: string; status: string }> {
+    const res = await adminFetch('/api/admin/self-modify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetPath, newContent }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Échec création patch.');
+    return data;
+  },
+
+  async validateAdminPatch(patchId: string): Promise<{ ok: boolean; message?: string }> {
+    const res = await adminFetch('/api/admin/validate-patch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patchId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Impossible de valider le patch.');
+    return data;
+  },
+
+  async rejectAdminPatch(patchId: string): Promise<{ ok: boolean }> {
+    const res = await adminFetch('/api/admin/reject-patch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patchId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Impossible de rejeter le patch.');
+    return data;
   },
 
   async checkHealth(): Promise<{ ok: boolean }> {
@@ -395,15 +642,19 @@ export async function sendAgentMessage(
   const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   try {
-    const res = await fetch('/api/agent', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(isAdmin ? getAdminHeaders() : {}),
-      },
-      body: JSON.stringify({ prompt, history, isAdmin: Boolean(isAdmin) }),
-      signal: controller.signal,
-    });
+    const res = isAdmin
+      ? await adminFetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, history, isAdmin: true }),
+          signal: controller.signal,
+        })
+      : await fetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, history, isAdmin: false }),
+          signal: controller.signal,
+        });
 
     clearTimeout(timeoutId);
 
@@ -415,7 +666,10 @@ export async function sendAgentMessage(
     return await res.json();
   } catch (err: any) {
     clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
+    if (err instanceof AdminSessionError) {
+      throw err;
+    }
+    if (err?.name === 'AbortError') {
       throw new Error("Délai d'attente de l'agent dépassé (120s). Veuillez réessayer avec une question plus ciblée.");
     }
     throw err;

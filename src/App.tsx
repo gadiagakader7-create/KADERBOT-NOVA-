@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Brain,
   Scale,
@@ -7,6 +7,7 @@ import {
   Code2,
   Settings,
   Terminal,
+  Lock,
 } from 'lucide-react';
 
 import {
@@ -60,7 +61,15 @@ import { LibraryTab } from './components/LibraryTab';
 import { AttachSheet } from './components/AttachSheet';
 import { ActionMenuModal } from './components/ActionMenuModal';
 import { SettingsModal } from './components/SettingsModal';
-import { apiService, decideAgentAction, sendAgentMessage } from './services/apiService';
+import { AdminAuthScreen } from './components/AdminAuthScreen';
+import {
+  activateAdminSession,
+  AdminSessionError,
+  apiService,
+  decideAgentAction,
+  onAdminSessionInvalidated,
+  sendAgentMessage,
+} from './services/apiService';
 import { getDoc } from './services/libraryService';
 import {
   addNote,
@@ -114,40 +123,103 @@ export default function App() {
     };
   });
 
-  // Le mode admin exige explicitement ?admin=true puis une validation serveur.
-  // La présence d’un jeton dans localStorage ne doit jamais transformer le lien public en lien admin.
+  // Le paramètre ?admin=true ouvre l'écran d'authentification à chaque visite/rechargement.
+  // Le serveur exige ADMIN_TOKEN + ADMIN_AUTH_KEYWORD pour délivrer une session en mémoire.
+  const readAdminUrlParam = () => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('admin') === 'true';
+  };
+
+  const [hasAdminUrlParam, setHasAdminUrlParam] = useState<boolean>(() => readAdminUrlParam());
+
+  const lockAdmin = useCallback(() => {
+    void apiService.logoutAdminSession();
+    setIsAdmin(false);
+    setIsAdminDrawerOpen(false);
+    setIsSettingsModalOpen(false);
+    setIsActionsModalOpen(false);
+    setIsAttachSheetOpen(false);
+    setActiveTab('chat');
+    activeThreadIdRef.current = null;
+    setActiveThreadId(null);
+    setActiveDocIds([]);
+    setMessages([]);
+  }, []);
+
+  const exitToPublic = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('admin');
+      const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState(null, '', nextUrl || '/');
+    }
+    setHasAdminUrlParam(false);
+    lockAdmin();
+  }, [lockAdmin]);
+
+  const handleAdminAuthenticated = useCallback((sessionId: string, tokenToSave: string) => {
+    activateAdminSession(sessionId);
+    const trimmedToken = tokenToSave.trim();
+    if (trimmedToken) {
+      setConfig(prev => {
+        if ((prev.adminToken || '').trim() === trimmedToken) return prev;
+        const next = { ...prev, adminToken: trimmedToken };
+        try {
+          localStorage.setItem('kaderbot_config', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    }
+    setIsAdmin(true);
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
-
-    const checkAdmin = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const hasAdminParam = params.get('admin') === 'true';
-
-      if (!hasAdminParam) {
-        if (!cancelled) {
-          setIsAdmin(false);
-          setMessages(prev => prev.length === 1 && prev[0]?.id === 'welcome' ? [] : prev);
-        }
-        return;
-      }
-
-      const authenticated = await apiService.verifyAdminSession();
-      if (!cancelled) {
-        setIsAdmin(authenticated);
-        if (!authenticated) {
-          setIsAdminDrawerOpen(false);
-          setMessages(prev => prev.length === 1 && prev[0]?.id === 'welcome' ? [] : prev);
-        }
-        if (!authenticated && hasAdminParam) setActiveTab('chat');
+    const handlePopState = () => {
+      const nextHasParam = readAdminUrlParam();
+      setHasAdminUrlParam(nextHasParam);
+      if (!nextHasParam) {
+        lockAdmin();
       }
     };
-    void checkAdmin();
-    window.addEventListener('popstate', checkAdmin);
+
+    const unsubscribe = onAdminSessionInvalidated(() => {
+      lockAdmin();
+    });
+
+    window.addEventListener('popstate', handlePopState);
     return () => {
-      cancelled = true;
-      window.removeEventListener('popstate', checkAdmin);
+      window.removeEventListener('popstate', handlePopState);
+      unsubscribe();
     };
-  }, [config.adminToken]);
+  }, [lockAdmin]);
+
+  // Verrouillage automatique côté client après 30 min sans interaction utilisateur.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const IDLE_LOCK_MS = 30 * 60 * 1000;
+    let idleTimerId = window.setTimeout(() => {
+      lockAdmin();
+    }, IDLE_LOCK_MS);
+
+    const resetIdleTimer = () => {
+      window.clearTimeout(idleTimerId);
+      idleTimerId = window.setTimeout(() => {
+        lockAdmin();
+      }, IDLE_LOCK_MS);
+    };
+
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'scroll'];
+    for (const evt of events) {
+      window.addEventListener(evt, resetIdleTimer, { passive: true });
+    }
+
+    return () => {
+      window.clearTimeout(idleTimerId);
+      for (const evt of events) {
+        window.removeEventListener(evt, resetIdleTimer);
+      }
+    };
+  }, [isAdmin, lockAdmin]);
 
   // En mode public, restreindre les onglets à 'chat' ou 'tools'
   useEffect(() => {
@@ -259,8 +331,9 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingStatus, setThinkingStatus] = useState<string>('KADERBOT réfléchit...');
   const [isAgentActive, setIsAgentActive] = useState(false);
-  // 1. Priorité au Local au démarrage : Si localStorage est vide, chargement initial serveur
+  // 1. Priorité au Local : Si localStorage est vide après connexion admin, chargement initial serveur
   useEffect(() => {
+    if (!isAdmin) return;
     const localMemo = localStorage.getItem(`kaderbot_memoire_${config.activeSession}`);
     if (!localMemo) {
       apiService
@@ -293,7 +366,7 @@ export default function App() {
           console.warn('Initialisation serveur ou hors-ligne, données par défaut actives:', err);
         });
     }
-  }, []);
+  }, [isAdmin, config.activeSession]);
 
   // 2. Sauvegarde Locale automatique dans localStorage sans appel automatique au serveur
   useEffect(() => {
@@ -1425,6 +1498,10 @@ export default function App() {
           setIsAgentActive(true);
         }
       } catch (agentErr: any) {
+        if (isAdmin && agentErr instanceof AdminSessionError) {
+          setIsThinking(false);
+          return;
+        }
         console.warn('Endpoint /api/agent indisponible ou erreur, bascule vers /api/chat:', agentErr.message);
         // Fallback transparent vers /api/chat si /api/agent renvoie 404, 500 ou échoue
         setPublicThinkingStatus('Synthétise la réponse...');
@@ -1568,6 +1645,15 @@ export default function App() {
           onClick: () => {
             setIsAdminDrawerOpen(false);
             setIsActionsModalOpen(true);
+          },
+        },
+        {
+          id: 'lock',
+          label: 'Verrouiller',
+          icon: <Lock className="w-4 h-4" />,
+          onClick: () => {
+            setIsAdminDrawerOpen(false);
+            lockAdmin();
           },
         },
       ]
@@ -1755,7 +1841,21 @@ export default function App() {
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           config={config}
-          onSaveConfig={updates => setConfig(prev => ({ ...prev, ...updates }))}
+          onSaveConfig={updates => {
+            const tokenChanged =
+              updates.adminToken !== undefined &&
+              updates.adminToken.trim() !== (config.adminToken || '').trim();
+            setConfig(prev => {
+              const next = { ...prev, ...updates };
+              try {
+                localStorage.setItem('kaderbot_config', JSON.stringify(next));
+              } catch {}
+              return next;
+            });
+            if (isAdmin && tokenChanged) {
+              lockAdmin();
+            }
+          }}
           onPushMemoryToServer={handlePushMemoryToServer}
           onPullMemoryFromServer={handlePullMemoryFromServer}
         />
@@ -1767,6 +1867,15 @@ export default function App() {
         onOpenLibrary={() => setActiveTab('library')}
         onFileAdded={handleAttachFileAdded}
       />
+
+      {/* Écran d'authentification administrateur (?admin=true tant que non authentifié) */}
+      {hasAdminUrlParam && !isAdmin && (
+        <AdminAuthScreen
+          savedToken={config.adminToken || ''}
+          onAuthenticated={handleAdminAuthenticated}
+          onExitToPublic={exitToPublic}
+        />
+      )}
     </div>
   );
 }

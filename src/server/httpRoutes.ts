@@ -19,6 +19,8 @@ export interface HttpRouteDependencies {
   defaultSystemPrompt: string;
   agentSystemPrompt: string;
   requireAdmin: RequestHandler;
+  createAdminSession: RequestHandler;
+  destroyAdminSession: RequestHandler;
   checkAgentRateLimit: (req: any) => boolean;
   classifyIntentWithRouter: (...args: any[]) => Promise<'CHAT' | 'AGENT'>;
   runAgentLoop: (...args: any[]) => Promise<any>;
@@ -46,6 +48,8 @@ export function registerHttpRoutes(app: Express, deps: HttpRouteDependencies): v
     defaultSystemPrompt,
     agentSystemPrompt,
     requireAdmin,
+    createAdminSession,
+    destroyAdminSession,
     checkAgentRateLimit,
     classifyIntentWithRouter,
     runAgentLoop,
@@ -503,10 +507,9 @@ app.post('/api/memory/save', requireAdmin, (req, res) => {
   }
 });
 
-// Vérification de session admin : l’URL ?admin=true seule ne donne aucun accès.
-app.post('/api/admin/session', requireAdmin, (_req, res) => {
-  return res.json({ ok: true });
-});
+// Ouverture et fermeture de session admin : vérifient ADMIN_TOKEN + ADMIN_AUTH_KEYWORD côté serveur.
+app.post('/api/admin/session', createAdminSession);
+app.post('/api/admin/logout', destroyAdminSession);
 
 // Endpoint de santé / ping de maintien d'activité (Render cron)
 app.get('/api/health', (req, res) => {
@@ -552,16 +555,16 @@ app.post('/api/agent', async (req, res) => {
     }
 
     // Sélection stricte des outils via requireAdmin :
-    // ADMIN_TOOLS uniquement si isAdmin === true ET jeton administrateur valide ; sinon PUBLIC_TOOLS.
+    // ADMIN_TOOLS uniquement si isAdmin === true ET session + jeton valides ;
+    // si isAdmin === true et que l'authentification échoue, renvoyer l'erreur sans retomber en public.
     let isAdminAuthenticated = false;
     if (isAdmin === true) {
-      const silentRes: any = {
-        status: () => silentRes,
-        json: () => silentRes,
-      };
-      requireAdmin(req, silentRes, () => {
+      requireAdmin(req, res, () => {
         isAdminAuthenticated = true;
       });
+      if (!isAdminAuthenticated) {
+        return;
+      }
     }
     const allowedTools = isAdminAuthenticated ? ADMIN_TOOLS : PUBLIC_TOOLS;
 

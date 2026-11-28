@@ -35,15 +35,17 @@ files_to_include = [
     ('src/agent/codeExecutor.ts', 'typescript', 'Exécution isolée Python/JS (Web Worker Pyodide/JS et sandbox serveur)'),
     ('src/agent/selfModify.ts', 'typescript', 'Protocole strict pour lecture paginée de src/ et proposition de patches'),
     ('src/types/agent.ts', 'typescript', 'Types de la boucle agentique et des politiques d\'outils'),
-    ('src/types/kaderbot.ts', 'typescript', 'Typage TypeScript complet (ReAct, Mémoire, Messages, Bibliothèque, Graphe)'),
-    ('src/services/apiService.ts', 'typescript', 'Service API client (agent ReAct, chat, extraction fichiers, admin)'),
+    ('src/types/kaderbot.ts', 'typescript', 'Typage TypeScript complet (ReAct, Mémoire, Messages, Bibliothèque, Notes personnelles, Graphe)'),
+    ('src/services/apiService.ts', 'typescript', 'Service API client (agent ReAct, chat, extraction fichiers, session admin en mémoire X-Admin-Session)'),
     ('src/services/libraryService.ts', 'typescript', 'Bibliothèque locale IndexedDB (kaderbot_library) avec plafond 200 Mo et export/import JSON'),
+    ('src/services/personalMemory.ts', 'typescript', 'Mémoire personnelle persistante IndexedDB (kaderbot_personal) partagée entre toutes les discussions'),
     ('src/hooks/usePWAInstall.ts', 'typescript', 'Hook d\'installation PWA'),
     ('src/shims/style-to-js.ts', 'typescript', 'Shim ESM natif pour compatibilité style-to-js / react-markdown'),
     ('src/core/cognitiveEngine.ts', 'typescript', 'Moteur cognitif, recherche sémantique hybride et déduction logique'),
     ('src/main.tsx', 'tsx', 'Point d\'entrée React'),
     ('src/index.css', 'css', 'Styles globaux Tailwind et thèmes'),
-    ('src/App.tsx', 'tsx', 'Composant racine, gestion des discussions, documents activés et navigation'),
+    ('src/App.tsx', 'tsx', 'Composant racine, gestion des discussions, mémoire personnelle, authentification admin 2 facteurs et navigation'),
+    ('src/components/AdminAuthScreen.tsx', 'tsx', 'Écran d\'authentification administrateur (Admin Token + Admin Authentification Keyword)'),
     ('src/components/ChatTab.tsx', 'tsx', 'Interface Chat flottante unifiée, tiroirs gauche/droit, bouton trombone et CodeCanvas inline'),
     ('src/components/CodeCanvas.tsx', 'tsx', 'Affichage inline des blocs de code dans la conversation (sans exécution)'),
     ('src/components/AttachSheet.tsx', 'tsx', 'Panneau inférieur d\'ajout de documents (.txt, .md, .pdf, .docx) et accès Bibliothèque'),
@@ -61,10 +63,11 @@ files_to_include = [
 header = """# Code Source Complet — KADERBOT NOVA (Architecture Modulaire)
 
 Ce document rassemble l'intégralité du code source à jour de l'application **KADERBOT NOVA** :
-- **Serveur modulaire & sécurisé** : `httpRoutes`, `adminRoutes`, `fileRoutes` (`POST /api/files/extract`), `storage`, `webSearch`, `llmProviders`, `middleware`.
+- **Serveur modulaire & sécurisé** : `httpRoutes`, `adminRoutes`, `fileRoutes` (`POST /api/files/extract`), `storage`, `webSearch`, `llmProviders`, `middleware` (double couche `ADMIN_TOKEN` + `ADMIN_AUTH_KEYWORD`, sessions en mémoire `X-Admin-Session`, expiration 30 min / 8 h et blocage après 5 échecs).
 - **Boucle Agentique & Auto-évolution** : `reactLoop` (Groq / OpenRouter / Gemini), `codeWorkspace` persistant sur disque, `codeExecutor`, `selfModify` avec diffs unifiés compacts.
-- **Interface Public & Admin épurée** : en-tête et saisie capsule flottants, tiroir gauche (Historique, Bibliothèque, Atelier Texte), tiroir droit *« Espace admin »*, rendu `CodeCanvas` inline.
+- **Interface Public & Admin épurée** : écran d'authentification `AdminAuthScreen`, en-tête et saisie capsule flottants, tiroir gauche (Historique, Bibliothèque, Atelier Texte), tiroir droit *« Espace admin »* avec bouton *« Verrouiller »*, rendu `CodeCanvas` inline.
 - **Bibliothèque locale & Documents** : extraction TXT/MD/PDF/DOCX sans stockage serveur, persistance IndexedDB (`kaderbot_library`, 200 Mo max), activation jusqu'à 3 documents par fil de discussion.
+- **Mémoire personnelle persistante** : sauvegarde locale IndexedDB (`kaderbot_personal`) des notes et faits capturés (`create_note` / `memo_store`), injection `[CONTEXTE PERSONNEL]` entre discussions et commandes locales (`mes notes`, `oublie la note N`).
 
 ---
 

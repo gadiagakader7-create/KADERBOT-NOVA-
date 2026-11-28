@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CodeCanvas } from './CodeCanvas';
 import { executeCode } from '../agent/codeExecutor';
+import { apiService } from '../services/apiService';
 
 interface WorkspaceFileEntry {
   path: string;
@@ -65,18 +66,6 @@ interface CodeWorkspaceTabProps {
   onBack?: () => void;
 }
 
-function getAdminHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem('kaderbot_config');
-    const config = raw ? JSON.parse(raw) : null;
-    return config?.adminToken?.trim()
-      ? { 'X-Admin-Token': config.adminToken.trim() }
-      : {};
-  } catch {
-    return {};
-  }
-}
 
 function detectLanguage(filePath: string): 'python' | 'javascript' {
   const lower = filePath.toLowerCase();
@@ -126,14 +115,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/admin/workspace', {
-        headers: { ...getAdminHeaders() },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
-        throw new Error(err.error || `Erreur HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await apiService.getAdminWorkspace();
       setGeneratedFiles(Array.isArray(data.generated) ? data.generated : []);
       setPatches(Array.isArray(data.patches) ? data.patches : []);
       setTests(Array.isArray(data.tests) ? data.tests : []);
@@ -173,13 +155,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
       : `/workspace/generated/${cleanName}`;
 
     try {
-      const res = await fetch('/api/admin/workspace/file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-        body: JSON.stringify({ path: target, content: newScriptCode }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erreur enregistrement script.');
+      const data = await apiService.saveAdminWorkspaceFile(target, newScriptCode);
       setStatusMsg(`Script enregistré dans ${data.file.path}`);
       setSelectedFilePath(data.file.path);
       setShowCreator(false);
@@ -192,15 +168,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
   const handleDeleteScript = async (filePath: string) => {
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/admin/workspace/file', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-        body: JSON.stringify({ path: filePath }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Erreur suppression.');
-      }
+      await apiService.deleteAdminWorkspaceFile(filePath);
       if (selectedFilePath === filePath) setSelectedFilePath(null);
       await loadWorkspace();
     } catch (err: any) {
@@ -222,14 +190,10 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
           timeoutMs: 30_000,
           isTest: false,
         });
-        await fetch('/api/admin/workspace/test-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-          body: JSON.stringify({
-            language,
-            label: `WebWorker: ${file.path}`,
-            ...result,
-          }),
+        await apiService.logAdminWorkspaceTest({
+          language,
+          label: `WebWorker: ${file.path}`,
+          ...result,
         });
         setStatusMsg(
           result.success
@@ -237,18 +201,12 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
             : `Exécution terminée avec erreur (${result.durationMs} ms). Consultez l'onglet Tests.`
         );
       } else {
-        const res = await fetch('/api/admin/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-          body: JSON.stringify({
-            language,
-            code: file.content,
-            isTest: false,
-            label: `Serveur Sandbox: ${file.path}`,
-          }),
+        const result = await apiService.executeAdminCode({
+          language,
+          code: file.content,
+          isTest: false,
+          label: `Serveur Sandbox: ${file.path}`,
         });
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || 'Erreur exécution sandbox.');
         setStatusMsg(
           result.success
             ? `Exécution sandbox serveur réussie (${result.durationMs} ms).`
@@ -267,11 +225,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
   const handleLoadSourceForPatch = async () => {
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/admin/source-file?path=${encodeURIComponent(patchTargetPath.trim())}`, {
-        headers: { ...getAdminHeaders() },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Lecture impossible.');
+      const data = await apiService.getAdminSourceFile(patchTargetPath.trim());
       setPatchNewContent(data.content || '');
       setStatusMsg(`Fichier source chargé en lecture seule : ${data.path}`);
     } catch (err: any) {
@@ -285,16 +239,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
     setErrorMsg(null);
     setStatusMsg(null);
     try {
-      const res = await fetch('/api/admin/self-modify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-        body: JSON.stringify({
-          targetPath: patchTargetPath.trim(),
-          newContent: patchNewContent,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Échec création patch.');
+      const data = await apiService.proposeAdminPatch(patchTargetPath.trim(), patchNewContent);
       setStatusMsg(
         data.status === 'rejeté'
           ? `Patch ${data.patchId} rejeté automatiquement suite à l'échec du test sur copie virtuelle.`
@@ -314,13 +259,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
     setErrorMsg(null);
     setStatusMsg(null);
     try {
-      const res = await fetch('/api/admin/validate-patch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-        body: JSON.stringify({ patchId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Impossible de valider le patch.');
+      const data = await apiService.validateAdminPatch(patchId);
       setStatusMsg(data.message || `Patch ${patchId} appliqué.`);
       await loadWorkspace();
     } catch (err: any) {
@@ -335,13 +274,7 @@ export const CodeWorkspaceTab: React.FC<CodeWorkspaceTabProps> = ({ isAdmin, onB
     setErrorMsg(null);
     setStatusMsg(null);
     try {
-      const res = await fetch('/api/admin/reject-patch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
-        body: JSON.stringify({ patchId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Impossible de rejeter le patch.');
+      await apiService.rejectAdminPatch(patchId);
       setStatusMsg(`Patch ${patchId} rejeté.`);
       await loadWorkspace();
     } catch (err: any) {
